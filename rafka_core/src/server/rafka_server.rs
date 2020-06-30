@@ -29,62 +29,62 @@ struct BrokerMetadataCheckpoint;
 struct BrokerTopicStats;
 struct FinalizedFeatureChangeListener;
 struct KafkaServer {
-    startupComplete: AtomicBool, // false
-    isShuttingDown: AtomicBool,  // false
-    isStartingUp: AtomicBool,    // false
+    startup_complete: AtomicBool, // false
+    is_shutting_down: AtomicBool, // false
+    is_starting_up: AtomicBool,   // false
 
-    shutdownLatch: CountDownLatch, // (1)
+    shutdown_latch: CountDownLatch, // (1)
 
     // properties for MetricsContext
-    metricsPrefix: String,    // "kafka.server"
-    KAFKA_CLUSTER_ID: String, // "kafka.cluster.id"
-    KAFKA_BROKER_ID: String,  // "kafka.broker.id"
+    metrics_prefix: String,   // "kafka.server"
+    kafka_cluster_id: String, // "kafka.cluster.id"
+    kafka_broker_id: String,  // "kafka.broker.id"
 
     pub metrics: Option<Metrics>, // was null, changed to Option<>
-    pub brokerState: BrokerState,
+    pub broker_state: BrokerState,
 
-    pub dataPlaneRequestProcessor: Option<KafkaApis>, // was null, changed to Option<>
-    pub controlPlaneRequestProcessor: Option<KafkaApis>, // was null, changed to Option<>
+    pub data_plane_request_processor: Option<KafkaApis>, // was null, changed to Option<>
+    pub control_plane_request_processor: Option<KafkaApis>, // was null, changed to Option<>
 
     pub authorizer: Option<Authorizer>, // was null, changed to Option<>
-    pub socketServer: Option<SocketServer>, // was null, changed to Option<>
-    pub dataPlaneRequestHandlerPool: Option<KafkaRequestHandlerPool>, /* was null, changed to
+    pub socket_server: Option<SocketServer>, // was null, changed to Option<>
+    pub data_plane_request_handler_pool: Option<KafkaRequestHandlerPool>, /* was null, changed to
                                          * Option<> */
-    pub controlPlaneRequestHandlerPool: Option<KafkaRequestHandlerPool>, /* was null, changed to
-                                                                          * Option<> */
+    pub control_plane_request_handler_pool: Option<KafkaRequestHandlerPool>, /* was null, changed to
+                                                                              * Option<> */
 
-    pub replicaManager: Option<ReplicaManager>, // was null, changed to Option<>
-    pub adminManager: Option<AdminManager>,     // was null, changed to Option<>
-    pub tokenManager: Option<DelegationTokenManager>, // was null, changed to Option<>
+    pub replica_manager: Option<ReplicaManager>, // was null, changed to Option<>
+    pub admin_manager: Option<AdminManager>,     // was null, changed to Option<>
+    pub token_manager: Option<DelegationTokenManager>, // was null, changed to Option<>
 
-    pub dynamicConfigHandlers: HashMap<String, ConfigHandler>,
-    pub dynamicConfigManager: DynamicConfigManager,
+    pub dynamic_config_handlers: HashMap<String, ConfigHandler>,
+    pub dynamic_config_manager: DynamicConfigManager,
 
-    pub groupCoordinator: Option<GroupCoordinator>, // was null, changed to Option<>
+    pub group_coordinator: Option<GroupCoordinator>, // was null, changed to Option<>
 
-    pub transactionCoordinator: Option<TransactionCoordinator>, // was null, changed to Option<>
+    pub transaction_coordinator: Option<TransactionCoordinator>, // was null, changed to Option<>
 
-    pub kafkaController: Option<KafkaController>, // was null, changed to Option<>
+    pub kafka_controller: Option<KafkaController>, // was null, changed to Option<>
 
-    pub kafkaScheduler: Option<KafkaScheduler>, // was null, changed to Option<>
+    pub kafka_scheduler: Option<KafkaScheduler>, // was null, changed to Option<>
 
-    pub metadataCache: Option<MetadataCache>, // was null, changed to Option<>
-    pub zkClientConfig: ZKClientConfig,       /* = KafkaServer.
-                                               * zkClientConfigFromKafkaConfig(config).
-                                               * getOrElse(new ZKClientConfig()) */
-    _zkClient: KafkaZkClient,
+    pub metadata_cache: Option<MetadataCache>, // was null, changed to Option<>
+    pub zk_client_config: ZKClientConfig,      /* = KafkaServer.
+                                                * zkClientConfigFromKafkaConfig(config).
+                                                * getOrElse(new ZKClientConfig()) */
+    _zk_client: KafkaZkClient,
 
-    pub correlationId: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
-                                   * capacity? */
-    pub brokerMetaPropsFile: String, // = "meta.properties"
-    pub brokerMetadataCheckpoints: HashMap<String, BrokerMetadataCheckpoint>,
+    pub correlation_id: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
+                                    * capacity? */
+    pub broker_meta_props_file: String, // = "meta.properties"
+    pub broker_metadata_checkpoints: HashMap<String, BrokerMetadataCheckpoint>,
     // = config.logDirs.map(logDir => (logDir, new BrokerMetadataCheckpoint(new File(logDir +
     // File.separator + brokerMetaPropsFile)))).toMap
-    _clusterId: Option<String>, // was null, changed to Option<>
-    _brokerTopicStats: Option<BrokerTopicStats>, // was null, changed to Option<>$
+    _cluster_id: Option<String>, // was null, changed to Option<>
+    _broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>$
 
-    _featureChangeListener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
-                                                                     * Option<> */
+    _feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
+                                                                       * Option<> */
 }
 // Unimplemented:
 // private var logContext: LogContext = null
