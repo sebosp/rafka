@@ -9,6 +9,7 @@ use tokio_zookeeper::*;
 
 mod server;
 mod zk;
+mod zookeeper;
 #[cfg(test)]
 mod tests {
     #[test]

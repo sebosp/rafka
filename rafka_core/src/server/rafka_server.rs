@@ -94,7 +94,7 @@ struct KafkaServer {
                                                                        * Option<> */
 }
 
-// Unimplemented:
+// RAFKA Unimplemented:
 // private var logContext: LogContext = null
 // var kafkaYammerMetrics: KafkaYammerMetrics = null
 // credentialProvider: CredentialProvider = null
