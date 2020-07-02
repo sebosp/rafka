@@ -8,6 +8,7 @@ use tokio::prelude::*;
 use tokio_zookeeper::*;
 
 mod server;
+mod utils;
 mod zk;
 mod zookeeper;
 #[cfg(test)]
