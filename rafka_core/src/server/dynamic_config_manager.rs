@@ -43,7 +43,7 @@
 //! but avoids any race conditions  on startup where a change might be missed between the initial
 //! config load and registering for change notifications.
 
-use crate::server::rafka_server::{KafkaZkClient, ConfigHandler};
+use crate::server::rafka_server::{ConfigHandler, KafkaZkClient};
 use crate::zk::admin_zk_client::AdminZkClient;
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -53,18 +53,18 @@ pub enum ConfigType {
     Topic,  // = "topics"
     Client, // = "clients"
     User,   // = "users"
-    Broker, // = "brokers"
-    /* val all = Seq(Topic, Client, User, Broker) */
+    Broker, /* = "brokers" */
+            /* val all = Seq(Topic, Client, User, Broker) */
 }
 
 pub enum ConfigEntityName {
     Default(String), // = "<default>"
 }
 
-pub struct DynamicConfigManager{
+pub struct DynamicConfigManager {
     zk_client: KafkaZkClient,
     config_handlers: HashMap<String, ConfigHandler>,
-    change_expirationMs: u32, // Long = 15*60*1000,
-    time: SystemTime, // = Time.SYSTEM
-    adminZkClient = new AdminZkClient(zkClient)
-
+    change_expirationMs: u32,     // Long = 15*60*1000,
+    time: SystemTime,             // = Time.SYSTEM
+    adminZkClient: AdminZkClient, // = new AdminZkClient(zkClient)
+}
