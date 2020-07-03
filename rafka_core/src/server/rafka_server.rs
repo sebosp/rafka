@@ -6,8 +6,10 @@
 
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
+use crate::utils::kafka_scheduler::KafkaScheduler;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32};
+use tokio::timer::Interval;
 struct CountDownLatch(u8);
 struct Metrics;
 struct KafkaApis;
@@ -24,7 +26,6 @@ struct DynamicConfigManager;
 struct GroupCoordinator;
 struct TransactionCoordinator;
 struct KafkaController;
-struct KafkaScheduler;
 struct MetadataCache;
 struct ZKClientConfig;
 pub struct KafkaZkClient;
