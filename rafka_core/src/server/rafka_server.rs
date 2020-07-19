@@ -7,9 +7,11 @@
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::utils::kafka_scheduler::KafkaScheduler;
+use crate::zk::kafka_zk_client::KafkaZkClient;
+use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32};
-use tokio::timer::Interval;
+use tokio::time::Interval;
 struct CountDownLatch(u8);
 struct Metrics;
 struct KafkaApis;
@@ -27,8 +29,6 @@ struct GroupCoordinator;
 struct TransactionCoordinator;
 struct KafkaController;
 struct MetadataCache;
-struct ZKClientConfig;
-pub struct KafkaZkClient;
 struct BrokerMetadataCheckpoint;
 struct BrokerTopicStats;
 struct FinalizedFeatureChangeListener;
@@ -127,7 +127,7 @@ impl Default for KafkaServer {
             admin_manager: None,
             token_manager: None,
             dynamic_config_handlers: HashMap::new(),
-            dynamic_config_manager: DynamicConfigManager::default(),
+            dynamic_config_manager: DynamicConfigManager, // RAFKA TODO: ::default(),
             group_coordinator: None,
             transaction_coordinator: None,
             kafka_controller: None,
@@ -135,7 +135,7 @@ impl Default for KafkaServer {
             metadata_cache: None,
             zk_client_config: ZKClientConfig::default(),
             _zk_client: KafkaZkClient::default(),
-            correlation_id: AtomicU32(0),
+            correlation_id: AtomicU32::new(0),
             broker_meta_props_file: String::from("meta.properties"),
             broker_metadata_checkpoints: HashMap::new(),
             _cluster_id: None,

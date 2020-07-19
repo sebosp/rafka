@@ -2,13 +2,13 @@
 //! core/src/main/scala/kafka/utils/KafkaScheduler.scala
 //! RAFKA Specific:
 //! - The tokio executor and the interval tasks will be used instead of this
-use futures::sync::mpsc;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
-pub struct KafkaScheduler<T>
-where
-    T: Sync,
-{
+pub struct KafkaScheludedTask;
+
+/// RAFKA TODO: Maybe :Sync?
+pub struct KafkaScheduler {
     /// The name of this task
     name: String,
     /// The amount of time to wait before the first execution
@@ -16,16 +16,13 @@ where
     /// The period with which to execute the task. If < 0 the task will execute only once.
     period: i32,
     /// An mpsc sender reference to report the completion of task to.
-    tx: Option<futures::sync::mpsc::Sender<T>>,
+    tx: Option<tokio::sync::mpsc::Sender<KafkaScheludedTask>>,
 }
 // RAFKA Unimplemented:
 // unit The unit for the preceding times, the callers of this function will have to use the
 // Duration unit when calling the module
 
-impl<T> Default for KafkaScheduler<T>
-where
-    T: Sync,
-{
+impl Default for KafkaScheduler {
     fn default() -> Self {
         KafkaScheduler {
             name: String::from("Kafka-Scheduler-unnanmed"),
@@ -40,4 +37,4 @@ where
 // pub fn spawn_interval(
 //    tx: mpsc::Sender<SomeTask>,
 //) -> impl Future<Item = (), Error = ()> {
-//}
+//

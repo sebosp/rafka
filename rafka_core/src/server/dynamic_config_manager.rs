@@ -43,8 +43,9 @@
 //! but avoids any race conditions  on startup where a change might be missed between the initial
 //! config load and registering for change notifications.
 
-use crate::server::rafka_server::{ConfigHandler, KafkaZkClient};
+use crate::server::rafka_server::ConfigHandler;
 use crate::zk::admin_zk_client::AdminZkClient;
+use crate::zk::kafka_zk_client::KafkaZkClient;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
@@ -53,9 +54,10 @@ pub enum ConfigType {
     Topic,  // = "topics"
     Client, // = "clients"
     User,   // = "users"
-    Broker, /* = "brokers" */
-            /* val all = Seq(Topic, Client, User, Broker) */
+    Broker, // = "brokers"
 }
+// There's a sequence also created for this
+// val all = Seq(Topic, Client, User, Broker)
 
 pub enum ConfigEntityName {
     Default(String), // = "<default>"

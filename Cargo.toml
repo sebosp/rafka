@@ -2,6 +2,7 @@
 members = [
     "rafka",
     "rafka_core",
+    "tokio-zookeeper",
 ]
 
 [profile.release]

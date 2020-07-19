@@ -17,3 +17,13 @@ pub struct KafkaZkClient {
     is_secure: bool,
     time: SystemTime,
 }
+
+impl Default for KafkaZkClient {
+    fn default() -> Self {
+        KafkaZkClient {
+            zoo_keeper_client: ZooKeeperClient::default(),
+            is_secure: false,
+            time: SystemTime::now(),
+        }
+    }
+}
