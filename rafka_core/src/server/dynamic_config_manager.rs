@@ -66,7 +66,7 @@ pub enum ConfigEntityName {
 pub struct DynamicConfigManager {
     zk_client: KafkaZkClient,
     config_handlers: HashMap<String, ConfigHandler>,
-    change_expirationMs: u32,     // Long = 15*60*1000,
-    time: SystemTime,             // = Time.SYSTEM
-    adminZkClient: AdminZkClient, // = new AdminZkClient(zkClient)
+    change_expiration_ms: u32,      // Long = 15*60*1000,
+    time: SystemTime,               // = Time.SYSTEM
+    admin_zk_client: AdminZkClient, // = new AdminZkClient(zkClient)
 }

@@ -4,9 +4,6 @@ extern crate failure;
 #[macro_use]
 extern crate slog_term;
 
-use tokio::prelude::*;
-use tokio_zookeeper::*;
-
 mod server;
 mod utils;
 mod zk;

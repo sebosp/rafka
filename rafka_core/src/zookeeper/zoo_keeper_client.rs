@@ -4,6 +4,7 @@
 // RAFKA TODO: Check if we can do the "pipeline" with the rust libraries
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use futures::future::lazy;
+use joyent_tokio_zookeeper::*;
 use std::collections::HashMap;
 /// RAFKA Specific:
 /// - While the library uses re-entrant locks and concurrent structures extensively, this crate
@@ -15,7 +16,6 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 use tokio::prelude::*;
 use tokio::sync::mpsc;
-use tokio_zookeeper::*;
 
 use slog::{error, info};
 
@@ -67,7 +67,7 @@ pub struct ZooKeeperClient {
     // zNodeChangeHandlers: HashMap<String, N>,
     // zNodeChildChangeHandlers: HashMap<String, C>,
     /// A connection to ZooKeeper.
-    zookeeper: Option<tokio_zookeeper::ZooKeeper>,
+    zookeeper: Option<joyent_tokio_zookeeper::ZooKeeper>,
     logger: slog::Logger,
 }
 
@@ -101,16 +101,23 @@ impl ZooKeeperClient {
     }
 
     pub async fn connect(&mut self) -> Result<(), String> {
-        let logger = self.logger.clone();
-        let handle = tokio::spawn(async {ZooKeeper::connect(&self.connect_string.parse().unwrap())});
+        let connect_string =
+            self.connect_string.parse::<joyent_tokio_zookeeper::types::ZkConnectString>().unwrap();
+        let handle = tokio::spawn(async move {
+            ZooKeeper::connect(&connect_string).await
+        });
         match handle.await {
-            Ok(val) => {
-                // A "default watcher is returned on the connection
+            Ok((zk, _watcher)) => {
+                // RAFKA TODO: A "default watcher is returned on the connection, figure out what to
+                // do with it
                 info!(self.logger, "Connection to zookeeper successful");
-                self.zookeeper = Some(val);
+                self.zookeeper = Some(zk);
                 Ok(())
             },
-            Err(err) => Err(String::from("Unable to connect to zookeeper")),
+            Err(err) => {
+                error!(self.logger, "Unable to connect to zookeeper: {:?}", err);
+                Err(format!("Unable to connect to zookeeper: {:?}", err))
+            },
         }
     }
 }
@@ -146,12 +153,12 @@ impl Default for ZooKeeperClient {
 
 pub trait ZNodeChangeHandler {
     type Path;
-    fn handleCreation();
-    fn handleDeletion();
-    fn handleDataChange();
+    fn handle_creation();
+    fn handle_deletion();
+    fn handle_data_change();
 }
 
 pub trait ZNodeChildChangeHandler {
     type Path;
-    fn handleChildChange();
+    fn handle_child_change();
 }
