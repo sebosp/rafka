@@ -12,27 +12,28 @@ use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use tokio::time::Interval;
-struct CountDownLatch(u8);
-struct Metrics;
-struct KafkaApis;
-struct Authorizer;
-struct SocketServer;
-struct KafkaRequestHandlerPool;
-struct LogManager;
-struct LogDirFailureChannel;
-struct ReplicaManager;
-struct AdminManager;
-struct DelegationTokenManager;
+use tracing::info;
+pub struct CountDownLatch(u8);
+pub struct Metrics;
+pub struct KafkaApis;
+pub struct Authorizer;
+pub struct SocketServer;
+pub struct KafkaRequestHandlerPool;
+pub struct LogManager;
+pub struct LogDirFailureChannel;
+pub struct ReplicaManager;
+pub struct AdminManager;
+pub struct DelegationTokenManager;
 pub struct ConfigHandler;
-struct DynamicConfigManager;
-struct GroupCoordinator;
-struct TransactionCoordinator;
-struct KafkaController;
-struct MetadataCache;
-struct BrokerMetadataCheckpoint;
+pub struct DynamicConfigManager;
+pub struct GroupCoordinator;
+pub struct TransactionCoordinator;
+pub struct KafkaController;
+pub struct MetadataCache;
+pub struct BrokerMetadataCheckpoint;
 struct BrokerTopicStats;
 struct FinalizedFeatureChangeListener;
-struct KafkaServer {
+pub struct KafkaServer {
     startup_complete: AtomicBool, // false
     is_shutting_down: AtomicBool, // false
     is_starting_up: AtomicBool,   // false
@@ -142,5 +143,14 @@ impl Default for KafkaServer {
             _broker_topic_stats: None,
             _feature_change_listener: None,
         }
+    }
+}
+
+impl KafkaServer {
+    pub fn startup(&mut self) {
+        info!("Starting");
+        // if self.is_shutting_down.atomic_and(true) {
+        // panic!("Kafka server is still shutting down, cannot re-start!");
+        // }
     }
 }

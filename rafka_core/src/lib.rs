@@ -4,7 +4,7 @@ extern crate failure;
 #[macro_use]
 extern crate slog_term;
 
-mod server;
+pub mod server;
 mod utils;
 mod zk;
 mod zookeeper;
