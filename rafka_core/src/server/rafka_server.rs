@@ -10,8 +10,9 @@ use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32};
-use tokio::time::Interval;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 use tracing::info;
 pub struct CountDownLatch(u8);
 pub struct Metrics;
@@ -34,9 +35,9 @@ pub struct BrokerMetadataCheckpoint;
 struct BrokerTopicStats;
 struct FinalizedFeatureChangeListener;
 pub struct KafkaServer {
-    startup_complete: AtomicBool, // false
-    is_shutting_down: AtomicBool, // false
-    is_starting_up: AtomicBool,   // false
+    startup_complete: Arc<AtomicBool>, // false
+    is_shutting_down: Arc<AtomicBool>, // false
+    is_starting_up: Arc<AtomicBool>,   // false
 
     shutdown_latch: CountDownLatch, // (1)
 
@@ -78,9 +79,10 @@ pub struct KafkaServer {
     pub kafka_scheduler: Option<KafkaScheduler>, // was null, changed to Option<>
 
     pub metadata_cache: Option<MetadataCache>, // was null, changed to Option<>
-    pub zk_client_config: ZKClientConfig,      /* = KafkaServer.
-                                                * zkClientConfigFromKafkaConfig(config).
-                                                * getOrElse(new ZKClientConfig()) */
+    pub init_time: Instant,
+    pub zk_client_config: ZKClientConfig, /* = KafkaServer.
+                                           * zkClientConfigFromKafkaConfig(config).
+                                           * getOrElse(new ZKClientConfig()) */
     _zk_client: KafkaZkClient,
 
     pub correlation_id: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
@@ -107,9 +109,9 @@ pub struct KafkaServer {
 impl Default for KafkaServer {
     fn default() -> Self {
         KafkaServer {
-            startup_complete: AtomicBool::new(false),
-            is_shutting_down: AtomicBool::new(false),
-            is_starting_up: AtomicBool::new(false),
+            startup_complete: Arc::new(AtomicBool::new(false)),
+            is_shutting_down: Arc::new(AtomicBool::new(false)),
+            is_starting_up: Arc::new(AtomicBool::new(false)),
             shutdown_latch: CountDownLatch(1),
             metrics_prefix: String::from("kafka.server"),
             kafka_cluster_id: String::from("kafka.cluster.id"),
@@ -142,6 +144,7 @@ impl Default for KafkaServer {
             _cluster_id: None,
             _broker_topic_stats: None,
             _feature_change_listener: None,
+            init_time: Instant::now(),
         }
     }
 }
@@ -149,8 +152,22 @@ impl Default for KafkaServer {
 impl KafkaServer {
     pub fn startup(&mut self) {
         info!("Starting");
-        // if self.is_shutting_down.atomic_and(true) {
-        // panic!("Kafka server is still shutting down, cannot re-start!");
-        // }
+        // These series of if might be pointless and we might get away by using mpsc from a
+        // coordinator thread instead of this memory sharing.
+        // NOTE: All these Ordering::Relaxed are not currently checked.
+        if self.is_shutting_down.clone().load(Ordering::Relaxed) {
+            panic!("Kafka server is still shutting down, cannot re-start!");
+        }
+        if self.startup_complete.clone().load(Ordering::Relaxed) {
+            return;
+        }
+        let can_startup = self.is_starting_up.compare_and_swap(false, true, Ordering::Relaxed);
+        if can_startup {
+            self.broker_state = BrokerState::Starting;
+        }
+    }
+
+    pub fn init_zk_client(&mut self) {
+        info!("Connecting to zookeeper on {:?}", self.zk_client_config);
     }
 }
