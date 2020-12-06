@@ -43,7 +43,7 @@
 //! but avoids any race conditions  on startup where a change might be missed between the initial
 //! config load and registering for change notifications.
 
-use crate::server::rafka_server::ConfigHandler;
+use crate::server::kafka_server::ConfigHandler;
 use crate::zk::admin_zk_client::AdminZkClient;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use std::collections::HashMap;

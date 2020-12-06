@@ -1,4 +1,4 @@
-use rafka_core::server::rafka_server::KafkaServer;
+use rafka_core::server::kafka_server::KafkaServer;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
