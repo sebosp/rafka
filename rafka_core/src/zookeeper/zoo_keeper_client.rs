@@ -22,6 +22,7 @@ use slog::{error, info};
 // ZKClientConfig comes from
 // https://zookeeper.apache.org/doc/r3.5.4-beta/api/org/apache/zookeeper/client/ZKClientConfig.html
 // and seems to provide TLS related config. For now we will just provide an empty struct.
+#[derive(Debug)]
 pub enum ZKClientConfig {
     /// For now only PlainText communication is implemented.
     PlainText,
