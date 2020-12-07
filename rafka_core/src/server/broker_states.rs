@@ -55,3 +55,5 @@ impl Default for BrokerState {
         BrokerState::NotRunning
     }
 }
+
+// TODO: Impl from_u8 and to_u8
