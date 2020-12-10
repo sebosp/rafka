@@ -43,10 +43,24 @@ fn kafka_config_params() -> HashMap<String, KafkaConfigDef> {
         }
     );
     res.insert(
-        String::from("ZkSessionTimeoutMsProp"),
+        String::from("zookeeper.session.timeout.ms"),
         KafkaConfigDef{
             importance: KafkaConfigDefImportance::High,
             doc: String::from("Zookeeper session timeout"),
+        }
+    );
+    res.insert(
+        String::from("zookeeper.connection.timeout.ms"),
+        KafkaConfigDef{
+            importance: KafkaConfigDefImportance::High,
+            doc: String::from("The max time that the client waits to establish a connection to zookeeper. If not set, the value in zookeeper.session.timeout.ms is used"),
+        }
+    );
+    res.insert(
+        String::from("zookeeper.sync.time.ms"),
+        KafkaConfigDef{
+            importance: KafkaConfigDefImportance::Low,
+            doc: String::from("How far a ZK follower can be behind a ZK leader"),
         }
     );
     res
@@ -55,6 +69,7 @@ fn kafka_config_params() -> HashMap<String, KafkaConfigDef> {
 pub struct KafkaConfig {
     zk_session_timeout_ms: u32,
     zk_sync_time_ms: u32,
+    zk_connection_timeout_ms: Option<u32>,
     zk_max_in_flight_requests: u32,
 }
 
@@ -63,6 +78,7 @@ impl Default for KafkaConfig {
         KafkaConfig {
             zk_session_timeout_ms: 18000u32,
             zk_sync_time_ms: 2000u32,
+            zk_connection_timeout_ms: None,
             zk_max_in_flight_requests: 10u32,
         }
     }
@@ -77,17 +93,9 @@ impl KafkaConfig {
             debug!("read_config_from: {} {} = {}", filename, property, value);
             match property.as_str() {
                 "zookeeper.connect" => 
-                _ => return Err(java_properties::PropertiesError{ description: String::from("Unknown config key: {}", property));
+                _ => return Err(java_properties::PropertiesError{ description: String::from("Unknown config key: {}", property)});
             }
         }
- /** ********* Zookeeper Configuration ***********
-  val ZkConnectProp = "zookeeper.connect"
-  val ZkSessionTimeoutMsProp = "zookeeper.session.timeout.ms"
-  val ZkConnectionTimeoutMsProp = "zookeeper.connection.timeout.ms"
-  val ZkSyncTimeMsProp = "zookeeper.sync.time.ms"
-  val ZkMaxInFlightRequestsProp = "zookeeper.max.in.flight.requests"
-  */
-
         Ok(kafka_config)
     }
 }
