@@ -15,3 +15,4 @@ joyent-tokio-zookeeper = { path = "../tokio-zookeeper" }
 failure = "0.1"
 tracing = "0.1"
 tracing-futures = "0.2"
+java-properties = "1.3"
