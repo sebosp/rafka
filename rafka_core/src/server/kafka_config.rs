@@ -4,9 +4,9 @@
 /// - No SSL for now.
 use java_properties::read;
 use std::collections::HashMap;
-use tracing::debug;
 use std::fs::File;
 use std::io::BufReader;
+use tracing::debug;
 
 // Unimplemented:
 // ZkEnableSecureAcls = false
@@ -16,7 +16,7 @@ use std::io::BufReader;
 // ZkSslCrlEnable = false
 // ZkSslOcspEnable = false
 
-pub enum KafkaConfigDefImportance{
+pub enum KafkaConfigDefImportance {
     High,
     Medium,
     Low,
@@ -42,31 +42,26 @@ fn kafka_config_params() -> HashMap<String, KafkaConfigDef> {
             "#),
         }
     );
-    res.insert(
-        String::from("zookeeper.session.timeout.ms"),
-        KafkaConfigDef{
-            importance: KafkaConfigDefImportance::High,
-            doc: String::from("Zookeeper session timeout"),
-        }
-    );
-    res.insert(
-        String::from("zookeeper.connection.timeout.ms"),
-        KafkaConfigDef{
-            importance: KafkaConfigDefImportance::High,
-            doc: String::from("The max time that the client waits to establish a connection to zookeeper. If not set, the value in zookeeper.session.timeout.ms is used"),
-        }
-    );
-    res.insert(
-        String::from("zookeeper.sync.time.ms"),
-        KafkaConfigDef{
-            importance: KafkaConfigDefImportance::Low,
-            doc: String::from("How far a ZK follower can be behind a ZK leader"),
-        }
-    );
+    res.insert(String::from("zookeeper.session.timeout.ms"), KafkaConfigDef {
+        importance: KafkaConfigDefImportance::High,
+        doc: String::from("Zookeeper session timeout"),
+    });
+    res.insert(String::from("zookeeper.connection.timeout.ms"), KafkaConfigDef {
+        importance: KafkaConfigDefImportance::High,
+        doc: String::from(
+            "The max time that the client waits to establish a connection to zookeeper. If not \
+             set, the value in zookeeper.session.timeout.ms is used",
+        ),
+    });
+    res.insert(String::from("zookeeper.sync.time.ms"), KafkaConfigDef {
+        importance: KafkaConfigDefImportance::Low,
+        doc: String::from("How far a ZK follower can be behind a ZK leader"),
+    });
     res
 }
 
 pub struct KafkaConfig {
+    zk_connect: String,
     zk_session_timeout_ms: u32,
     zk_sync_time_ms: u32,
     zk_connection_timeout_ms: Option<u32>,
@@ -80,20 +75,33 @@ impl Default for KafkaConfig {
             zk_sync_time_ms: 2000u32,
             zk_connection_timeout_ms: None,
             zk_max_in_flight_requests: 10u32,
+            zk_connect: String::from(""),
         }
     }
 }
 
 impl KafkaConfig {
-    pub fn read_config_from(filename: String) -> Result<Self, java_properties::PropertiesError> {
+    /// `read_config_from` is the main entry point for configuration.
+    pub fn read_config_from(
+        filename: &String,
+    ) -> Result<HashMap<String, String>, java_properties::PropertiesError> {
         let mut config_file_content = File::open(&filename)?;
-        let mut kafka_config =  KafkaConfig::default();
-        let config_hash = read(BufReader::new(config_file_content))?;
-        for (property, value) in &config_hash {
-            debug!("read_config_from: {} {} = {}", filename, property, value);
+        read(BufReader::new(config_file_content))
+    }
+
+    /// `get_kafka_config` Reads the kafka config.
+    pub fn get_kafka_config(filename: &String) -> Result<Self, String> {
+        // TODO: Create a ConfigError struct and return it instead of the String
+        let config_hash = match KafkaConfig::read_config_from(filename) {
+            Err(err) => return Err(err.to_string()),
+            Ok(val) => val,
+        };
+        let mut kafka_config = KafkaConfig::default();
+        for (property, property_value) in &config_hash {
+            debug!("read_config_from: {} {} = {}", filename, property, property_value);
             match property.as_str() {
-                "zookeeper.connect" => 
-                _ => return Err(java_properties::PropertiesError{ description: String::from("Unknown config key: {}", property)});
+                "zookeeper.connect" => kafka_config.zk_connect = property_value.clone(),
+                _ => return Err(format!("Unknown config key: {}", property)),
             }
         }
         Ok(kafka_config)
