@@ -57,6 +57,19 @@ fn kafka_config_params() -> HashMap<String, KafkaConfigDef> {
         importance: KafkaConfigDefImportance::Low,
         doc: String::from("How far a ZK follower can be behind a ZK leader"),
     });
+    res.insert(String::from("log.dir"), KafkaConfigDef {
+        importance: KafkaConfigDefImportance::High,
+        doc: String::from(
+            "The directory in which the log data is kept (supplemental for log.dirs property)",
+        ),
+    });
+    res.insert(String::from("log.dirs"), KafkaConfigDef {
+        importance: KafkaConfigDefImportance::High,
+        doc: String::from(
+            "The directories in which the log data is kept. If not set, the value in log.dir is \
+             used",
+        ),
+    });
     res
 }
 
@@ -66,6 +79,7 @@ pub struct KafkaConfig {
     zk_sync_time_ms: u32,
     zk_connection_timeout_ms: Option<u32>,
     zk_max_in_flight_requests: u32,
+    log_dirs: Vec<String>,
 }
 
 impl Default for KafkaConfig {
@@ -76,6 +90,7 @@ impl Default for KafkaConfig {
             zk_connection_timeout_ms: None,
             zk_max_in_flight_requests: 10u32,
             zk_connect: String::from(""),
+            log_dirs: vec![String::from("/tmp/kafka-logs")],
         }
     }
 }
@@ -101,6 +116,8 @@ impl KafkaConfig {
             debug!("read_config_from: {} {} = {}", filename, property, property_value);
             match property.as_str() {
                 "zookeeper.connect" => kafka_config.zk_connect = property_value.clone(),
+                "log.dirs" => self.log_dirs = property_value.clone().split(',').collect(),
+                "log.dir" => self.log_dirs.push(property_value.clone()),
                 _ => return Err(format!("Unknown config key: {}", property)),
             }
         }
