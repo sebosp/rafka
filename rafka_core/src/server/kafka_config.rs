@@ -116,8 +116,8 @@ impl KafkaConfig {
             debug!("read_config_from: {} {} = {}", filename, property, property_value);
             match property.as_str() {
                 "zookeeper.connect" => kafka_config.zk_connect = property_value.clone(),
-                "log.dirs" => self.log_dirs = property_value.clone().split(',').collect(),
-                "log.dir" => self.log_dirs.push(property_value.clone()),
+                "log.dirs" => kafka_config.log_dirs = property_value.clone().split(',').collect(),
+                "log.dir" => kafka_config.log_dirs.push(property_value.clone()),
                 _ => return Err(format!("Unknown config key: {}", property)),
             }
         }
