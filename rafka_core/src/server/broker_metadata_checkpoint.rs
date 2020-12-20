@@ -5,7 +5,7 @@ use std::io::prelude::*;
 use std::io::{self, BufRead};
 use std::path::Path;
 use tracing::{debug, error, warn};
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct BrokerMetadataCheckpoint {
     broker_id: u32,
     cluster_id: Option<String>,
@@ -21,11 +21,16 @@ impl BrokerMetadataCheckpoint {
         )
     }
 
-    pub fn write(self) {
+    fn to_multiline_string(self) -> String {
         let mut content: String = format!("version=0\nbroker.id={}\n", self.broker_id);
         if let Some(cluster_id) = self.cluster_id {
             content.push_str(&format!("\ncluster.id={}", cluster_id));
         }
+        content
+    }
+
+    pub fn write(self) {
+        let content = self.to_multiline_string();
         let old_path = Path::new(&self.filename);
         let temp_file_name = format!("{}.tmp", self.filename);
 
@@ -53,6 +58,65 @@ impl BrokerMetadataCheckpoint {
         }
     }
 
+    /// Since this file is usually 3 or 4 lines, we can pass it here and parse it in memory
+    pub fn from_multiline_string(self, content: String) -> Option<BrokerMetadataCheckpoint> {
+        let mut broker_id: u32;
+        let mut cluster_id: Option<String> = None;
+        let mut version: u32;
+        for (line_number, config_line) in content.split("\n").enumerate() {
+            let config_line_parts: Vec<&str> = config_line.split('=').collect();
+            if config_line_parts.len() != 2 {
+                error!(
+                    "BrokerMetadataCheckpoint: {}:{}, Invalid config line, expected 2 items \
+                     separated by =, found {} items",
+                    self.filename,
+                    line_number,
+                    config_line_parts.len()
+                );
+            } else {
+                match config_line_parts[0].as_ref() {
+                    "broker_id" => {
+                        broker_id = match config_line_parts[1].to_string().parse() {
+                            Ok(num) => num,
+                            Err(x) => {
+                                error!(
+                                    "BrokerMetadataCheckpoint: Unable to parse number for \
+                                     broker_id. Found {}",
+                                    config_line_parts[1]
+                                );
+                                return None;
+                            },
+                        };
+                    },
+                    "cluster_id" => cluster_id = Some(config_line_parts[1].to_string()),
+                    "version" => {
+                        version = match config_line_parts[1].parse::<u32>() {
+                            Ok(num) => version,
+                            Err(err) => {
+                                error!(
+                                    "BrokerMetadataCheckpoint: Unable to parse number for \
+                                     version. Found: {}",
+                                    config_line_parts[1]
+                                );
+                                return None;
+                            },
+                        }
+                    },
+                }
+            }
+        }
+        if version == 0 {
+            Some(BrokerMetadataCheckpoint {
+                filename: self.filename.clone(),
+                broker_id,
+                cluster_id,
+            })
+        } else {
+            error!("Unrecognized version of the server meta.properties file: {}", version);
+            None
+        }
+    }
+
     pub fn read(self) -> Option<BrokerMetadataCheckpoint> {
         // try to delete any existing temp files for cleanliness
         let temp_file_name = format!("{}.tmp", self.filename);
@@ -60,9 +124,6 @@ impl BrokerMetadataCheckpoint {
         if temp_path.is_file() {
             remove_file(temp_path);
         }
-        let mut broker_id: u32;
-        let mut cluster_id: Option<String> = None;
-        let mut version: u32;
         let file_path = Path::new(&self.filename);
         if !file_path.is_file() {
             warn!(
@@ -72,60 +133,17 @@ impl BrokerMetadataCheckpoint {
             return None;
         }
         if let Ok(lines) = read_lines(self.filename) {
-            for (line_number, line_data) in lines.enumerate() {
-                if let Ok(config_line) = line_data {
-                    let config_line_parts: Vec<&str> = config_line.split('=').collect();
-                    if config_line_parts.len() != 2 {
-                        error!(
-                            "BrokerMetadataCheckpoint: {}:{}, Invalid config line, expected 2 \
-                             items separated by =, found {} items",
-                            self.filename,
-                            line_number,
-                            config_line_parts.len()
-                        );
-                    } else {
-                        match config_line_parts[0].as_ref() {
-                            "broker_id" => {
-                                broker_id = match config_line_parts[1].to_string().parse() {
-                                    Ok(num) => num,
-                                    Err(x) => {
-                                        error!(
-                                            "BrokerMetadataCheckpoint: Unable to parse number for \
-                                             broker_id. Found {}",
-                                            config_line_parts[1]
-                                        );
-                                        return None;
-                                    },
-                                };
-                            },
-                            "cluster_id" => cluster_id = Some(config_line_parts[1].to_string()),
-                            "version" => {
-                                version = match config_line_parts[1].parse() {
-                                    Ok(num) => version,
-                                    Err(err) => {
-                                        error!(
-                                            "BrokerMetadataCheckpoint: Unable to parse number for \
-                                             version. Found: {}",
-                                            config_line_parts[1]
-                                        );
-                                        return None;
-                                    },
-                                }
-                            },
-                        }
-                    }
+            let mut config_content: String;
+            for line_data in lines {
+                match line_data {
+                    Ok(config_line) => config_content.push_str(&config_line),
+                    Err(err) => {
+                        error!("Unable to read line from file: {:?}", err);
+                        return None;
+                    },
                 }
             }
-            if version == 0 {
-                return Some(BrokerMetadataCheckpoint {
-                    filename: self.filename.clone(),
-                    broker_id,
-                    cluster_id,
-                });
-            } else {
-                error!("Unrecognized version of the server meta.properties file: {}", version);
-                None
-            }
+            self.from_multiline_string(config_content)
         } else {
             None
         }
@@ -141,4 +159,14 @@ where
 {
     let file = File::open(filename)?;
     Ok(io::BufReader::new(file).lines())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn parse_config_file() {
+        let bmc = BrokerMetadataCheckpoint::default();
+        assert_eq!();
+    }
 }
