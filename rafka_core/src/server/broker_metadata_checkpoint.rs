@@ -5,7 +5,7 @@ use std::io::prelude::*;
 use std::io::{self, BufRead};
 use std::path::Path;
 use tracing::{debug, error, warn};
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Eq)]
 pub struct BrokerMetadataCheckpoint {
     broker_id: u32,
     cluster_id: Option<String>,
@@ -60,11 +60,11 @@ impl BrokerMetadataCheckpoint {
 
     /// Since this file is usually 3 or 4 lines, we can pass it here and parse it in memory
     pub fn from_multiline_string(self, content: String) -> Option<BrokerMetadataCheckpoint> {
-        let mut broker_id: u32;
+        let mut broker_id: Option<u32>;
         let mut cluster_id: Option<String> = None;
-        let mut version: u32;
+        let mut version: Option<u32>;
         for (line_number, config_line) in content.split("\n").enumerate() {
-            let config_line_parts: Vec<&str> = config_line.split('=').collect();
+            let config_line_parts: Vec<&str> = config_line.splitn(2, '=').collect();
             if config_line_parts.len() != 2 {
                 error!(
                     "BrokerMetadataCheckpoint: {}:{}, Invalid config line, expected 2 items \
@@ -77,43 +77,48 @@ impl BrokerMetadataCheckpoint {
                 match config_line_parts[0].as_ref() {
                     "broker_id" => {
                         broker_id = match config_line_parts[1].to_string().parse() {
-                            Ok(num) => num,
+                            Ok(num) => Some(num),
                             Err(x) => {
                                 error!(
                                     "BrokerMetadataCheckpoint: Unable to parse number for \
                                      broker_id. Found {}",
                                     config_line_parts[1]
                                 );
-                                return None;
+                                None
                             },
                         };
                     },
                     "cluster_id" => cluster_id = Some(config_line_parts[1].to_string()),
                     "version" => {
                         version = match config_line_parts[1].parse::<u32>() {
-                            Ok(num) => version,
+                            Ok(num) => Some(num),
                             Err(err) => {
                                 error!(
                                     "BrokerMetadataCheckpoint: Unable to parse number for \
                                      version. Found: {}",
                                     config_line_parts[1]
                                 );
-                                return None;
+                                None
                             },
                         }
                     },
                 }
             }
         }
-        if version == 0 {
-            Some(BrokerMetadataCheckpoint {
-                filename: self.filename.clone(),
-                broker_id,
-                cluster_id,
-            })
-        } else {
-            error!("Unrecognized version of the server meta.properties file: {}", version);
-            None
+        match version {
+            Some(0) => match broker_id {
+                Some(broker_id) => Some(BrokerMetadataCheckpoint {
+                    filename: self.filename.clone(),
+                    broker_id,
+                    cluster_id,
+                }),
+                None => None,
+            },
+            Some(version) => {
+                error!("Unrecognized version of the server meta.properties file: {}", version);
+                None
+            },
+            None => None,
         }
     }
 
@@ -166,7 +171,37 @@ mod tests {
     use super::*;
     #[test]
     fn parse_config_file() {
-        let bmc = BrokerMetadataCheckpoint::default();
-        assert_eq!();
+        let test_bmc = BrokerMetadataCheckpoint::default();
+        let without_cluster_bmc = BrokerMetadataCheckpoint {
+            filename: String::from("somepath"),
+            cluster_id: None,
+            broker_id: 1u32,
+        };
+        let without_cluster_expected = String::from("version=0\nbroker.id=1");
+        assert_eq!(without_cluster_bmc.to_multiline_string(), without_cluster_expected,);
+        assert_eq!(
+            without_cluster_expected,
+            test_bmc.from_multiline_string(without_cluster_expected)
+        );
+        let with_cluster_bmc = BrokerMetadataCheckpoint {
+            filename: String::from("somepath"),
+            cluster_id: Some(String::from("rafka1")),
+            broker_id: 2u32,
+        };
+        let with_cluster_expected = String::from("version=0\nbroker.id=1\ncluster.id=rafka1");
+        assert_eq!(with_cluster_bmc.to_multiline_string(), with_cluster_expected);
+        assert_eq!(with_cluster_expected, test_bmc.from_multiline_string(with_cluster_expected));
+        // Test a line that is not a config
+        assert_eq!(test_bmc.from_multiline_string(String::from("not.a.config.line")), None);
+        // Test a version that is not zero
+        assert_eq!(test_bmc.from_multiline_string(String::from("version=1")), None);
+        // Test a config without version
+        assert_eq!(test_bmc.from_multiline_string(String::from("broker.id=1")), None);
+        assert_eq!(
+            test_bmc.from_multiline_string(String::from(
+                "broker.id=1\nversion=0\ncluster.id=something.with="
+            )),
+            None
+        );
     }
 }
