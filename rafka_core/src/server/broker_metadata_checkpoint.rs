@@ -5,7 +5,7 @@ use std::io::prelude::*;
 use std::io::{self, BufRead};
 use std::path::Path;
 use tracing::{debug, error, warn};
-#[derive(Default, Debug, Eq)]
+#[derive(Default, Debug, Eq, PartialEq)]
 pub struct BrokerMetadataCheckpoint {
     broker_id: u32,
     cluster_id: Option<String>,
@@ -180,7 +180,11 @@ mod tests {
         let without_cluster_expected = String::from("version=0\nbroker.id=1");
         assert_eq!(without_cluster_bmc.to_multiline_string(), without_cluster_expected,);
         assert_eq!(
-            without_cluster_expected,
+            Some(BrokerMetadataCheckpoint {
+                cluster_id: None,
+                broker_id: 1u32,
+                filename: String::from("somepath"),
+            }),
             test_bmc.from_multiline_string(without_cluster_expected)
         );
         let with_cluster_bmc = BrokerMetadataCheckpoint {
@@ -190,7 +194,14 @@ mod tests {
         };
         let with_cluster_expected = String::from("version=0\nbroker.id=1\ncluster.id=rafka1");
         assert_eq!(with_cluster_bmc.to_multiline_string(), with_cluster_expected);
-        assert_eq!(with_cluster_expected, test_bmc.from_multiline_string(with_cluster_expected));
+        assert_eq!(
+            Some(BrokerMetadataCheckpoint {
+                cluster_id: Some(String::from("rafka1")),
+                broker_id: 1u32,
+                filename: String::from("rafka1"),
+            }),
+            test_bmc.from_multiline_string(with_cluster_expected)
+        );
         // Test a line that is not a config
         assert_eq!(test_bmc.from_multiline_string(String::from("not.a.config.line")), None);
         // Test a version that is not zero
