@@ -53,7 +53,7 @@ impl BrokerMetadata {
                 );
             } else {
                 match config_line_parts[0] {
-                    "broker_id" => {
+                    "broker.id" => {
                         broker_id = match config_line_parts[1].to_string().parse() {
                             Ok(num) => Some(num),
                             Err(why) => {
@@ -66,7 +66,7 @@ impl BrokerMetadata {
                             },
                         };
                     },
-                    "cluster_id" => cluster_id = Some(config_line_parts[1].to_string()),
+                    "cluster.id" => cluster_id = Some(config_line_parts[1].to_string()),
                     "version" => {
                         version = match config_line_parts[1].parse::<u32>() {
                             Ok(num) => Some(num),
@@ -83,7 +83,7 @@ impl BrokerMetadata {
                     _ => {
                         error!(
                             "BrokerMetadataCheckpoint: Unknown property {}",
-                            config_line_parts[1]
+                            config_line_parts[0]
                         );
                     },
                 }
@@ -106,7 +106,7 @@ impl BrokerMetadata {
     fn to_multiline_string(&self) -> String {
         let mut content: String = format!("version=0\nbroker.id={}\n", self.broker_id);
         if let Some(cluster_id) = &self.cluster_id {
-            content.push_str(&format!("\ncluster.id={}", cluster_id));
+            content.push_str(&format!("cluster.id={}\n", cluster_id));
         }
         debug!("to_multiline_string: {}", content);
         content
@@ -202,12 +202,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test_env_log::test;
-    use tracing::info;
 
+    // #[test_env_log::test]
     #[test]
     fn parse_config_string() {
-        info!("This record will be captured by `cargo test`");
         let filename = String::from("somepath");
         let without_cluster_bm = BrokerMetadata { cluster_id: None, broker_id: 1u32 };
         let without_cluster_expected = String::from("version=0\nbroker.id=1\n");
@@ -218,10 +216,10 @@ mod tests {
         );
         let with_cluster_bmc =
             BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2u32 };
-        let with_cluster_expected = String::from("version=0\nbroker.id=1\ncluster.id=rafka1");
+        let with_cluster_expected = String::from("version=0\nbroker.id=2\ncluster.id=rafka1\n");
         assert_eq!(with_cluster_bmc.to_multiline_string(), with_cluster_expected);
         assert_eq!(
-            Some(BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 1u32 }),
+            Some(BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2u32 }),
             BrokerMetadata::from_multiline_string(with_cluster_expected, &filename,)
         );
         // Test a line that is not a config
@@ -244,7 +242,10 @@ mod tests {
                 String::from("broker.id=1\nversion=0\ncluster.id=something.with="),
                 &filename,
             ),
-            None
+            Some(BrokerMetadata {
+                broker_id: 1,
+                cluster_id: Some(String::from("something.with="))
+            })
         );
     }
 }
