@@ -79,7 +79,7 @@ pub struct KafkaConfig {
     zk_sync_time_ms: u32,
     zk_connection_timeout_ms: Option<u32>,
     zk_max_in_flight_requests: u32,
-    log_dirs: Vec<String>,
+    pub log_dirs: Vec<String>,
 }
 
 impl Default for KafkaConfig {
@@ -116,7 +116,10 @@ impl KafkaConfig {
             debug!("read_config_from: {} {} = {}", filename, property, property_value);
             match property.as_str() {
                 "zookeeper.connect" => kafka_config.zk_connect = property_value.clone(),
-                "log.dirs" => kafka_config.log_dirs = property_value.clone().split(',').collect(),
+                "log.dirs" => {
+                    kafka_config.log_dirs =
+                        property_value.clone().split(',').map(|x| x.to_string()).collect()
+                },
                 "log.dir" => kafka_config.log_dirs.push(property_value.clone()),
                 _ => return Err(format!("Unknown config key: {}", property)),
             }
