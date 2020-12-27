@@ -16,12 +16,14 @@ use tracing::{debug, error, info};
 // ZkSslCrlEnable = false
 // ZkSslOcspEnable = false
 
+#[derive(Debug)]
 pub enum KafkaConfigDefImportance {
     High,
     Medium,
     Low,
 }
 
+#[derive(Debug)]
 pub struct KafkaConfigDef {
     key: String,
     importance: KafkaConfigDefImportance,
@@ -30,7 +32,7 @@ pub struct KafkaConfigDef {
     provided: bool,
 }
 
-fn kafka_config_params() -> HashMap<String, KafkaConfigDef> {
+fn gen_kafka_config_definition() -> HashMap<String, KafkaConfigDef> {
     let mut res = HashMap::new();
     res.insert(
         String::from("zookeeper.connect"),
@@ -101,6 +103,7 @@ pub struct KafkaConfig {
     pub zk_connection_timeout_ms: u32,
     pub zk_max_in_flight_requests: u32,
     pub log_dirs: Vec<String>,
+    // config_definition: HashMap<String, KafkaConfigDef>,
 }
 
 impl Default for KafkaConfig {
@@ -116,6 +119,29 @@ impl Default for KafkaConfig {
     }
 }
 
+#[macro_export]
+macro_rules! from_property_u32 {
+    ( $kafka_config:expr, $input_config:expr, $config_definition:expr, $property:expr, $value:expr, $field:ident ) => {{
+        match $config_definition.get_mut($property) {
+            Some(property_definition) => match $value.parse::<u32>() {
+                Ok(val) => {
+                    $kafka_config.$field = val;
+                    property_definition.provided = true;
+                },
+                Err(err) => {
+                    error!(
+                        "Unable to parse property {} to u32 number: {}. Doc: {}",
+                        $value, err, property_definition.doc
+                    );
+                },
+            },
+            None => {
+                error!("Unknown/Unhandled Configuration Key: {}", $property);
+            },
+        };
+    }};
+}
+
 impl KafkaConfig {
     /// `read_config_from` is the main entry point for configuration.
     pub fn read_config_from(
@@ -128,40 +154,39 @@ impl KafkaConfig {
     /// `get_kafka_config` Reads the kafka config.
     pub fn get_kafka_config(filename: &String) -> Result<Self, String> {
         // TODO: Create a ConfigError struct and return it instead of the String
-        let config_hash = match KafkaConfig::read_config_from(filename) {
+        let input_config = match KafkaConfig::read_config_from(filename) {
             Err(err) => return Err(err.to_string()),
             Ok(val) => val,
         };
         debug!("read_config_from: {}", filename);
-        KafkaConfig::from_properties_hashmap(config_hash)
+        KafkaConfig::from_properties_hashmap(input_config)
     }
 
     /// Transforms from a HashMap of configs into a KafkaConfig object
-    pub fn from_properties_hashmap(config_hash: HashMap<String, String>) -> Result<Self, String> {
+    pub fn from_properties_hashmap(input_config: HashMap<String, String>) -> Result<Self, String> {
         let mut kafka_config = KafkaConfig::default();
+        let mut config_definition = gen_kafka_config_definition();
         let mut zk_connection_timeout_ms: Option<u32> = None;
-        for (property, property_value) in &config_hash {
+        for (property, property_value) in &input_config {
             debug!("from_properties_hashmap: {} = {}", property, property_value);
             match property.as_str() {
                 "zookeeper.connect" => kafka_config.zk_connect = property_value.clone(),
-                "zookeeper.session.timeout.ms" => match property_value.parse::<u32>() {
-                    Ok(val) => kafka_config.zk_session_timeout_ms = val,
-                    Err(err) => {
-                        error!(
-                            "Unable to parse property {} to u32 number: {}",
-                            property_value, err
-                        );
-                    },
-                },
-                "zookeeper.connection.timeout.ms" => match property_value.parse::<u32>() {
-                    Ok(val) => zk_connection_timeout_ms = Some(val),
-                    Err(err) => {
-                        error!(
-                            "Unable to parse property {} to u32 number: {}",
-                            property_value, err
-                        );
-                    },
-                },
+                "zookeeper.session.timeout.ms" => from_property_u32!(
+                    kafka_config,
+                    input_config,
+                    config_definition,
+                    property,
+                    property_value,
+                    zk_session_timeout_ms
+                ),
+                "zookeeper.connection.timeout.ms" => from_property_u32!(
+                    kafka_config,
+                    input_config,
+                    config_definition,
+                    property,
+                    property_value,
+                    zk_connection_timeout_ms
+                ),
                 "log.dirs" => {
                     kafka_config.log_dirs =
                         property_value.clone().split(',').map(|x| x.to_string()).collect()
@@ -180,5 +205,14 @@ impl KafkaConfig {
         };
 
         Ok(kafka_config)
+    }
+
+    pub fn from_hash_u32(
+        input_config: &HashMap<String, String>,
+        config_definition: HashMap<String, KafkaConfigDef>,
+        property_name: String,
+        config_name: String,
+    ) -> Option<u32> {
+
     }
 }
