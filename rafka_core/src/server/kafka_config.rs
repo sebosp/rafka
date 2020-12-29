@@ -4,8 +4,11 @@
 /// - No SSL for now.
 use java_properties::read;
 use std::collections::HashMap;
+use std::error;
+use std::fmt;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{self, BufReader, Write};
+use std::num;
 use tracing::{debug, error, info};
 
 // Unimplemented:
@@ -21,6 +24,55 @@ pub enum KafkaConfigDefImportance {
     High,
     Medium,
     Low,
+}
+
+#[derive(Debug)]
+pub enum KafkaConfigError {
+    Io(io::Error),
+    Property(java_properties::PropertiesError),
+    ParseInt(num::ParseIntError),
+    MissingKey(String),
+    InvalidValue(String),
+}
+
+impl From<num::ParseIntError> for KafkaConfigError {
+    fn from(err: num::ParseIntError) -> KafkaConfigError {
+        KafkaConfigError::ParseInt(err)
+    }
+}
+
+impl From<io::Error> for KafkaConfigError {
+    fn from(err: io::Error) -> KafkaConfigError {
+        KafkaConfigError::Io(err)
+    }
+}
+
+impl From<java_properties::PropertiesError> for KafkaConfigError {
+    fn from(err: java_properties::PropertiesError) -> KafkaConfigError {
+        KafkaConfigError::Property(err)
+    }
+}
+
+impl error::Error for KafkaConfigError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            KafkaConfigError::Io(ref err) => Some(err),
+            KafkaConfigError::Property(ref err) => Some(err),
+            KafkaConfigError::ParseInt(ref err) => Some(err),
+            _ => None,
+        }
+    }
+}
+impl fmt::Display for KafkaConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            KafkaConfigError::Io(ref err) => write!(f, "IO error: {}", err),
+            KafkaConfigError::ParseInt(ref err) => write!(f, "Parse error: {}", err),
+            KafkaConfigError::Property(ref err) => write!(f, "Property error: {}", err),
+            KafkaConfigError::MissingKey(ref err) => write!(f, "Missing Key error: {}", err),
+            KafkaConfigError::InvalidValue(ref err) => write!(f, "Invalid Value: {}", err),
+        }
+    }
 }
 
 #[derive(Debug)]
