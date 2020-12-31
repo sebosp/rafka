@@ -27,39 +27,54 @@ pub enum KafkaConfigDefImportance {
 }
 
 #[derive(Debug)]
-pub enum KafkaConfigError {
+pub enum KafkaConfigError<T>
+where
+    T: std::str::FromStr,
+{
     Io(io::Error),
     Property(java_properties::PropertiesError),
-    ParseInt(num::ParseIntError),
+    Parse(T::Err),
     MissingKey(String),
     InvalidValue(String),
     UnknownKey(String),
 }
 
-impl From<num::ParseIntError> for KafkaConfigError {
-    fn from(err: num::ParseIntError) -> KafkaConfigError {
-        KafkaConfigError::ParseInt(err)
+impl<T> From<num::ParseIntError> for KafkaConfigError<T> {
+    fn from(err: T::Err) -> KafkaConfigError<T>
+    where
+        T: std::str::FromStr,
+    {
+        KafkaConfigError::Parse(err)
     }
 }
 
-impl From<io::Error> for KafkaConfigError {
-    fn from(err: io::Error) -> KafkaConfigError {
+impl<T> From<io::Error> for KafkaConfigError<T> {
+    fn from(err: io::Error) -> KafkaConfigError<T>
+    where
+        T: std::str::FromStr,
+    {
         KafkaConfigError::Io(err)
     }
 }
 
-impl From<java_properties::PropertiesError> for KafkaConfigError {
-    fn from(err: java_properties::PropertiesError) -> KafkaConfigError {
+impl<T> From<java_properties::PropertiesError> for KafkaConfigError<T> {
+    fn from(err: java_properties::PropertiesError) -> KafkaConfigError<T>
+    where
+        T: std::str::FromStr,
+    {
         KafkaConfigError::Property(err)
     }
 }
 
-impl error::Error for KafkaConfigError {
+impl<T> error::Error for KafkaConfigError<T>
+where
+    T: std::str::FromStr,
+{
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             KafkaConfigError::Io(ref err) => Some(err),
             KafkaConfigError::Property(ref err) => Some(err),
-            KafkaConfigError::ParseInt(ref err) => Some(err),
+            KafkaConfigError::Parse(ref err) => Some(err),
             _ => None,
         }
     }
@@ -68,7 +83,7 @@ impl fmt::Display for KafkaConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             KafkaConfigError::Io(ref err) => write!(f, "IO error: {}", err),
-            KafkaConfigError::ParseInt(ref err) => write!(f, "Parse error: {}", err),
+            KafkaConfigError::Parse(ref err) => write!(f, "Parse error: {}", err),
             KafkaConfigError::Property(ref err) => write!(f, "Property error: {}", err),
             KafkaConfigError::MissingKey(ref err) => write!(f, "Missing Key error: {}", err),
             KafkaConfigError::InvalidValue(ref err) => write!(f, "Invalid Value: {}", err),
@@ -157,7 +172,7 @@ pub struct KafkaConfig {
     pub zk_connection_timeout_ms: u32,
     pub zk_max_in_flight_requests: u32,
     pub log_dirs: Vec<String>,
-    // config_definition: HashMap<String, KafkaConfigDef>,
+    config_definition: HashMap<String, KafkaConfigDef>,
 }
 
 impl Default for KafkaConfig {
@@ -169,6 +184,7 @@ impl Default for KafkaConfig {
             zk_max_in_flight_requests: 10u32,
             zk_connect: String::from(""),
             log_dirs: vec![String::from("/tmp/kafka-logs")],
+            config_definition: gen_kafka_config_definition(),
         }
     }
 }
@@ -199,6 +215,38 @@ macro_rules! from_property_u32 {
 }
 
 impl KafkaConfig {
+    /// `try_from_property` transform a string property into a destination field from KafkaConfig
+    /// fileds
+    pub fn try_from<T>(
+        &mut self,
+        input_config: &HashMap<String, String>,
+        property_name: &String,
+        property_value: &String,
+    ) -> Result<T, KafkaConfigError>
+    where
+        T: std::str::FromStr,
+    {
+        match self.config_definition.get_mut(property_name) {
+            Some(property_definition) => match property_value.parse::<T>() {
+                Ok(val) => {
+                    property_definition.provided = true;
+                    Ok(val)
+                },
+                Err(err) => {
+                    error!(
+                        "Unable to parse property {} to u32 number: {}. Doc: {}",
+                        property_value, err, property_definition.doc
+                    );
+                    Err(KafkaConfigError::Parse(err))
+                },
+            },
+            None => {
+                error!("Unknown/Unhandled Configuration Key: {}", property_name);
+                Err(KafkaConfigError::UnknownKey(property_name.to_string()))
+            },
+        }
+    }
+
     /// `read_config_from` is the main entry point for configuration.
     pub fn read_config_from(
         filename: &String,
@@ -260,13 +308,15 @@ impl KafkaConfig {
 
         Ok(kafka_config)
     }
+}
 
-    pub fn from_hash_u32(
-        input_config: &HashMap<String, String>,
-        config_definition: HashMap<String, KafkaConfigDef>,
-        property_name: String,
-        config_name: String,
-    ) -> Option<u32> {
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn it_gets_config_from_hashmap() {
+        let mut kafka_config = KafkaConfig::default();
+        let test_config: HashMap<String, String> = HashMap::new();
     }
 }
