@@ -41,6 +41,34 @@ pub enum KafkaConfigError {
     DuplicateKey(String),
 }
 
+/// This implementation is only for testing, for example any I/O error is considered equal
+impl PartialEq for KafkaConfigError {
+    fn eq(&self, rhs: &Self) -> bool {
+        match self {
+            KafkaConfigError::Io(_) => matches!(rhs, KafkaConfigError::Io(_)),
+            KafkaConfigError::Property(lhs) => {
+                // TODO: create a method that expects a string and returns the java_properties
+                matches!(rhs, KafkaConfigError::Property(rhs) if rhs.line_number() == lhs.line_number())
+            },
+            KafkaConfigError::MissingKeys(lhs) => {
+                matches!(rhs, KafkaConfigError::MissingKeys(rhs) if rhs == lhs)
+            },
+            KafkaConfigError::InvalidValue(lhs) => {
+                matches!(rhs, KafkaConfigError::InvalidValue(rhs) if rhs == lhs)
+            },
+            KafkaConfigError::UnknownKey(lhs) => {
+                matches!(rhs, KafkaConfigError::UnknownKey(rhs) if rhs == lhs)
+            },
+            KafkaConfigError::DuplicateKey(lhs) => {
+                matches!(rhs, KafkaConfigError::DuplicateKey(rhs) if rhs == lhs)
+            },
+            KafkaConfigError::ParseInt(lhs) => {
+                matches!(rhs, KafkaConfigError::ParseInt(rhs) if rhs == lhs)
+            },
+        }
+    }
+}
+
 impl From<num::ParseIntError> for KafkaConfigError {
     fn from(err: num::ParseIntError) -> KafkaConfigError {
         KafkaConfigError::ParseInt(err)
@@ -160,7 +188,7 @@ fn gen_kafka_config_definition() -> HashMap<String, KafkaConfigDef> {
     res
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct KafkaConfigBuilder {
     pub zk_connect: Option<String>,
     pub zk_session_timeout_ms: Option<u32>,
@@ -172,13 +200,42 @@ pub struct KafkaConfigBuilder {
     config_definition: HashMap<String, KafkaConfigDef>,
 }
 
+impl Default for KafkaConfigBuilder {
+    fn default() -> Self {
+        KafkaConfigBuilder {
+            zk_connect: None,
+            zk_session_timeout_ms: None,
+            zk_sync_time_ms: None,
+            zk_connection_timeout_ms: None,
+            zk_max_in_flight_requests: None,
+            log_dirs: None,
+            log_dir: None,
+            config_definition: gen_kafka_config_definition(),
+        }
+    }
+}
+
+impl PartialEq for KafkaConfigBuilder {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.zk_connect == rhs.zk_connect
+            && self.zk_session_timeout_ms == rhs.zk_session_timeout_ms
+            && self.zk_sync_time_ms == rhs.zk_sync_time_ms
+            && self.zk_connection_timeout_ms == rhs.zk_connection_timeout_ms
+            && self.zk_max_in_flight_requests == rhs.zk_max_in_flight_requests
+            && self.log_dirs == rhs.log_dirs
+            && self.log_dir == rhs.log_dir
+    }
+}
+
 impl KafkaConfigBuilder {
-    pub fn set_config_key_as_provided(
-        &mut self,
-        key: &'static str,
-    ) -> Result<(), KafkaConfigError> {
+    /// `set_config_key_as_provided` sets one of the java properties as provided, this happens when
+    /// the variable is resolved by using the value of another variable.
+    pub fn set_config_key_as_provided(&mut self, key: &'static str) {
         if let Some(config_def) = self.config_definition.get_mut(key) {
             config_def.provided = true;
+        } else {
+            // Help with typos
+            panic!("KafkaConfigBuilder::set_config_key_as_provided No such key {}", key);
         }
     }
 
@@ -186,8 +243,8 @@ impl KafkaConfigBuilder {
     /// KafkaConfig fileds
     pub fn try_from_property_to_u32(
         &mut self,
-        property_name: &String,
-        property_value: &String,
+        property_name: &str,
+        property_value: &str,
     ) -> Result<u32, KafkaConfigError> {
         match self.config_definition.get_mut(property_name) {
             Some(property_definition) => match property_value.parse::<u32>() {
@@ -211,12 +268,11 @@ impl KafkaConfigBuilder {
     }
 
     /// Transforms from a HashMap of configs into a KafkaConfigBuilder object
+    /// This may return KafkaConfigError::UnknownKey errors
     pub fn from_properties_hashmap(
-        self,
         input_config: HashMap<String, String>,
     ) -> Result<Self, KafkaConfigError> {
         let mut config_builder = KafkaConfigBuilder::default();
-        let mut zk_connection_timeout_ms: Option<u32> = None;
         for (property, property_value) in &input_config {
             debug!("from_properties_hashmap: {} = {}", property, property_value);
             match property.as_str() {
@@ -240,9 +296,22 @@ impl KafkaConfigBuilder {
         Ok(config_builder)
     }
 
-    /// `resolve_zk_connection_timeout_ms` Satisties REQ-01, if
-    fn resolve_zk_connection_timeout_ms(&mut self) -> Result<(), KafkaConfigError> {
-        if self.zk_connection_timeout_ms.is_some() {
+    fn resolve_zk_session_timeout_ms(&mut self, kafka_config: &mut KafkaConfig) {
+        // If this is None, it would be caught later by the MissingKeys process
+        if let Some(zk_session_timeout_ms) = self.zk_session_timeout_ms {
+            kafka_config.zk_session_timeout_ms = zk_session_timeout_ms;
+            self.set_config_key_as_provided("zookeeper.session.timeout.ms");
+        }
+    }
+
+    /// `resolve_zk_connection_timeout_ms` Satisties REQ-01, if zk_connection_timeout_ms is unset
+    /// the value of zk_connection_timeout_ms will be used.
+    fn resolve_zk_connection_timeout_ms(
+        &mut self,
+        kafka_config: &mut KafkaConfig,
+    ) -> Result<(), KafkaConfigError> {
+        if let Some(zk_connection_timeout_ms) = self.zk_connection_timeout_ms {
+            kafka_config.zk_connection_timeout_ms = zk_connection_timeout_ms;
             return Ok(());
         } else {
             debug!(
@@ -260,20 +329,21 @@ impl KafkaConfigBuilder {
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
         let mut kafka_config = KafkaConfig::default();
-        self.resolve_zk_connection_timeout_ms();
+        self.resolve_zk_session_timeout_ms(&mut kafka_config);
+        self.resolve_zk_connection_timeout_ms(&mut kafka_config)?;
         let mut missing_keys: Vec<String> = vec![];
         for (property, property_def) in &self.config_definition {
             if KafkaConfigDefImportance::High == property_def.importance && !property_def.provided {
                 missing_keys.push(property.to_string());
             }
         }
-        if missing_keys.len() > 0 {
+        if !missing_keys.is_empty() {
             return Err(KafkaConfigError::MissingKeys(missing_keys));
         }
         Ok(kafka_config)
     }
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct KafkaConfig {
     pub zk_connect: String,
     pub zk_session_timeout_ms: u32,
@@ -292,7 +362,6 @@ impl Default for KafkaConfig {
             zk_max_in_flight_requests: 10u32,
             zk_connect: String::from(""),
             log_dirs: vec![String::from("/tmp/kafka-logs")],
-            config_definition: gen_kafka_config_definition(),
         }
     }
 }
@@ -323,19 +392,19 @@ macro_rules! from_property_u32 {
 }
 
 impl KafkaConfig {
-    /// `read_config_from` is the main entry point for configuration.
-    pub fn read_config_from(
-        filename: &String,
-    ) -> Result<HashMap<String, String>, KafkaConfigError> {
+    /// `read_config_from` is the main entry point for configuration from the runner perspective,
+    /// This should be changed to read_to_string().
+    pub fn read_config_from(filename: &str) -> Result<HashMap<String, String>, KafkaConfigError> {
         let mut config_file_content = File::open(&filename)?;
-        read(BufReader::new(config_file_content)).map_err(|err| KafkaConfigError::Property(err))
+        read(BufReader::new(&mut config_file_content))
+            .map_err(|err| KafkaConfigError::Property(err))
     }
 
     /// `get_kafka_config` Reads the kafka config.
-    pub fn get_kafka_config(filename: &String) -> Result<Self, KafkaConfigError> {
+    pub fn get_kafka_config(filename: &str) -> Result<Self, KafkaConfigError> {
         let input_config = KafkaConfig::read_config_from(filename)?;
         debug!("read_config_from: {}", filename);
-        KafkaConfig::from_properties_hashmap(input_config)
+        KafkaConfigBuilder::from_properties_hashmap(input_config)?.build()
     }
 }
 
@@ -354,20 +423,21 @@ mod tests {
         let mut unknown_key_config: HashMap<String, String> = HashMap::new();
         unknown_key_config.insert(String::from("not.a.known.key"), String::from("127.0.0.1:2181"));
         assert_eq!(
-            KafkaConfig::from_properties_hashmap(unknown_key_config),
-            KafkaConfigError::UnknownKey(String::from("not.a.known.key"))
+            KafkaConfigBuilder::from_properties_hashmap(unknown_key_config),
+            Err(KafkaConfigError::UnknownKey(String::from("not.a.known.key")))
         );
         let mut missing_key_config: HashMap<String, String> = HashMap::new();
         missing_key_config
-            .insert(String::from("zookeeeper.session.timeout.ms"), String::from("1000"));
-        assert_eq!(
-            KafkaConfig::from_properties_hashmap(missing_key_config),
-            KafkaConfigError::MissingKeys(vec![String::from("zookeeper.connect")])
-        );
+            .insert(String::from("zookeeper.session.timeout.ms"), String::from("1000"));
+        let missing_keys_builder =
+            KafkaConfigBuilder::from_properties_hashmap(missing_key_config).unwrap().build();
+        if let Err(KafkaConfigError::MissingKeys(mut missing_keys)) = missing_keys_builder {
+            assert_eq!(missing_keys.sort(), vec![String::from("zookeeper.connect")].sort());
+        }
         let mut full_config: HashMap<String, String> = HashMap::new();
         full_config.insert(String::from("zookeeper.connect"), String::from("127.0.0.1:2181"));
         full_config.insert(String::from("zookeeper.session.timeout.ms"), String::from("1000"));
         full_config.insert(String::from("zookeeper.connection.timeout.ms"), String::from("1000"));
-        assert!(KafkaConfig::from_properties_hashmap(full_config).is_ok());
+        assert!(KafkaConfigBuilder::from_properties_hashmap(full_config).is_ok());
     }
 }
