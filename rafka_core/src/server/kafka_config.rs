@@ -119,6 +119,8 @@ pub struct KafkaConfigDef {
     key: String,
     importance: KafkaConfigDefImportance,
     doc: String,
+    /// `default` of the value, this would be parsed and transformed into each field type from
+    /// KafkaConfig
     default: Option<String>,
     provided: bool,
 }
@@ -146,7 +148,8 @@ fn gen_kafka_config_definition() -> HashMap<String, KafkaConfigDef> {
         key: String::from("zk_session_timeout_ms"),
         importance: KafkaConfigDefImportance::High,
         doc: String::from("Zookeeper session timeout"),
-        default: None,
+        // val ZkSessionTimeoutMs = 18000
+        default: Some(String::from("18000")),
         provided: false,
     });
     res.insert(String::from("zookeeper.connection.timeout.ms"), KafkaConfigDef {
@@ -156,23 +159,25 @@ fn gen_kafka_config_definition() -> HashMap<String, KafkaConfigDef> {
             "The max time that the client waits to establish a connection to zookeeper. If not \
              set, the value in zookeeper.session.timeout.ms is used", // REQ-01
         ),
-        default: Some(String::from("zk_session_timeout_ms")),
-        provided: false,
-    });
-    res.insert(String::from("zookeeper.sync.time.ms"), KafkaConfigDef {
-        key: String::from("zk_sync_time_ms"),
-        importance: KafkaConfigDefImportance::Low,
-        doc: String::from("How far a ZK follower can be behind a ZK leader"),
         default: None,
         provided: false,
     });
+    // res.insert(String::from("zookeeper.sync.time.ms"), KafkaConfigDef {
+    // key: String::from("zk_sync_time_ms"),
+    // importance: KafkaConfigDefImportance::Low,
+    // doc: String::from("How far a ZK follower can be behind a ZK leader"),
+    // val ZkSyncTimeMs = 2000
+    // default: Some(String::from("2000")),
+    // provided: false,
+    // });
     res.insert(String::from("log.dir"), KafkaConfigDef {
         key: String::from("log_dirs"),
         importance: KafkaConfigDefImportance::High,
         doc: String::from(
             "The directory in which the log data is kept (supplemental for log.dirs property)",
         ),
-        default: None,
+        // val LogDir = "/tmp/kafka-logs"
+        default: Some(String::from("/tmp/kafka-logs")),
         provided: false,
     });
     res.insert(String::from("log.dirs"), KafkaConfigDef {
@@ -182,7 +187,7 @@ fn gen_kafka_config_definition() -> HashMap<String, KafkaConfigDef> {
             "The directories in which the log data is kept. If not set, the value in log.dir is \
              used",
         ),
-        default: Some(String::from("log.dir")),
+        default: None,
         provided: false,
     });
     res
@@ -202,7 +207,7 @@ pub struct KafkaConfigBuilder {
 
 impl Default for KafkaConfigBuilder {
     fn default() -> Self {
-        KafkaConfigBuilder {
+        let mut config_builder = KafkaConfigBuilder {
             zk_connect: None,
             zk_session_timeout_ms: None,
             zk_sync_time_ms: None,
@@ -211,7 +216,9 @@ impl Default for KafkaConfigBuilder {
             log_dirs: None,
             log_dir: None,
             config_definition: gen_kafka_config_definition(),
-        }
+        };
+        config_builder.set_defaults_from_config_definition().unwrap();
+        config_builder
     }
 }
 
@@ -230,7 +237,7 @@ impl PartialEq for KafkaConfigBuilder {
 impl KafkaConfigBuilder {
     /// `set_config_key_as_provided` sets one of the java properties as provided, this happens when
     /// the variable is resolved by using the value of another variable.
-    pub fn set_config_key_as_provided(&mut self, key: &'static str) {
+    pub fn set_config_key_as_provided(&mut self, key: &str) {
         if let Some(config_def) = self.config_definition.get_mut(key) {
             config_def.provided = true;
         } else {
@@ -267,6 +274,41 @@ impl KafkaConfigBuilder {
         }
     }
 
+    /// `parse_to_field_name` gets a property string and a property value as strings (usually from
+    /// configuration files) and sets these values in the builder struct
+    fn parse_to_field_name(&mut self, property: &str, value: &str) -> Result<(), KafkaConfigError> {
+        match property {
+            "zookeeper.connect" => self.zk_connect = Some(value.to_string()),
+            "zookeeper.session.timeout.ms" => {
+                self.zk_session_timeout_ms = Some(self.try_from_property_to_u32(property, value)?);
+            },
+            "zookeeper.connection.timeout.ms" => {
+                self.zk_connection_timeout_ms =
+                    Some(self.try_from_property_to_u32(property, value)?);
+            },
+            "log.dirs" => {
+                self.log_dirs = Some(value.to_string().split(',').map(|x| x.to_string()).collect())
+            },
+            "log.dir" => self.log_dir = Some(value.to_string()),
+            _ => return Err(KafkaConfigError::UnknownKey(property.to_string())),
+        }
+        self.set_config_key_as_provided(property);
+        Ok(())
+    }
+
+    /// Iterates over the Config Definition `default` field and sets each value on the builder
+    pub fn set_defaults_from_config_definition(&mut self) -> Result<(), KafkaConfigError> {
+        // TODO: Second call to gen_kafka_config_definition is done to avoid borrow checks, maybe
+        // find a way around it
+        for (property, property_definition) in gen_kafka_config_definition() {
+            if let Some(property_value) = &property_definition.default {
+                debug!("set_default: {} = {}", property, property_value);
+                self.parse_to_field_name(&property, &property_value)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Transforms from a HashMap of configs into a KafkaConfigBuilder object
     /// This may return KafkaConfigError::UnknownKey errors
     pub fn from_properties_hashmap(
@@ -275,29 +317,13 @@ impl KafkaConfigBuilder {
         let mut config_builder = KafkaConfigBuilder::default();
         for (property, property_value) in &input_config {
             debug!("from_properties_hashmap: {} = {}", property, property_value);
-            match property.as_str() {
-                "zookeeper.connect" => config_builder.zk_connect = Some(property_value.clone()),
-                "zookeeper.session.timeout.ms" => {
-                    config_builder.zk_session_timeout_ms =
-                        Some(config_builder.try_from_property_to_u32(property, property_value)?);
-                },
-                "zookeeper.connection.timeout.ms" => {
-                    config_builder.zk_connection_timeout_ms =
-                        Some(config_builder.try_from_property_to_u32(property, property_value)?);
-                },
-                "log.dirs" => {
-                    config_builder.log_dirs =
-                        Some(property_value.clone().split(',').map(|x| x.to_string()).collect())
-                },
-                "log.dir" => config_builder.log_dir = Some(property_value.clone()),
-                _ => return Err(KafkaConfigError::UnknownKey(property.to_string())),
-            }
+            config_builder.parse_to_field_name(property, property_value)?;
         }
         Ok(config_builder)
     }
 
     fn resolve_zk_session_timeout_ms(&mut self, kafka_config: &mut KafkaConfig) {
-        // If this is None, it would be caught later by the MissingKeys process
+        // NOTE: zk_session_timeout_ms has a default, so it is never None
         if let Some(zk_session_timeout_ms) = self.zk_session_timeout_ms {
             kafka_config.zk_session_timeout_ms = zk_session_timeout_ms;
             self.set_config_key_as_provided("zookeeper.session.timeout.ms");
@@ -325,12 +351,27 @@ impl KafkaConfigBuilder {
         Ok(())
     }
 
+    /// `resolve_log_dirs` validates the log.dirs and log.dir combination. Note that the end value
+    /// in KafkaConfig has a default, so even if they are un-set, they will be marked as provided
+    fn resolve_log_dirs(&mut self, kafka_config: &mut KafkaConfig) -> Result<(), KafkaConfigError> {
+        // TODO: Consider checking for valid Paths and return KafkaConfigError for them
+        if let Some(log_dirs) = &self.log_dirs {
+            kafka_config.log_dirs = log_dirs.clone().split(',').map(|x| x.to_string()).collect();
+        } else if let Some(log_dir) = &self.log_dir {
+            kafka_config.log_dirs = vec![log_dir.clone()];
+        }
+        self.set_config_key_as_provided("log.dirs");
+        self.set_config_key_as_provided("log.dir");
+        Ok(())
+    }
+
     /// `build` validates and resolves dependant properties from a KafkaConfigBuilder into a
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
         let mut kafka_config = KafkaConfig::default();
         self.resolve_zk_session_timeout_ms(&mut kafka_config);
         self.resolve_zk_connection_timeout_ms(&mut kafka_config)?;
+        self.resolve_log_dirs(&mut kafka_config)?;
         let mut missing_keys: Vec<String> = vec![];
         for (property, property_def) in &self.config_definition {
             if KafkaConfigDefImportance::High == property_def.importance && !property_def.provided {
@@ -343,7 +384,7 @@ impl KafkaConfigBuilder {
         Ok(kafka_config)
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct KafkaConfig {
     pub zk_connect: String,
     pub zk_session_timeout_ms: u32,
@@ -351,19 +392,6 @@ pub struct KafkaConfig {
     pub zk_connection_timeout_ms: u32,
     pub zk_max_in_flight_requests: u32,
     pub log_dirs: Vec<String>,
-}
-
-impl Default for KafkaConfig {
-    fn default() -> Self {
-        KafkaConfig {
-            zk_session_timeout_ms: 18000u32,
-            zk_sync_time_ms: 2000u32,
-            zk_connection_timeout_ms: 18000u32,
-            zk_max_in_flight_requests: 10u32,
-            zk_connect: String::from(""),
-            log_dirs: vec![String::from("/tmp/kafka-logs")],
-        }
-    }
 }
 
 #[macro_export]
@@ -395,6 +423,7 @@ impl KafkaConfig {
     /// `read_config_from` is the main entry point for configuration from the runner perspective,
     /// This should be changed to read_to_string().
     pub fn read_config_from(filename: &str) -> Result<HashMap<String, String>, KafkaConfigError> {
+        // TODO: Should this be moved to the Builder? Use Path Trait instead of &str
         let mut config_file_content = File::open(&filename)?;
         read(BufReader::new(&mut config_file_content))
             .map_err(|err| KafkaConfigError::Property(err))
@@ -414,12 +443,23 @@ mod tests {
 
     #[test]
     fn it_gets_config_from_hashmap() {
-        let mut kafka_config = KafkaConfig::default();
         // Property(java_properties::PropertiesError),
         // ParseInt(num::ParseIntError),
         // MissingKeys(String),
         // InvalidValue(String),
         // UnknownKey(String),
+        let all_required_keys: Vec<String> = vec![String::from("zookeeper.connect")];
+        let empty_config: HashMap<String, String> = HashMap::new();
+        if let Err(empty_config_builder) =
+            KafkaConfigBuilder::from_properties_hashmap(empty_config).unwrap().build()
+        {
+            assert!(matches!(
+                empty_config_builder,
+                KafkaConfigError::MissingKeys(req_keys) if req_keys == all_required_keys
+            ));
+        } else {
+            panic!("Expected Err result on empty_config");
+        }
         let mut unknown_key_config: HashMap<String, String> = HashMap::new();
         unknown_key_config.insert(String::from("not.a.known.key"), String::from("127.0.0.1:2181"));
         assert_eq!(
@@ -433,11 +473,14 @@ mod tests {
             KafkaConfigBuilder::from_properties_hashmap(missing_key_config).unwrap().build();
         if let Err(KafkaConfigError::MissingKeys(mut missing_keys)) = missing_keys_builder {
             assert_eq!(missing_keys.sort(), vec![String::from("zookeeper.connect")].sort());
+        } else {
+            panic!("Expected Err result on missing_keys");
         }
         let mut full_config: HashMap<String, String> = HashMap::new();
         full_config.insert(String::from("zookeeper.connect"), String::from("127.0.0.1:2181"));
         full_config.insert(String::from("zookeeper.session.timeout.ms"), String::from("1000"));
         full_config.insert(String::from("zookeeper.connection.timeout.ms"), String::from("1000"));
+        full_config.insert(String::from("log.dirs"), String::from("/some-dir/logs"));
         assert!(KafkaConfigBuilder::from_properties_hashmap(full_config).is_ok());
     }
 }
