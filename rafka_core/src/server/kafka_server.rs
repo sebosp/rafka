@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::info;
+use tracing::{debug, info};
 pub struct CountDownLatch(u8);
 pub struct Metrics;
 pub struct KafkaApis;
@@ -41,11 +41,6 @@ pub struct KafkaServer {
     is_starting_up: Arc<AtomicBool>,   // false
 
     shutdown_latch: CountDownLatch, // (1)
-
-    // properties for MetricsContext
-    metrics_prefix: String,   // "kafka.server"
-    kafka_cluster_id: String, // "kafka.cluster.id"
-    kafka_broker_id: String,  // "kafka.broker.id"
 
     pub metrics: Option<Metrics>, // was null, changed to Option<>
     // TODO: BrokerState is volatile, nede to make sure we can make its changes sync through the
@@ -97,6 +92,7 @@ pub struct KafkaServer {
 
     _feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
                                                                        * Option<> */
+    pub kafka_config: KafkaConfig,
 }
 
 // RAFKA Unimplemented:
@@ -114,9 +110,6 @@ impl Default for KafkaServer {
             is_shutting_down: Arc::new(AtomicBool::new(false)),
             is_starting_up: Arc::new(AtomicBool::new(false)),
             shutdown_latch: CountDownLatch(1),
-            metrics_prefix: String::from("kafka.server"),
-            kafka_cluster_id: String::from("kafka.cluster.id"),
-            kafka_broker_id: String::from("kafka.broker.id"),
             metrics: None,
             broker_state: BrokerState::default(),
             data_plane_request_processor: None,
@@ -146,6 +139,7 @@ impl Default for KafkaServer {
             _broker_topic_stats: None,
             _feature_change_listener: None,
             init_time: Instant::now(),
+            kafka_config: KafkaConfig::default(),
         }
     }
 }
@@ -155,16 +149,20 @@ impl KafkaServer {
     pub fn new(config: KafkaConfig, time: std::time::Instant) -> Self {
         let mut kafka_server = KafkaServer::default();
         // TODO: In the future we can implement SSL/etc.
+        // In the kotlin code, zkClientConfigFromKafkaConfig is used to build an
+        // Option<ZkClientConfig>, it returns None if there's no SSL setup, we are not using SSL so
+        // we can bypass that and return just the default() value
         kafka_server.zk_client_config = ZKClientConfig::default();
         let broker_meta_props_file = String::from("meta.properties");
         // Using File.separator as "." since this is going to just work on Linux.
-        for bmc_log_dir in config.log_dirs {
+        for bmc_log_dir in &config.log_dirs {
             let filename = format!("{}.{}", bmc_log_dir, broker_meta_props_file);
             kafka_server
                 .broker_metadata_checkpoints
                 .insert(filename.clone(), BrokerMetadataCheckpoint::new(&filename));
         }
         kafka_server.init_time = time;
+        kafka_server.kafka_config = config;
         kafka_server
     }
 
@@ -188,6 +186,38 @@ impl KafkaServer {
     }
 
     pub fn init_zk_client(&mut self) {
-        info!("Connecting to zookeeper on {:?}", self.zk_client_config);
+        info!("Connecting to zookeeper on {:?}", self.kafka_config.zk_connect);
+        match self.kafka_config.zk_connect.find('/') {
+            Some(chroot_index) => {
+                // make sure chroot path exists
+                let (zk_connect_host_port, zk_chroot) =
+                    self.kafka_config.zk_connect.split_at(chroot_index);
+                debug!("Zookeeper host:port list: {}, chroot: {}", zk_connect_host_port, zk_chroot);
+                let zk_client = self.create_zk_client(zk_connect_host_port);
+                zk_client.make_sure_persistent_path_exists(zk_chroot);
+                info!("Created zookeeper path {}", zk_chroot);
+                // zk_client.close(); TODO Check Drop may be implicit
+            },
+            None => {
+                debug!(
+                    "Zookeeper path does not contain chroot, no need to make sure the path exists"
+                );
+            },
+        };
+        // _zkClient = createZkClient(config.zkConnect, secureAclsEnabled)
+        // _zkClient.createTopLevelPaths()
+    }
+
+    /// Creates a new zk_client for the zk_connect parameter
+    fn create_zk_client(&self, zk_connect: &str) -> KafkaZkClient {
+        KafkaZkClient::build(
+            zk_connect,
+            self.kafka_config.zk_session_timeout_ms,
+            self.kafka_config.zk_connection_timeout_ms,
+            self.kafka_config.zk_max_in_flight_requests,
+            self.init_time,
+            Some(String::from("Kafka server")),
+            Some(self.zk_client_config),
+        )
     }
 }
