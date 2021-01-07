@@ -4,7 +4,8 @@
 // RAFKA TODO: Check if we can do the "pipeline" with the rust libraries
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use futures::future::lazy;
-use joyent_tokio_zookeeper::*;
+use zookeeper_async::{Acl, CreateMode, WatchedEvent, Watcher, ZooKeeper};
+use crate::server::kafka_config::KafkaConfig;
 use std::collections::HashMap;
 /// RAFKA Specific:
 /// - While the library uses re-entrant locks and concurrent structures extensively, this crate
@@ -13,8 +14,7 @@ use std::collections::HashMap;
 ///   tokio scheduler will be used.
 /// - Need to figure out reconnection to zookeeper
 /// (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
-use std::time::SystemTime;
-use tokio::prelude::*;
+use std::time::{Instant, Duration};
 use tokio::sync::mpsc;
 
 use slog::{error, info};
@@ -22,7 +22,7 @@ use slog::{error, info};
 // ZKClientConfig comes from
 // https://zookeeper.apache.org/doc/r3.5.4-beta/api/org/apache/zookeeper/client/ZKClientConfig.html
 // and seems to provide TLS related config. For now we will just provide an empty struct.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ZKClientConfig {
     /// For now only PlainText communication is implemented.
     PlainText,
@@ -39,6 +39,13 @@ pub enum ZookeeperRequest {
     Unimplemented,
 }
 
+struct LoggingWatcher;
+impl Watcher for LoggingWatcher {
+    fn handle(&self, e: WatchedEvent) {
+        println!("{:?}", e)
+    }
+}
+
 pub struct ZooKeeperClient {
     /// `connect_string` comma separated host:port pairs, each corresponding to a zk server
     connect_string: String,
@@ -51,7 +58,7 @@ pub struct ZooKeeperClient {
     max_in_flight_requests: u32,
     /// name name of the client instance
     name: Option<String>,
-    time: SystemTime,
+    time: Instant,
     /// monitoring related fields
     metric_group: String,
     metric_type: String,
@@ -68,7 +75,7 @@ pub struct ZooKeeperClient {
     // zNodeChangeHandlers: HashMap<String, N>,
     // zNodeChildChangeHandlers: HashMap<String, C>,
     /// A connection to ZooKeeper.
-    zookeeper: Option<joyent_tokio_zookeeper::ZooKeeper>,
+    zookeeper: Option<ZooKeeper>,
     logger: slog::Logger,
 }
 
@@ -78,10 +85,10 @@ impl ZooKeeperClient {
         session_timeout_ms: u32,
         connection_timeout_ms: u32,
         max_in_flight_requests: u32,
-        time: SystemTime,
+        time: Instant,
+        name: Option<String>,
+        zk_client_config: Option<ZKClientConfig>,
         tx: Option<mpsc::Sender<ZookeeperRequest>>,
-        metric_group: String,
-        metric_type: String,
     ) -> Self {
         ZooKeeperClient {
             connect_string,
@@ -89,26 +96,24 @@ impl ZooKeeperClient {
             connection_timeout_ms,
             max_in_flight_requests,
             time,
-            metric_group,
-            metric_type,
-            name: None,
-            zk_client_config: None,
+            name,
+            zk_client_config,
             // expiry_scheduler_handler: KafkaScheduler { tx, ..KafkaScheduler::default() },
             // zNodeChangeHandlers: HashMap::new(),
             // zNodeChildChangeHandlers: HashMap::new(),
             zookeeper: None,
             logger: crate::utils::default_logger(),
+            ..ZooKeeperClient::default()
         }
     }
 
     pub async fn connect(&mut self) -> Result<(), String> {
-        let connect_string =
-            self.connect_string.parse::<joyent_tokio_zookeeper::types::ZkConnectString>().unwrap();
+        // TODO: Return a ZKError
         let handle = tokio::spawn(async move {
-            ZooKeeper::connect(&connect_string).await
+            ZooKeeper::connect(&self.connect_string, Duration::from_millis(self.connection_timeout_ms.into()), LoggingWatcher).await
         });
         match handle.await {
-            Ok((zk, _watcher)) => {
+            Ok(zk) => {
                 // RAFKA TODO: A "default watcher is returned on the connection, figure out what to
                 // do with it
                 info!(self.logger, "Connection to zookeeper successful");
@@ -141,7 +146,7 @@ impl Default for ZooKeeperClient {
             session_timeout_ms,
             connection_timeout_ms: session_timeout_ms,
             max_in_flight_requests: 10,
-            time: SystemTime::now(),
+            time: Instant::now(),
             metric_group: String::from(""),
             metric_type: String::from(""),
             name: None,
