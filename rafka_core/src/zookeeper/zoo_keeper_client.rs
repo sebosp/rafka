@@ -16,6 +16,9 @@ use std::collections::HashMap;
 /// (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
 use std::time::{Instant, Duration};
 use tokio::sync::mpsc;
+use thiserror::Error;
+// TODO: Backtrace
+// use std::backtrace::Backtrace;
 
 use slog::{error, info};
 
@@ -44,6 +47,16 @@ impl Watcher for LoggingWatcher {
     fn handle(&self, e: WatchedEvent) {
         println!("{:?}", e)
     }
+}
+
+#[derive(Error, Debug)]
+pub enum ZooKeeperClientError {
+    #[error("IO error {0}")]
+    Io (#[from] std::io::Error),
+    #[error("Tokio error {0}")]
+    Tokio(#[from] tokio::task::JoinError),
+    #[error("zookeeper-async error {0}")]
+    ZookeeperAsync(#[from] zookeeper_async::ZkError),
 }
 
 pub struct ZooKeeperClient {
@@ -107,12 +120,11 @@ impl ZooKeeperClient {
         }
     }
 
-    pub async fn connect(&mut self) -> Result<(), String> {
-        // TODO: Return a ZKError
+    pub async fn connect(&mut self) -> Result<(), ZooKeeperClientError> {
         let handle = tokio::spawn(async move {
             ZooKeeper::connect(&self.connect_string, Duration::from_millis(self.connection_timeout_ms.into()), LoggingWatcher).await
         });
-        match handle.await {
+        match handle.await? {
             Ok(zk) => {
                 // RAFKA TODO: A "default watcher is returned on the connection, figure out what to
                 // do with it
