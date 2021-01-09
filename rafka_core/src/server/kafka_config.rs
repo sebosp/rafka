@@ -9,6 +9,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::{self, BufReader};
 use std::num;
+use thiserror::Error;
 use tracing::{debug, error};
 
 // Unimplemented:
@@ -30,14 +31,21 @@ pub enum KafkaConfigDefImportance {
 
 /// `KafkaConfigError` is a custom error that is returned when properties are invalid, unknown,
 /// missing or the config file is not readable.
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum KafkaConfigError {
-    Io(io::Error),
-    Property(java_properties::PropertiesError),
-    ParseInt(num::ParseIntError),
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
+    #[error("Property error: {0}")]
+    Property(#[from] java_properties::PropertiesError),
+    #[error("Parse error: {0}")]
+    ParseInt(#[from] num::ParseIntError),
+    #[error("Missing Key error: {0:?}")]
     MissingKeys(Vec<String>),
+    #[error("Invalid Value: {0}")]
     InvalidValue(String),
+    #[error("Unknown Key: {0}")]
     UnknownKey(String),
+    #[error("Duplicate Key: {0}")]
     DuplicateKey(String),
 }
 
@@ -65,48 +73,6 @@ impl PartialEq for KafkaConfigError {
             KafkaConfigError::ParseInt(lhs) => {
                 matches!(rhs, KafkaConfigError::ParseInt(rhs) if rhs == lhs)
             },
-        }
-    }
-}
-
-impl From<num::ParseIntError> for KafkaConfigError {
-    fn from(err: num::ParseIntError) -> KafkaConfigError {
-        KafkaConfigError::ParseInt(err)
-    }
-}
-
-impl From<io::Error> for KafkaConfigError {
-    fn from(err: io::Error) -> KafkaConfigError {
-        KafkaConfigError::Io(err)
-    }
-}
-
-impl From<java_properties::PropertiesError> for KafkaConfigError {
-    fn from(err: java_properties::PropertiesError) -> KafkaConfigError {
-        KafkaConfigError::Property(err)
-    }
-}
-
-impl error::Error for KafkaConfigError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match self {
-            KafkaConfigError::Io(ref err) => Some(err),
-            KafkaConfigError::Property(ref err) => Some(err),
-            KafkaConfigError::ParseInt(ref err) => Some(err),
-            _ => None,
-        }
-    }
-}
-impl fmt::Display for KafkaConfigError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            KafkaConfigError::Io(ref err) => write!(f, "IO error: {}", err),
-            KafkaConfigError::ParseInt(ref err) => write!(f, "Parse error: {}", err),
-            KafkaConfigError::Property(ref err) => write!(f, "Property error: {}", err),
-            KafkaConfigError::MissingKeys(ref err) => write!(f, "Missing Key error: {:?}", err),
-            KafkaConfigError::InvalidValue(ref err) => write!(f, "Invalid Value: {}", err),
-            KafkaConfigError::UnknownKey(ref err) => write!(f, "Unknown Key: {}", err),
-            KafkaConfigError::DuplicateKey(ref err) => write!(f, "Duplicate Key: {}", err),
         }
     }
 }
@@ -372,6 +338,9 @@ impl KafkaConfigBuilder {
         self.resolve_zk_session_timeout_ms(&mut kafka_config);
         self.resolve_zk_connection_timeout_ms(&mut kafka_config)?;
         self.resolve_log_dirs(&mut kafka_config)?;
+        if let Some(zk_connect) = &self.zk_connect {
+            kafka_config.zk_connect = zk_connect.to_string();
+        }
         let mut missing_keys: Vec<String> = vec![];
         for (property, property_def) in &self.config_definition {
             if KafkaConfigDefImportance::High == property_def.importance && !property_def.provided {
