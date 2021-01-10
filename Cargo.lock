@@ -801,6 +801,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "rafka_core",
+ "tokio 1.0.1",
  "tracing",
  "tracing-subscriber",
 ]
@@ -819,6 +820,7 @@ dependencies = [
  "thiserror",
  "tokio 1.0.1",
  "tracing",
+ "tracing-attributes",
  "tracing-futures",
  "tracing-log",
  "tracing-subscriber",
