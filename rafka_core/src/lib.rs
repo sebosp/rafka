@@ -5,6 +5,7 @@ extern crate failure;
 extern crate slog_term;
 
 pub mod server;
+pub mod tokio;
 mod utils;
 mod zk;
 mod zookeeper;
