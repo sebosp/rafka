@@ -21,6 +21,7 @@ env_logger = "0.8.2"
 test-env-log = "0.2.3"
 zookeeper-async = "3.0.0"
 thiserror = "1.0"
+fs-err = "2.5"
 
 [dev-dependencies]
 test-env-log = { version = "0.2.3", features = ["trace"] }

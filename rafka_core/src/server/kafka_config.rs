@@ -2,15 +2,12 @@
 /// core/src/main/scala/kafka/server/KafkaConfig.scala
 /// Changes:
 /// - No SSL for now.
-use java_properties::read;
+use fs_err::File;
 use std::collections::HashMap;
-use std::error;
-use std::fmt;
-use std::fs::File;
 use std::io::{self, BufReader};
 use std::num;
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 // Unimplemented:
 // ZkEnableSecureAcls = false
@@ -353,7 +350,7 @@ impl KafkaConfigBuilder {
         Ok(kafka_config)
     }
 }
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 pub struct KafkaConfig {
     pub zk_connect: String,
     pub zk_session_timeout_ms: u32,
@@ -389,19 +386,12 @@ macro_rules! from_property_u32 {
 }
 
 impl KafkaConfig {
-    /// `read_config_from` is the main entry point for configuration from the runner perspective,
-    /// This should be changed to read_to_string().
-    pub fn read_config_from(filename: &str) -> Result<HashMap<String, String>, KafkaConfigError> {
-        // TODO: Should this be moved to the Builder? Use Path Trait instead of &str
-        let mut config_file_content = File::open(&filename)?;
-        read(BufReader::new(&mut config_file_content))
-            .map_err(|err| KafkaConfigError::Property(err))
-    }
-
     /// `get_kafka_config` Reads the kafka config.
     pub fn get_kafka_config(filename: &str) -> Result<Self, KafkaConfigError> {
-        let input_config = KafkaConfig::read_config_from(filename)?;
-        debug!("read_config_from: {}", filename);
+        debug!("read_config_from: Reading {}", filename);
+        let mut config_file_content = File::open(&filename)?;
+        let input_config = java_properties::read(BufReader::new(&mut config_file_content))?;
+        debug!("read_config_from: Converting to HashMap");
         KafkaConfigBuilder::from_properties_hashmap(input_config)?.build()
     }
 }

@@ -356,6 +356,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs-err"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bcd1163ae48bda72a20ae26d66a04d3094135cadab911cff418ae5e33f253431"
+
+[[package]]
 name = "futures"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -812,6 +818,7 @@ version = "0.1.0"
 dependencies = [
  "env_logger 0.8.2",
  "failure",
+ "fs-err",
  "futures",
  "java-properties",
  "slog",
