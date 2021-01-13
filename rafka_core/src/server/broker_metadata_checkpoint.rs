@@ -18,6 +18,7 @@ pub struct BrokerMetadata {
 /// move operations. This .tmp may be left over when the process is killed in the process of
 /// writing the .tmp and previous to move operation, so the first thing before reading is removing
 /// such a file.
+#[derive(Debug)]
 pub struct BrokerMetadataCheckpoint {
     filename: PathBuf,
 }

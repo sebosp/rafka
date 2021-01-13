@@ -3,11 +3,13 @@
 //! RAFKA Specific:
 //! - The tokio executor and the interval tasks will be used instead of this
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
 
+#[derive(Debug)]
 pub struct KafkaScheludedTask;
 
 /// RAFKA TODO: Maybe :Sync?
+#[derive(Debug)]
 pub struct KafkaScheduler {
     /// The name of this task
     name: String,
@@ -16,7 +18,7 @@ pub struct KafkaScheduler {
     /// The period with which to execute the task. If < 0 the task will execute only once.
     period: i32,
     /// An mpsc sender reference to report the completion of task to.
-    tx: Option<tokio::sync::mpsc::Sender<KafkaScheludedTask>>,
+    tx: Option<Sender<KafkaScheludedTask>>,
 }
 // RAFKA Unimplemented:
 // unit The unit for the preceding times, the callers of this function will have to use the

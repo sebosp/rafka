@@ -38,6 +38,7 @@
 // Custom states is also allowed for cases where there are custom kafka states for different
 // scenarios.
 
+#[derive(Debug)]
 pub enum BrokerState {
     NotRunning,                    // 0
     Starting,                      // 1
