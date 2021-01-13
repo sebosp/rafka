@@ -2,11 +2,11 @@
 //! core/src/main/scala/kafka/zookeeper/ZooKeeperClient.scala
 
 // RAFKA TODO: Check if we can do the "pipeline" with the rust libraries
-use crate::utils::kafka_scheduler::KafkaScheduler;
-use futures::future::lazy;
-use zookeeper_async::{Acl, CreateMode, WatchedEvent, Watcher, ZooKeeper};
+
 use crate::server::kafka_config::KafkaConfig;
-use std::collections::HashMap;
+use crate::tokio::{AsyncTask, AsyncTaskError};
+use crate::utils::kafka_scheduler::KafkaScheduler;
+use std::fmt;
 /// RAFKA Specific:
 /// - While the library uses re-entrant locks and concurrent structures extensively, this crate
 ///   will rather use mpsc channels to communicate back and forth and have a main loop.
@@ -14,13 +14,13 @@ use std::collections::HashMap;
 ///   tokio scheduler will be used.
 /// - Need to figure out reconnection to zookeeper
 /// (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
-use std::time::{Instant, Duration};
-use tokio::sync::mpsc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::mpsc::Sender;
+use tracing::info;
+use zookeeper_async::{Acl, CreateMode, WatchedEvent, Watcher, ZooKeeper};
 // TODO: Backtrace
 // use std::backtrace::Backtrace;
-
-use slog::{error, info};
 
 // ZKClientConfig comes from
 // https://zookeeper.apache.org/doc/r3.5.4-beta/api/org/apache/zookeeper/client/ZKClientConfig.html
@@ -52,7 +52,7 @@ impl Watcher for LoggingWatcher {
 #[derive(Error, Debug)]
 pub enum ZooKeeperClientError {
     #[error("IO error {0}")]
-    Io (#[from] std::io::Error),
+    Io(#[from] std::io::Error),
     #[error("Tokio error {0}")]
     Tokio(#[from] tokio::task::JoinError),
     #[error("zookeeper-async error {0}")]
@@ -72,9 +72,6 @@ pub struct ZooKeeperClient {
     /// name name of the client instance
     name: Option<String>,
     time: Instant,
-    /// monitoring related fields
-    metric_group: String,
-    metric_type: String,
     // zk_client_config ZooKeeper client configuration, for TLS configs if desired
     zk_client_config: Option<ZKClientConfig>,
     // RAFKA unimplemented:
@@ -89,7 +86,18 @@ pub struct ZooKeeperClient {
     // zNodeChildChangeHandlers: HashMap<String, C>,
     /// A connection to ZooKeeper.
     zookeeper: Option<ZooKeeper>,
-    logger: slog::Logger,
+}
+
+impl fmt::Debug for ZooKeeperClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ZooKeeperClient")
+            .field("connect_string", &self.connect_string)
+            .field("session_timeout_ms", &self.session_timeout_ms)
+            .field("connection_timeout_ms", &self.connection_timeout_ms)
+            .field("max_in_flight_requests", &self.max_in_flight_requests)
+            .field("zk_client_config", &self.zk_client_config)
+            .finish()
+    }
 }
 
 impl ZooKeeperClient {
@@ -101,7 +109,6 @@ impl ZooKeeperClient {
         time: Instant,
         name: Option<String>,
         zk_client_config: Option<ZKClientConfig>,
-        tx: Option<mpsc::Sender<ZookeeperRequest>>,
     ) -> Self {
         ZooKeeperClient {
             connect_string,
@@ -115,28 +122,38 @@ impl ZooKeeperClient {
             // zNodeChangeHandlers: HashMap::new(),
             // zNodeChildChangeHandlers: HashMap::new(),
             zookeeper: None,
-            logger: crate::utils::default_logger(),
             ..ZooKeeperClient::default()
         }
     }
 
-    pub async fn connect(&mut self) -> Result<(), ZooKeeperClientError> {
-        let handle = tokio::spawn(async move {
-            ZooKeeper::connect(&self.connect_string, Duration::from_millis(self.connection_timeout_ms.into()), LoggingWatcher).await
-        });
-        match handle.await? {
-            Ok(zk) => {
-                // RAFKA TODO: A "default watcher is returned on the connection, figure out what to
-                // do with it
-                info!(self.logger, "Connection to zookeeper successful");
-                self.zookeeper = Some(zk);
-                Ok(())
-            },
-            Err(err) => {
-                error!(self.logger, "Unable to connect to zookeeper: {:?}", err);
-                Err(format!("Unable to connect to zookeeper: {:?}", err))
-            },
+    /// `clone_uninit` creates a copy of Self but with the `zookeeper` field set to None,
+    /// this is useful is a special temporary must be created for a special reason such as
+    /// initializing the chroot paths at first connect
+    pub fn clone_uninit(&self) -> Self {
+        ZooKeeperClient {
+            connect_string: self.connect_string.clone(),
+            name: self.name.clone(),
+            ..*self
         }
+    }
+
+    pub async fn connect(&mut self) -> Result<(), AsyncTaskError> {
+        let zk = ZooKeeper::connect(
+            &self.connect_string,
+            Duration::from_millis(self.connection_timeout_ms.into()),
+            LoggingWatcher,
+        )
+        .await?;
+        info!("Connection to zookeeper successful");
+        self.zookeeper = Some(zk);
+        Ok(())
+    }
+
+    pub async fn make_sure_persistent_path_exists(
+        &self,
+        zk_chroot: &str,
+    ) -> Result<(), AsyncTaskError> {
+
     }
 }
 
@@ -159,11 +176,8 @@ impl Default for ZooKeeperClient {
             connection_timeout_ms: session_timeout_ms,
             max_in_flight_requests: 10,
             time: Instant::now(),
-            metric_group: String::from(""),
-            metric_type: String::from(""),
             name: None,
             zk_client_config: None,
-            logger: crate::utils::default_logger(),
             zookeeper: None,
         }
     }
