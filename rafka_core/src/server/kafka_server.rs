@@ -8,6 +8,7 @@ use crate::server::broker_metadata_checkpoint::BrokerMetadataCheckpoint;
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::kafka_config::KafkaConfig;
+use crate::tokio::{AsyncTask, AsyncTaskError, CoordinatorTask, ZookeeperAsyncTask};
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
@@ -15,33 +16,55 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::mpsc::{channel, Sender};
 use tracing::{debug, info};
+use tracing_attributes::instrument;
+#[derive(Debug)]
 pub struct CountDownLatch(u8);
+#[derive(Debug)]
 pub struct Metrics;
+#[derive(Debug)]
 pub struct KafkaApis;
+#[derive(Debug)]
 pub struct Authorizer;
+#[derive(Debug)]
 pub struct SocketServer;
+#[derive(Debug)]
 pub struct KafkaRequestHandlerPool;
+#[derive(Debug)]
 pub struct LogManager;
+#[derive(Debug)]
 pub struct LogDirFailureChannel;
+#[derive(Debug)]
 pub struct ReplicaManager;
+#[derive(Debug)]
 pub struct AdminManager;
+#[derive(Debug)]
 pub struct DelegationTokenManager;
+#[derive(Debug)]
 pub struct ConfigHandler;
+#[derive(Debug)]
 pub struct DynamicConfigManager;
+#[derive(Debug)]
 pub struct GroupCoordinator;
+#[derive(Debug)]
 pub struct TransactionCoordinator;
+#[derive(Debug)]
 pub struct KafkaController;
+#[derive(Debug)]
 pub struct MetadataCache;
+#[derive(Debug)]
 struct BrokerTopicStats;
+#[derive(Debug)]
 struct FinalizedFeatureChangeListener;
+
+#[derive(Debug)]
 pub struct KafkaServer {
-    startup_complete: Arc<AtomicBool>, // false
-    is_shutting_down: Arc<AtomicBool>, // false
-    is_starting_up: Arc<AtomicBool>,   // false
-
-    shutdown_latch: CountDownLatch, // (1)
-
+    // startup_complete: Arc<AtomicBool>, // false
+    // is_shutting_down: Arc<AtomicBool>, // false
+    // is_starting_up: Arc<AtomicBool>,   // false
+    //
+    // shutdown_latch: CountDownLatch, // (1)
     pub metrics: Option<Metrics>, // was null, changed to Option<>
     // TODO: BrokerState is volatile, nede to make sure we can make its changes sync through the
     // threads
@@ -93,6 +116,8 @@ pub struct KafkaServer {
     _feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
                                                                        * Option<> */
     pub kafka_config: KafkaConfig,
+
+    pub async_task_tx: Sender<AsyncTask>,
 }
 
 // RAFKA Unimplemented:
@@ -105,11 +130,14 @@ pub struct KafkaServer {
 
 impl Default for KafkaServer {
     fn default() -> Self {
+        // TODO: Consider removing this implementation in favor of new() as the channel is basically
+        // unusable
+        let (tx, _rx) = channel(4_096); // TODO: Magic number removal
         KafkaServer {
-            startup_complete: Arc::new(AtomicBool::new(false)),
-            is_shutting_down: Arc::new(AtomicBool::new(false)),
-            is_starting_up: Arc::new(AtomicBool::new(false)),
-            shutdown_latch: CountDownLatch(1),
+            // startup_complete: Arc::new(AtomicBool::new(false)),
+            // is_shutting_down: Arc::new(AtomicBool::new(false)),
+            // is_starting_up: Arc::new(AtomicBool::new(false)),
+            // shutdown_latch: CountDownLatch(1),
             metrics: None,
             broker_state: BrokerState::default(),
             data_plane_request_processor: None,
@@ -140,14 +168,19 @@ impl Default for KafkaServer {
             _feature_change_listener: None,
             init_time: Instant::now(),
             kafka_config: KafkaConfig::default(),
+            async_task_tx: tx,
         }
     }
 }
 
 impl KafkaServer {
     /// `new` creates a new instance, expects a parsed config
-    pub fn new(config: KafkaConfig, time: std::time::Instant) -> Self {
-        let mut kafka_server = KafkaServer::default();
+    pub fn new(
+        config: KafkaConfig,
+        time: std::time::Instant,
+        async_task_tx: Sender<AsyncTask>,
+    ) -> Self {
+        let mut kafka_server = KafkaServer { async_task_tx, ..KafkaServer::default() };
         // TODO: In the future we can implement SSL/etc.
         // In the kotlin code, zkClientConfigFromKafkaConfig is used to build an
         // Option<ZkClientConfig>, it returns None if there's no SSL setup, we are not using SSL so
@@ -167,56 +200,40 @@ impl KafkaServer {
     }
 
     /// Main entry point for this class
-    pub fn startup(&mut self) {
+    pub async fn startup(&mut self) -> Result<(), AsyncTaskError> {
         info!("Starting");
         // These series of if might be pointless and we might get away by using mpsc from a
         // coordinator thread instead of this memory sharing.
         // NOTE: All these Ordering::Relaxed are not currently checked.
-        if self.is_shutting_down.clone().load(Ordering::Relaxed) {
-            panic!("Kafka server is still shutting down, cannot re-start!");
-        }
-        if self.startup_complete.clone().load(Ordering::Relaxed) {
-            return;
-        }
-        let can_startup = self.is_starting_up.compare_and_swap(false, true, Ordering::Relaxed);
-        if can_startup {
-            self.broker_state = BrokerState::Starting;
-            self.init_zk_client();
-        }
+        // if self.is_shutting_down.clone().load(Ordering::Relaxed) {
+        // panic!("Kafka server is still shutting down, cannot re-start!");
+        // }
+        // if self.startup_complete.clone().load(Ordering::Relaxed) {
+        // return;
+        // }
+        // let can_startup = self.is_starting_up.compare_and_swap(false, true, Ordering::Relaxed);
+        // if can_startup {
+        self.broker_state = BrokerState::Starting;
+        self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await?;
+        //}
+        Ok(())
     }
 
-    pub fn init_zk_client(&mut self) {
-        info!("Connecting to zookeeper on {:?}", self.kafka_config.zk_connect);
-        match self.kafka_config.zk_connect.find('/') {
-            Some(chroot_index) => {
-                // make sure chroot path exists
-                let (zk_connect_host_port, zk_chroot) =
-                    self.kafka_config.zk_connect.split_at(chroot_index);
-                debug!("Zookeeper host:port list: {}, chroot: {}", zk_connect_host_port, zk_chroot);
-                let zk_client = self.create_zk_client(zk_connect_host_port);
-                zk_client.make_sure_persistent_path_exists(zk_chroot);
-                info!("Created zookeeper path {}", zk_chroot);
-                // zk_client.close(); TODO Check Drop may be implicit
-            },
-            None => {
-                debug!(
-                    "Zookeeper path does not contain chroot, no need to make sure the path exists"
-                );
-            },
-        };
-        // _zkClient = createZkClient(config.zkConnect, secureAclsEnabled)
-        // _zkClient.createTopLevelPaths()
+    #[instrument]
+    pub async fn init_zk_client(&mut self) -> Result<(), AsyncTaskError> {
+        // NOTE: This has been moved to crate::tokio::async_coordinator as first step before
+        // starting to process messages
+        info!("Sending Connect to zookeeper on {:?}", self.kafka_config.zk_connect);
+        Ok(())
     }
 
     /// Creates a new zk_client for the zk_connect parameter
     fn create_zk_client(&self, zk_connect: &str) -> KafkaZkClient {
         KafkaZkClient::build(
             zk_connect,
-            self.kafka_config.zk_session_timeout_ms,
-            self.kafka_config.zk_connection_timeout_ms,
-            self.kafka_config.zk_max_in_flight_requests,
-            self.init_time,
+            &self.kafka_config,
             Some(String::from("Kafka server")),
+            self.init_time,
             Some(self.zk_client_config),
         )
     }
