@@ -50,19 +50,38 @@ use std::collections::HashMap;
 use std::time::SystemTime;
 
 /// Represents all the entities that can be configured via ZK
-pub enum ConfigType {
-    Topic,  // = "topics"
-    Client, // = "clients"
-    User,   // = "users"
-    Broker, // = "brokers"
-}
-// There's a sequence also created for this
-// val all = Seq(Topic, Client, User, Broker)
-
-pub enum ConfigEntityName {
-    Default(String), // = "<default>"
+#[derive(Debug)]
+pub struct ConfigType {
+    pub topic: &'static str,
+    pub client: &'static str,
+    pub user: &'static str,
+    pub broker: &'static str,
 }
 
+impl ConfigType {
+    // There's a sequence created for this
+    // val all = Seq(Topic, Client, User, Broker)
+    pub fn all(&self) -> Vec<&str> {
+        vec![self.topic, self.client, self.user, self.broker]
+    }
+}
+
+impl Default for ConfigType {
+    fn default() -> Self {
+        ConfigType { topic: "topics", client: "clients", user: "users", broker: "brokers" }
+    }
+}
+
+#[derive(Debug)]
+pub struct ConfigEntityName {
+    default: &'static str,
+}
+impl Default for ConfigEntityName {
+    fn default() -> Self {
+        ConfigEntityName { default: "<default>" }
+    }
+}
+#[derive(Debug)]
 pub struct DynamicConfigManager {
     zk_client: KafkaZkClient,
     config_handlers: HashMap<String, ConfigHandler>,
