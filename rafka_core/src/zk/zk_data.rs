@@ -124,7 +124,7 @@ impl ConfigZNode {
 #[derive(Debug)]
 pub struct ConfigEntityTypeZNode;
 impl ConfigEntityTypeZNode {
-    pub fn path(entity_type: &str) -> &'static str {
+    pub fn path(entity_type: &str) -> String {
         format!("{}/{}", ConfigZNode::path(), entity_type)
     }
 }
@@ -138,9 +138,11 @@ impl Default for ZkData {
             ZNode { path: format!("{}/tokens", delegation_token_auth_znode.path) };
         let config_type = ConfigType::default();
         ZkData {
-            config_entity_type_user: ZNode { path: ConfigEntityTypeZNode::path(&config_type.user) },
+            config_entity_type_user: ZNode {
+                path: &ConfigEntityTypeZNode::path(&config_type.user),
+            },
             config_entity_type_broker: ZNode {
-                path: ConfigEntityTypeZNode::path(&config_type.broker),
+                path: &ConfigEntityTypeZNode::path(&config_type.broker),
             },
             delegation_token_auth_znode,
             delegation_tokens_znode,
