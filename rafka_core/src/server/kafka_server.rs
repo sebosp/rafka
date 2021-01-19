@@ -6,6 +6,7 @@
 
 use crate::server::broker_metadata_checkpoint::BrokerMetadataCheckpoint;
 use crate::server::broker_states::BrokerState;
+use crate::server::dynamic_config_manager::DynamicConfigManager;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::kafka_config::KafkaConfig;
 use crate::tokio::{AsyncTask, AsyncTaskError, CoordinatorTask, ZookeeperAsyncTask};
@@ -43,8 +44,6 @@ pub struct AdminManager;
 pub struct DelegationTokenManager;
 #[derive(Debug)]
 pub struct ConfigHandler;
-#[derive(Debug)]
-pub struct DynamicConfigManager;
 #[derive(Debug)]
 pub struct GroupCoordinator;
 #[derive(Debug)]
