@@ -38,7 +38,9 @@ pub struct ZkData {
 }
 
 impl ZkData {
-    pub fn default_acls(&self, is_secure: bool, path: &str) -> Vec<Acl> {
+    pub fn default_acls(&self, path: &str) -> Vec<Acl> {
+        // NOTE: For now not caring about secure setup
+        let is_secure = false;
         let mut acls: Vec<Acl> = vec![];
         // Old Consumer path is kept open as different consumers will write under this node.
         if self.consumer_path_znode.path != path && is_secure {
