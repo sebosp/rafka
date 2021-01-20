@@ -1,6 +1,5 @@
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::kafka_zk_client::KafkaZkClient;
-use crate::zookeeper::zoo_keeper_client;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -34,6 +33,10 @@ pub enum AsyncTaskError {
     ZooKeeperError(#[from] zookeeper_async::ZkError),
     #[error("Mpsc SendError {0:?}")]
     MpscSendError(#[from] tokio::sync::mpsc::error::SendError<AsyncTask>),
+    #[error("ZooKeeperClientError {0:?}")]
+    ZooKeeperClientError(#[from] crate::zookeeper::zoo_keeper_client::ZooKeeperClientError),
+    #[error("KafkaZkClientError {0:?}")]
+    KafkaZkClientError(#[from] crate::zk::kafka_zk_client::KafkaZkClientError),
 }
 
 // pub async make_sure_persistent_path_exists(String) -> Result<(), AsyncTaskError> {
