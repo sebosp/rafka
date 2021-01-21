@@ -7,6 +7,7 @@
 //! see org.apache.kafka.clients.admin.AdminClient for publicly supported APIs.
 
 use crate::zk::kafka_zk_client::KafkaZkClient;
+#[derive(Debug)]
 pub struct AdminZkClient {
     zk_client: KafkaZkClient,
 }
