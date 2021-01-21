@@ -1,5 +1,6 @@
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::kafka_zk_client::KafkaZkClient;
+use std::error::Error;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -37,6 +38,23 @@ pub enum AsyncTaskError {
     ZooKeeperClientError(#[from] crate::zookeeper::zoo_keeper_client::ZooKeeperClientError),
     #[error("KafkaZkClientError {0:?}")]
     KafkaZkClientError(#[from] crate::zk::kafka_zk_client::KafkaZkClientError),
+}
+
+impl AsyncTaskError {
+    /// `is_zookeeper_async_node_exists` checks that the error belogs to a variant of the crate
+    /// zookeeper_async and that it is the NodeExists variant. This because it seems used a couple
+    /// of times. This should be changed in the future to receive a T that we can try to cast to.
+    pub fn is_zookeeper_async_node_exists(&self) -> bool {
+        if let Some(err) = self.source() {
+            if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
+                match zk_err {
+                    zookeeper_async::ZkError::NodeExists => return true,
+                    _ => return false,
+                }
+            }
+        }
+        false
+    }
 }
 
 // pub async make_sure_persistent_path_exists(String) -> Result<(), AsyncTaskError> {
