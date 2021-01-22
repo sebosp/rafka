@@ -47,7 +47,7 @@ use crate::server::kafka_server::ConfigHandler;
 use crate::zk::admin_zk_client::AdminZkClient;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::Instant;
 
 /// Represents all the entities that can be configured via ZK
 #[derive(Debug)]
@@ -86,6 +86,18 @@ pub struct DynamicConfigManager {
     zk_client: KafkaZkClient,
     config_handlers: HashMap<String, ConfigHandler>,
     change_expiration_ms: u32,      // Long = 15*60*1000,
-    time: SystemTime,               // = Time.SYSTEM
+    time: Instant,                  // = Time.SYSTEM
     admin_zk_client: AdminZkClient, // = new AdminZkClient(zkClient)
+}
+
+impl Default for DynamicConfigManager {
+    fn default() -> Self {
+        DynamicConfigManager {
+            zk_client: KafkaZkClient::default(),
+            config_handlers: HashMap::new(),
+            change_expiration_ms: 15 * 60 * 1000,
+            time: Instant::now(),
+            admin_zk_client: AdminZkClient::default(),
+        }
+    }
 }
