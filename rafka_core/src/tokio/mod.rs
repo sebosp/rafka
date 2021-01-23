@@ -1,6 +1,7 @@
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use std::error::Error;
+use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::debug;
@@ -57,18 +58,23 @@ impl AsyncTaskError {
     }
 }
 
-// pub async make_sure_persistent_path_exists(String) -> Result<(), AsyncTaskError> {
-//
-//
-// }
-
 #[instrument]
 pub async fn async_coordinator(kafka_config: KafkaConfig, mut rx: mpsc::Receiver<AsyncTask>) {
-    debug!("async_coordinator: Starting");
-    debug!("Connecting to ZooKeeper");
-    let mut kafka_zk_client = KafkaZkClient::default();
-    kafka_zk_client.create_chroot_path_if_set(&kafka_config.zk_connect);
+    debug!("async_coordinator: Preparing");
+    let init_time = Instant::now();
+    let mut kafka_zk_client = KafkaZkClient::build(
+        &kafka_config.zk_connect,
+        &kafka_config,
+        Some(String::from("Async Coordinator")),
+        init_time,
+        None,
+    );
+    kafka_zk_client
+        .create_chroot_path_if_set(&kafka_config.zk_connect, &kafka_config)
+        .await
+        .expect("Unable to create zookeeper chroot paths");
     kafka_zk_client.connect().await.unwrap();
+    debug!("async_coordinator: Main loop starting");
     while let Some(message) = rx.recv().await {
         debug!("async_coordinator: message: {:?}", message);
         match message {
