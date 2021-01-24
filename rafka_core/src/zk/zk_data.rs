@@ -5,15 +5,16 @@ use crate::server::dynamic_config_manager::ConfigType;
 use zookeeper_async::Acl;
 // NOTE: Maybe all of this could be moved into a hashmap or something?
 
-/// A ZNode contains a known path or parent path of a node that could be stored in ZK
+/// `ZNode` contains a known path or parent path of a node that could be stored in ZK
 #[derive(Debug)]
 pub struct ZNode {
-    path: &'static str,
+    path: String,
 }
 
+/// `ZkData`  contains a set of known paths in zookeeper
 #[derive(Debug)]
 pub struct ZkData {
-    // old consumer path znode
+    /// old consumer path znode
     consumer_path_znode: ZNode,
     config_entity_type_user: ZNode,
     config_entity_type_broker: ZNode,
@@ -55,7 +56,7 @@ impl ZkData {
     }
 
     pub fn is_sensitive_path(&self, path: &str) -> bool {
-        path != "" // This used to be path != null in scala code
+        !path.is_empty() // This used to be path != null in scala code
             && self.sensitive_root_paths().iter().any(|sensitive_path| path.starts_with(sensitive_path))
     }
 
@@ -99,9 +100,9 @@ impl ZkData {
 
     pub fn sensitive_root_paths(&self) -> Vec<&str> {
         vec![
-            self.config_entity_type_user.path,
-            self.config_entity_type_broker.path,
-            self.delegation_tokens_znode.path,
+            &self.config_entity_type_user.path,
+            &self.config_entity_type_broker.path,
+            &self.delegation_tokens_znode.path,
         ]
     }
 }
@@ -110,16 +111,16 @@ impl ZkData {
 #[derive(Debug)]
 pub struct ConsumerPathZNode;
 impl ConsumerPathZNode {
-    pub fn path() -> &'static str {
-        "/consumers"
+    pub fn path() -> String {
+        String::from("/consumers")
     }
 }
 
 #[derive(Debug)]
 pub struct ConfigZNode;
 impl ConfigZNode {
-    pub fn path() -> &'static str {
-        "/config"
+    pub fn path() -> String {
+        String::from("/config")
     }
 }
 
@@ -133,18 +134,14 @@ impl ConfigEntityTypeZNode {
 
 impl Default for ZkData {
     fn default() -> Self {
-        let mut secure_root_paths = vec![];
-        let mut persistent_zk_paths = vec![];
-        let delegation_token_auth_znode = ZNode { path: "/delegation_token" };
+        let delegation_token_auth_znode = ZNode { path: String::from("/delegation_token") };
         let delegation_tokens_znode =
             ZNode { path: format!("{}/tokens", delegation_token_auth_znode.path) };
         let config_type = ConfigType::default();
         ZkData {
-            config_entity_type_user: ZNode {
-                path: &ConfigEntityTypeZNode::path(&config_type.user),
-            },
+            config_entity_type_user: ZNode { path: ConfigEntityTypeZNode::path(&config_type.user) },
             config_entity_type_broker: ZNode {
-                path: &ConfigEntityTypeZNode::path(&config_type.broker),
+                path: ConfigEntityTypeZNode::path(&config_type.broker),
             },
             delegation_token_auth_znode,
             delegation_tokens_znode,
