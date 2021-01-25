@@ -18,6 +18,7 @@ use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
 use std::error::Error;
 use std::time::Instant;
 use tracing::{debug, error};
+use tracing_attributes::instrument;
 use zookeeper_async::CreateMode;
 
 #[derive(thiserror::Error, Debug)]
@@ -87,7 +88,7 @@ impl KafkaZkClient {
     /// If there is no slash, an error is returned about an InvalidPath
     fn parent_path(path: &str) -> Result<String, KafkaZkClientError> {
         // XXX: Change this to return a slice to avoid creating strings for no good reason.
-        match path.rfind("/") {
+        match path.rfind('/') {
             Some(idx) => {
                 let (parent, _) = path.split_at(idx);
                 Ok(parent.to_string())
@@ -100,13 +101,15 @@ impl KafkaZkClient {
     }
 
     /// zookeeper_async::proto::CreateRequest is private (proto module is not pub)
+    #[instrument]
     async fn retry_request_until_connected(
-        create_request: String,
+        _create_request: String,
     ) -> Result<(), KafkaZkClientError> {
         unimplemented!()
     }
 
     /// `create_looped_0` is a replacement for createRecursive0 from java code.
+    #[instrument]
     async fn create_looped_0(&mut self, path: &str) -> Result<(), AsyncTaskError> {
         // NOTE: This function used to be createRecursive0, but has been transfromed into a loop
         let mut path = path.to_string();
@@ -141,7 +144,14 @@ impl KafkaZkClient {
         Ok(())
     }
 
+    /// `close` closes the connecting to zookeeper
+    #[instrument]
+    pub async fn close(&mut self) -> Result<(), AsyncTaskError> {
+        self.zoo_keeper_client.close().await
+    }
+
     /// `create_looped` is a replacement for createRecursive from java code.
+    #[instrument]
     pub async fn create_looped(
         &mut self,
         path: &str,
@@ -150,7 +160,7 @@ impl KafkaZkClient {
     ) -> Result<(), AsyncTaskError> {
         let create_request = self
             .zoo_keeper_client
-            .create_request(path, vec![], self.zk_data.default_acls(path), CreateMode::Persistent)
+            .create_request(path, data, self.zk_data.default_acls(path), CreateMode::Persistent)
             .await;
         if let Err(err) = create_request {
             if let Some(err) = err.source() {
@@ -181,6 +191,7 @@ impl KafkaZkClient {
     }
 
     /// `make_sure_persistent_path_exists` Make sure a persistent path exists in ZK.
+    #[instrument]
     pub async fn make_sure_persistent_path_exists(
         &mut self,
         path: &str,
@@ -188,28 +199,34 @@ impl KafkaZkClient {
         self.create_looped(path, vec![], false).await
     }
 
+    /// `connect` performs a connection to the underlying zookeeper client
+    #[instrument]
     pub async fn connect(&mut self) -> Result<(), AsyncTaskError> {
         self.zoo_keeper_client.connect().await
     }
 
     /// `create_chroot_path_if_set` is called from the async coordinator before the real connection
     /// done to zookeeper so that the chroot path is checked as persistent.
+    #[instrument]
     pub async fn create_chroot_path_if_set(
         &mut self,
         zk_connect: &str,
+        kafka_config: &KafkaConfig,
     ) -> Result<(), AsyncTaskError> {
         match zk_connect.find('/') {
             Some(chroot_index) => {
                 let (zk_connect_host_port, zk_chroot) = zk_connect.split_at(chroot_index);
                 debug!("Zookeeper host:port list: {}, chroot: {}", zk_connect_host_port, zk_chroot);
-                let mut temp_kafka_zk_client = KafkaZkClient {
-                    zoo_keeper_client: self.zoo_keeper_client.clone_uninit(),
-                    time: self.time,
-                    current_zookeeper_session_id: self.current_zookeeper_session_id,
-                    zk_data: ZkData::default(),
-                };
+                let mut temp_kafka_zk_client = KafkaZkClient::build(
+                    &zk_connect_host_port.to_string(),
+                    kafka_config,
+                    Some(String::from("Chroot Path Handler")),
+                    self.time,
+                    None,
+                );
                 temp_kafka_zk_client.connect().await?;
                 temp_kafka_zk_client.make_sure_persistent_path_exists(zk_chroot).await?;
+                temp_kafka_zk_client.close().await.unwrap();
             },
             None => {
                 debug!(
@@ -218,5 +235,30 @@ impl KafkaZkClient {
             },
         };
         Ok(())
+    }
+
+    /// `create_top_level_paths` ensures the top level paths (on top of the chroot) are created,
+    /// this  requires a connected client.
+    #[instrument]
+    pub async fn create_top_level_paths(&mut self) -> Result<(), AsyncTaskError> {
+        let persistent_paths: Vec<String> = self
+            .zk_data
+            .persistent_zk_paths()
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>();
+        for path in persistent_paths {
+            self.make_sure_persistent_path_exists(&path).await?;
+        }
+        Ok(())
+    }
+
+    /// `init` creates the chroot paths, creates the persistent paths and connects to the chroot-ed
+    /// zookeeper location.
+    #[instrument]
+    pub async fn init(&mut self, kafka_config: &KafkaConfig) -> Result<(), AsyncTaskError> {
+        self.create_chroot_path_if_set(&kafka_config.zk_connect, &kafka_config).await?;
+        self.connect().await?;
+        self.create_top_level_paths().await
     }
 }
