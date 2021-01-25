@@ -151,7 +151,7 @@ impl Default for KafkaServer {
             admin_manager: None,
             token_manager: None,
             dynamic_config_handlers: HashMap::new(),
-            dynamic_config_manager: DynamicConfigManager, // RAFKA TODO: ::default(),
+            dynamic_config_manager: DynamicConfigManager::default(),
             group_coordinator: None,
             transaction_coordinator: None,
             kafka_controller: None,
