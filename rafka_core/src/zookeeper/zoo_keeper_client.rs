@@ -16,8 +16,8 @@ use std::fmt;
 /// (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tokio::sync::mpsc::Sender;
 use tracing::info;
+use tracing_attributes::instrument;
 use zookeeper_async::{Acl, CreateMode, WatchedEvent, Watcher, ZooKeeper};
 // TODO: Backtrace
 // use std::backtrace::Backtrace;
@@ -57,6 +57,8 @@ pub enum ZooKeeperClientError {
     Tokio(#[from] tokio::task::JoinError),
     #[error("zookeeper-async error {0}")]
     ZookeeperAsync(#[from] zookeeper_async::ZkError),
+    #[error("Zookeeper client not Initialized")]
+    NotInitialized,
 }
 
 pub struct ZooKeeperClient {
@@ -122,22 +124,13 @@ impl ZooKeeperClient {
             // zNodeChangeHandlers: HashMap::new(),
             // zNodeChildChangeHandlers: HashMap::new(),
             zookeeper: None,
-            ..ZooKeeperClient::default()
         }
     }
 
-    /// `clone_uninit` creates a copy of Self but with the `zookeeper` field set to None,
-    /// this is useful is a special temporary must be created for a special reason such as
-    /// initializing the chroot paths at first connect
-    pub fn clone_uninit(&self) -> Self {
-        ZooKeeperClient {
-            connect_string: self.connect_string.clone(),
-            name: self.name.clone(),
-            ..*self
-        }
-    }
-
+    /// `connect` peforms a connection to the zookeeper server.
+    #[instrument]
     pub async fn connect(&mut self) -> Result<(), AsyncTaskError> {
+        // NOTE: If zookeeper is not up, then it will continue forever trying to connect
         let zk = ZooKeeper::connect(
             &self.connect_string,
             Duration::from_millis(self.connection_timeout_ms.into()),
@@ -149,11 +142,35 @@ impl ZooKeeperClient {
         Ok(())
     }
 
-    pub async fn make_sure_persistent_path_exists(
+    /// `create_request` Creates an operation request for zookeeper, we do not seem to get a
+    /// create_response, and we seem to be returned a string?
+    #[instrument]
+    pub async fn create_request(
         &self,
-        zk_chroot: &str,
-    ) -> Result<(), AsyncTaskError> {
+        path: &str,
+        data: Vec<u8>,
+        acls: Vec<Acl>,
+        mode: zookeeper_async::CreateMode,
+    ) -> Result<String, AsyncTaskError> {
+        if let Some(zk) = &self.zookeeper {
+            Ok(zk.create(path, data, acls, mode).await?)
+        } else {
+            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+        }
+    }
 
+    /// `close` closes the zookeeper connect if initialized, otherwise returns uninitialized error.
+    /// This error could be disregarded... Maybe
+    #[instrument]
+    pub async fn close(&mut self) -> Result<(), AsyncTaskError> {
+        if let Some(zk) = &self.zookeeper {
+            match zk.close().await {
+                Err(err) => Err(AsyncTaskError::ZooKeeperError(err)),
+                Ok(()) => Ok(()),
+            }
+        } else {
+            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+        }
     }
 }
 
