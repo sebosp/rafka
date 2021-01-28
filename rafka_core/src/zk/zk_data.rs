@@ -11,38 +11,49 @@ pub struct ZNode {
     path: String,
 }
 
+impl Default for ZNode {
+    fn default() -> Self {
+        Self { path: String::from("unset") }
+    }
+}
+
 pub trait ZNodeData {
-    type Data;
-    fn path() -> String;
-    fn decode(input: &str) -> Self;
-    fn encode(self) -> String;
+    fn path(&self) -> &str;
+    // fn decode(input: &str) -> Self;
+    // fn encode(self) -> String;
+}
+
+impl ZNodeData for ZNode {
+    fn path(&self) -> &str {
+        &self.path
+    }
 }
 
 /// `ZkData`  contains a set of known paths in zookeeper
 #[derive(Debug)]
 pub struct ZkData {
     /// old consumer path znode
-    consumer_path_znode: ZNode,
-    config_entity_type_user: ZNode,
-    config_entity_type_broker: ZNode,
-    delegation_token_auth_znode: ZNode,
-    delegation_tokens_znode: ZNode,
-    broker_ids_znode: ZNode,
-    topics_znode: ZNode,
-    config_entity_change_notification_znode: ZNode,
-    delete_topics_znode: ZNode,
-    broker_sequence_id_znode: ZNode,
-    isr_change_notification_znode: ZNode,
-    producer_id_block_znode: ZNode,
-    log_dir_event_notification_znode: ZNode,
+    consumer_path: ConsumerPathZNode,
+    config_entity_type_user: ConfigEntityTypeUserZNode,
+    config_entity_type_broker: ConfigEntityTypeBrokerZNode,
+    delegation_token_auth: DelegationTokenAuthZNode,
+    delegation_tokens: DelegationTokensZNode,
+    broker_ids: ZNode,
+    topics: ZNode,
+    config_entity_change_notification: ConfigEntityChangeNotificationZNode,
+    delete_topics: ZNode,
+    broker_sequence_id: ZNode,
+    isr_change_notification: ZNode,
+    producer_id_block: ZNode,
+    log_dir_event_notification: ZNode,
     config_types: ConfigType,
-    /* admin_znode: ZNode,
-     * brokers_znode: ZNode,
-     * cluster_znode: ZNode,
-     * config_znode: ZNode,
-     * controller_znode: ZNode,
-     * controller_epoch_znode: ZNode,
-     * extended_acl_znode: ZNode,
+    /* admin: ZNode,
+     * brokers: ZNode,
+     * cluster: ZNode,
+     * config: ZNode,
+     * controller: ZNode,
+     * controller_epoch: ZNode,
+     * extended_acl: ZNode,
      */
 }
 
@@ -52,7 +63,7 @@ impl ZkData {
         let is_secure = false;
         let mut acls: Vec<Acl> = vec![];
         // Old Consumer path is kept open as different consumers will write under this node.
-        if self.consumer_path_znode.path != path && is_secure {
+        if self.consumer_path.0.path() != path && is_secure {
             acls.extend_from_slice(Acl::creator_all());
             if !self.is_sensitive_path(path) {
                 acls.extend_from_slice(Acl::read_unsafe());
@@ -72,17 +83,17 @@ impl ZkData {
     pub fn secure_root_paths(&self) -> Vec<&str> {
         unimplemented!();
         // let mut paths = vec![
-        // self.admin_znode.path,
-        // self.brokers_znode.path,
-        // self.cluster_znode.path,
-        // self.config_znode.path,
-        // self.controller_znode.path,
-        // self.controller_epoch_znode.path,
-        // self.isr_change_notification_znode.path,
-        // self.producer_id_block_znode.path,
-        // self.log_dir_event_notification_znode.path,
-        // self.delegation_token_auth_znode.path,
-        // self.extended_acl_znode.path,
+        // self.admin.path,
+        // self.brokers.path,
+        // self.cluster.path,
+        // self.config.path,
+        // self.controller.path,
+        // self.controller_epoch.path,
+        // self.isr_change_notification.path,
+        // self.producer_id_block.path,
+        // self.log_dir_event_notification.path,
+        // self.delegation_token_auth.path,
+        // self.extended_acl.path,
         // ];
         // paths.extend_from_slice(&ZkAclStore.securePaths);
         // paths
@@ -91,15 +102,15 @@ impl ZkData {
     // These are persistent ZK paths that should exist on kafka broker startup.
     pub fn persistent_zk_paths(&self) -> Vec<&str> {
         let mut paths: Vec<&str> = vec![
-            &self.consumer_path_znode.path, // old consumer path
-            &self.broker_ids_znode.path,
-            &self.topics_znode.path,
-            &self.config_entity_change_notification_znode.path,
-            &self.delete_topics_znode.path,
-            &self.broker_sequence_id_znode.path,
-            &self.isr_change_notification_znode.path,
-            &self.producer_id_block_znode.path,
-            &self.log_dir_event_notification_znode.path,
+            &self.consumer_path.0.path, // old consumer path
+            &self.broker_ids.path,
+            &self.topics.path,
+            &self.config_entity_change_notification.0.path(),
+            &self.delete_topics.path,
+            &self.broker_sequence_id.path,
+            &self.isr_change_notification.path,
+            &self.producer_id_block.path,
+            &self.log_dir_event_notification.path,
         ];
         for path in self.config_types.all() {
             paths.push(&path);
@@ -109,93 +120,128 @@ impl ZkData {
 
     pub fn sensitive_root_paths(&self) -> Vec<&str> {
         vec![
-            &self.config_entity_type_user.path,
-            &self.config_entity_type_broker.path,
-            &self.delegation_tokens_znode.path,
+            &self.config_entity_type_user.0.path,
+            &self.config_entity_type_broker.0.path,
+            &self.delegation_tokens.0.path(),
         ]
     }
 }
 
 // old consumer path znode
 #[derive(Debug)]
-pub struct ConsumerPathZNode;
-impl ConsumerPathZNode {
-    pub fn path() -> String {
-        String::from("/consumers")
+pub struct ConsumerPathZNode(ZNode);
+impl Default for ConsumerPathZNode {
+    fn default() -> Self {
+        Self(ZNode { path: String::from("/consumers") })
     }
 }
 
 #[derive(Debug)]
-pub struct ConfigZNode;
-impl ConfigZNode {
-    pub fn path() -> String {
-        String::from("/config")
+pub struct ConfigZNode(ZNode);
+impl Default for ConfigZNode {
+    fn default() -> Self {
+        Self(ZNode { path: String::from("/config") })
     }
 }
 
 #[derive(Debug)]
-pub struct BrokersZNode;
-impl BrokersZNode {
-    pub fn path() -> String {
-        String::from("/brokers")
+pub struct BrokersZNode(ZNode);
+impl Default for BrokersZNode {
+    fn default() -> Self {
+        Self(ZNode { path: String::from("/brokers") })
     }
 }
 
 #[derive(Debug)]
-pub struct BrokerIdZNode;
+pub struct BrokerIdZNode(ZNode);
 impl BrokerIdZNode {
-    pub fn path() -> String {
-        format!("{}/ids", BrokersZNode::path())
+    pub fn build(brokers_znode: &BrokersZNode) -> Self {
+        Self(ZNode { path: format!("{}/ids", brokers_znode.0.path()) })
     }
 }
 
 #[derive(Debug)]
-pub struct TopicsZNode;
+pub struct TopicsZNode(ZNode);
 impl TopicsZNode {
-    pub fn path() -> String {
-        format!("{}/topics", BrokersZNode::path())
+    pub fn build(brokers_znode: &BrokersZNode) -> Self {
+        Self(ZNode { path: format!("{}/topics", brokers_znode.0.path()) })
     }
 }
 
 #[derive(Debug)]
-pub struct ConfigEntityTypeZNode;
-impl ConfigEntityTypeZNode {
-    pub fn path(entity_type: &str) -> String {
-        format!("{}/{}", ConfigZNode::path(), entity_type)
+pub struct ConfigEntityTypeUserZNode(ZNode);
+impl ConfigEntityTypeUserZNode {
+    pub fn build(config_znode: &ConfigZNode, config_type: &ConfigType) -> Self {
+        Self(ZNode { path: format!("{}/{}", config_znode.0.path(), config_type.user) })
+    }
+}
+
+#[derive(Debug)]
+pub struct ConfigEntityTypeBrokerZNode(ZNode);
+impl ConfigEntityTypeBrokerZNode {
+    pub fn build(config_znode: &ConfigZNode, config_type: &ConfigType) -> Self {
+        Self(ZNode { path: format!("{}/{}", config_znode.0.path(), config_type.broker) })
+    }
+}
+
+#[derive(Debug)]
+pub struct ConfigEntityChangeNotificationZNode(ZNode);
+impl ConfigEntityChangeNotificationZNode {
+    pub fn build(config_znode: &ConfigZNode) -> Self {
+        Self(ZNode { path: format!("{}/changes", config_znode.0.path()) })
+    }
+}
+
+#[derive(Debug)]
+pub struct DelegationTokenAuthZNode(ZNode);
+impl Default for DelegationTokenAuthZNode {
+    fn default() -> Self {
+        Self(ZNode { path: String::from("/delegation_token") })
+    }
+}
+
+#[derive(Debug)]
+pub struct DelegationTokensZNode(ZNode);
+impl DelegationTokensZNode {
+    pub fn build(delegation_token_auth: &DelegationTokenAuthZNode) -> Self {
+        Self(ZNode { path: format!("{}/tokens", delegation_token_auth.0.path()) })
     }
 }
 
 impl Default for ZkData {
     fn default() -> Self {
-        let delegation_token_auth_znode = ZNode { path: String::from("/delegation_token") };
-        let delegation_tokens_znode =
-            ZNode { path: format!("{}/tokens", delegation_token_auth_znode.path) };
-        let config_type = ConfigType::default();
-        let broker_ids_znode = BrokerIdZNode::path();
-        let topics_znode = TopicsZNode::path();
-        let config_entity_change_notification_znode = ZNode { path: String::from("unset") };
-        let delete_topics_znode = ZNode { path: String::from("unset") };
-        let broker_sequence_id_znode = ZNode { path: String::from("unset") };
-        let isr_change_notification_znode = ZNode { path: String::from("unset") };
-        let producer_id_block_znode = ZNode { path: String::from("unset") };
-        let log_dir_event_notification_znode = ZNode { path: String::from("unset") };
         let config_types = ConfigType::default();
+        let config_znode = ConfigZNode::default();
+        let brokers_znode = BrokersZNode::default();
+        let delegation_token_auth = DelegationTokenAuthZNode::default();
+        let delegation_tokens = DelegationTokensZNode::build(&delegation_token_auth);
+        let broker_ids = BrokerIdZNode::build(&brokers_znode);
+        let topics = TopicsZNode::build(&brokers_znode);
+        let config_entity_change_notification =
+            ConfigEntityChangeNotificationZNode::build(&config_znode);
+        let delete_topics = ZNode { path: String::from("unset") };
+        let broker_sequence_id = ZNode { path: String::from("unset") };
+        let isr_change_notification = ZNode { path: String::from("unset") };
+        let producer_id_block = ZNode { path: String::from("unset") };
+        let log_dir_event_notification = ZNode { path: String::from("unset") };
+        let config_entity_type_user =
+            ConfigEntityTypeUserZNode::build(&config_znode, &config_types);
+        let config_entity_type_broker =
+            ConfigEntityTypeBrokerZNode::build(&config_znode, &config_types);
         ZkData {
-            config_entity_type_user: ZNode { path: ConfigEntityTypeZNode::path(&config_type.user) },
-            config_entity_type_broker: ZNode {
-                path: ConfigEntityTypeZNode::path(&config_type.broker),
-            },
-            delegation_token_auth_znode,
-            delegation_tokens_znode,
-            consumer_path_znode: ZNode { path: ConsumerPathZNode::path() },
-            broker_ids_znode,
-            topics_znode,
-            config_entity_change_notification_znode,
-            delete_topics_znode,
-            broker_sequence_id_znode,
-            isr_change_notification_znode,
-            producer_id_block_znode,
-            log_dir_event_notification_znode,
+            config_entity_type_user,
+            config_entity_type_broker,
+            delegation_token_auth,
+            delegation_tokens,
+            consumer_path: ConsumerPathZNode::default(),
+            broker_ids: broker_ids.0,
+            topics: topics.0,
+            config_entity_change_notification,
+            delete_topics,
+            broker_sequence_id,
+            isr_change_notification,
+            producer_id_block,
+            log_dir_event_notification,
             config_types,
         }
     }
