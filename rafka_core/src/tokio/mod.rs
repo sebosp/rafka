@@ -69,11 +69,7 @@ pub async fn async_coordinator(kafka_config: KafkaConfig, mut rx: mpsc::Receiver
         init_time,
         None,
     );
-    kafka_zk_client
-        .create_chroot_path_if_set(&kafka_config.zk_connect, &kafka_config)
-        .await
-        .expect("Unable to create zookeeper chroot paths");
-    kafka_zk_client.connect().await.unwrap();
+    kafka_zk_client.init(&kafka_config).await.unwrap();
     debug!("async_coordinator: Main loop starting");
     while let Some(message) = rx.recv().await {
         debug!("async_coordinator: message: {:?}", message);
@@ -85,5 +81,6 @@ pub async fn async_coordinator(kafka_config: KafkaConfig, mut rx: mpsc::Receiver
             },
         }
     }
+    kafka_zk_client.close().await.unwrap();
     error!("async_coordinator: Exiting.");
 }
