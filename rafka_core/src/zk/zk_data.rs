@@ -41,14 +41,14 @@ pub struct ZkData {
     broker_ids: ZNode,
     topics: ZNode,
     config_entity_change_notification: ConfigEntityChangeNotificationZNode,
-    delete_topics: ZNode,
-    broker_sequence_id: ZNode,
-    isr_change_notification: ZNode,
+    delete_topics: DeleteTopicsZNode,
+    broker_sequence_id: BrokerSequenceIdZNode,
+    isr_change_notification: IsrChangeNotificationZNode,
     producer_id_block: ZNode,
     log_dir_event_notification: ZNode,
     config_types: ConfigType,
-    /* admin: ZNode,
-     * brokers: ZNode,
+    admin: AdminZNode,
+    /* brokers: ZNode,
      * cluster: ZNode,
      * config: ZNode,
      * controller: ZNode,
@@ -106,9 +106,9 @@ impl ZkData {
             &self.broker_ids.path,
             &self.topics.path,
             &self.config_entity_change_notification.0.path(),
-            &self.delete_topics.path,
-            &self.broker_sequence_id.path,
-            &self.isr_change_notification.path,
+            &self.delete_topics.0.path(),
+            &self.broker_sequence_id.0.path(),
+            &self.isr_change_notification.0.path(),
             &self.producer_id_block.path,
             &self.log_dir_event_notification.path,
         ];
@@ -127,15 +127,7 @@ impl ZkData {
     }
 }
 
-// old consumer path znode
-#[derive(Debug)]
-pub struct ConsumerPathZNode(ZNode);
-impl Default for ConsumerPathZNode {
-    fn default() -> Self {
-        Self(ZNode { path: String::from("/consumers") })
-    }
-}
-
+// source line: 70
 #[derive(Debug)]
 pub struct ConfigZNode(ZNode);
 impl Default for ConfigZNode {
@@ -144,6 +136,7 @@ impl Default for ConfigZNode {
     }
 }
 
+// source line: 74
 #[derive(Debug)]
 pub struct BrokersZNode(ZNode);
 impl Default for BrokersZNode {
@@ -152,6 +145,7 @@ impl Default for BrokersZNode {
     }
 }
 
+// source line: 78
 #[derive(Debug)]
 pub struct BrokerIdZNode(ZNode);
 impl BrokerIdZNode {
@@ -160,6 +154,7 @@ impl BrokerIdZNode {
     }
 }
 
+// source line: 281
 #[derive(Debug)]
 pub struct TopicsZNode(ZNode);
 impl TopicsZNode {
@@ -168,6 +163,7 @@ impl TopicsZNode {
     }
 }
 
+// source line: 361 (based on)
 #[derive(Debug)]
 pub struct ConfigEntityTypeUserZNode(ZNode);
 impl ConfigEntityTypeUserZNode {
@@ -176,6 +172,7 @@ impl ConfigEntityTypeUserZNode {
     }
 }
 
+// source line: 361 (based on)
 #[derive(Debug)]
 pub struct ConfigEntityTypeBrokerZNode(ZNode);
 impl ConfigEntityTypeBrokerZNode {
@@ -184,6 +181,7 @@ impl ConfigEntityTypeBrokerZNode {
     }
 }
 
+// source line: 382
 #[derive(Debug)]
 pub struct ConfigEntityChangeNotificationZNode(ZNode);
 impl ConfigEntityChangeNotificationZNode {
@@ -192,6 +190,44 @@ impl ConfigEntityChangeNotificationZNode {
     }
 }
 
+// source line: 393
+#[derive(Debug)]
+pub struct IsrChangeNotificationZNode(ZNode);
+impl Default for IsrChangeNotificationZNode {
+    fn default() -> Self {
+        Self(ZNode { path: String::from("/isr_change_notification") })
+    }
+}
+
+// source line: 436
+#[derive(Debug)]
+pub struct AdminZNode(ZNode);
+impl Default for AdminZNode {
+    fn default() -> Self {
+        Self(ZNode { path: String::from("/admin") })
+    }
+}
+
+// source line: 440
+#[derive(Debug)]
+pub struct DeleteTopicsZNode(ZNode);
+impl DeleteTopicsZNode {
+    pub fn build(admin_znode: &AdminZNode) -> Self {
+        Self(ZNode { path: format!("{}/delete_topics", admin_znode.0.path()) })
+    }
+}
+
+// old consumer path znode
+// source line: 511
+#[derive(Debug)]
+pub struct ConsumerPathZNode(ZNode);
+impl Default for ConsumerPathZNode {
+    fn default() -> Self {
+        Self(ZNode { path: String::from("/consumers") })
+    }
+}
+
+// source line: 762
 #[derive(Debug)]
 pub struct DelegationTokenAuthZNode(ZNode);
 impl Default for DelegationTokenAuthZNode {
@@ -200,6 +236,16 @@ impl Default for DelegationTokenAuthZNode {
     }
 }
 
+// source line: 754
+#[derive(Debug)]
+pub struct BrokerSequenceIdZNode(ZNode);
+impl BrokerSequenceIdZNode {
+    pub fn build(brokers_znode: &BrokersZNode) -> Self {
+        Self(ZNode { path: format!("{}/seqid", brokers_znode.0.path()) })
+    }
+}
+
+// source line: 778
 #[derive(Debug)]
 pub struct DelegationTokensZNode(ZNode);
 impl DelegationTokensZNode {
@@ -213,15 +259,16 @@ impl Default for ZkData {
         let config_types = ConfigType::default();
         let config_znode = ConfigZNode::default();
         let brokers_znode = BrokersZNode::default();
+        let admin_znode = AdminZNode::default();
         let delegation_token_auth = DelegationTokenAuthZNode::default();
         let delegation_tokens = DelegationTokensZNode::build(&delegation_token_auth);
         let broker_ids = BrokerIdZNode::build(&brokers_znode);
         let topics = TopicsZNode::build(&brokers_znode);
         let config_entity_change_notification =
             ConfigEntityChangeNotificationZNode::build(&config_znode);
-        let delete_topics = ZNode { path: String::from("unset") };
-        let broker_sequence_id = ZNode { path: String::from("unset") };
-        let isr_change_notification = ZNode { path: String::from("unset") };
+        let delete_topics = DeleteTopicsZNode::build(&admin_znode);
+        let broker_sequence_id = BrokerSequenceIdZNode::build(&brokers_znode);
+        let isr_change_notification = IsrChangeNotificationZNode::default();
         let producer_id_block = ZNode { path: String::from("unset") };
         let log_dir_event_notification = ZNode { path: String::from("unset") };
         let config_entity_type_user =
@@ -233,6 +280,7 @@ impl Default for ZkData {
             config_entity_type_broker,
             delegation_token_auth,
             delegation_tokens,
+            admin: admin_znode,
             consumer_path: ConsumerPathZNode::default(),
             broker_ids: broker_ids.0,
             topics: topics.0,
