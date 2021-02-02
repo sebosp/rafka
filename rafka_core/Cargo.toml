@@ -23,6 +23,9 @@ zookeeper-async = "4.0.0"
 thiserror = "1.0"
 fs-err = "2.5"
 
+[dependencies.rafka_derive]
+path = "../rafka_derive"
+
 [dev-dependencies]
 test-env-log = { version = "0.2.3", features = ["trace"] }
 env_logger = "0.8.2"

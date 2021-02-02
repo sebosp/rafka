@@ -809,6 +809,7 @@ dependencies = [
  "fs-err",
  "futures",
  "java-properties",
+ "rafka_derive",
  "slog",
  "slog-term",
  "test-env-log",
@@ -820,6 +821,14 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "zookeeper-async",
+]
+
+[[package]]
+name = "rafka_derive"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn",
 ]
 
 [[package]]
