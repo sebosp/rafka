@@ -8,6 +8,7 @@ use crate::server::broker_metadata_checkpoint::BrokerMetadataCheckpoint;
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
+use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
 use crate::server::kafka_config::KafkaConfig;
 use crate::tokio::{AsyncTask, AsyncTaskError, CoordinatorTask, ZookeeperAsyncTask};
 use crate::utils::kafka_scheduler::KafkaScheduler;
@@ -54,8 +55,6 @@ pub struct KafkaController;
 pub struct MetadataCache;
 #[derive(Debug)]
 struct BrokerTopicStats;
-#[derive(Debug)]
-struct FinalizedFeatureChangeListener;
 
 #[derive(Debug)]
 pub struct KafkaServer {
@@ -112,8 +111,8 @@ pub struct KafkaServer {
     _cluster_id: Option<String>, // was null, changed to Option<>
     _broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>$
 
-    _feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
-                                                                       * Option<> */
+    feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
+                                                                      * Option<> */
     pub kafka_config: KafkaConfig,
 
     pub async_task_tx: Sender<AsyncTask>,
@@ -214,6 +213,11 @@ impl KafkaServer {
         // if can_startup {
         self.broker_state = BrokerState::Starting;
         self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await?;
+        self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));
+        // if (config.isFeatureVersioningEnabled) {
+        //    _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
+        //}
+
         //}
         Ok(())
     }
