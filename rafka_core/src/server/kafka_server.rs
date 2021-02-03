@@ -163,7 +163,7 @@ impl Default for KafkaServer {
             broker_metadata_checkpoints: HashMap::new(),
             _cluster_id: None,
             _broker_topic_stats: None,
-            _feature_change_listener: None,
+            feature_change_listener: None,
             init_time: Instant::now(),
             kafka_config: KafkaConfig::default(),
             async_task_tx: tx,
@@ -213,7 +213,9 @@ impl KafkaServer {
         // if can_startup {
         self.broker_state = BrokerState::Starting;
         self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await?;
-        self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));
+        // TODO: Either move this to the async-coordinator or use the tx field to create the
+        // listeners for FinalizedFeatureChangeListener
+        // self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));
         // if (config.isFeatureVersioningEnabled) {
         //    _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
         //}
