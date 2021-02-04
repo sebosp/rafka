@@ -46,29 +46,35 @@
 use crate::server::kafka_server::ConfigHandler;
 use crate::zk::admin_zk_client::AdminZkClient;
 use crate::zk::kafka_zk_client::KafkaZkClient;
+use crate::zk::zk_data::{ConfigZNode, ZNodeHandle};
 use std::collections::HashMap;
 use std::time::Instant;
 
 /// Represents all the entities that can be configured via ZK
 #[derive(Debug)]
 pub struct ConfigType {
-    pub topic: &'static str,
-    pub client: &'static str,
-    pub user: &'static str,
-    pub broker: &'static str,
+    pub topic: String,
+    pub client: String,
+    pub user: String,
+    pub broker: String,
 }
 
 impl ConfigType {
     // There's a sequence created for this
     // val all = Seq(Topic, Client, User, Broker)
     pub fn all(&self) -> Vec<&str> {
-        vec![self.topic, self.client, self.user, self.broker]
+        vec![&self.topic, &self.client, &self.user, &self.broker]
     }
 }
 
-impl Default for ConfigType {
-    fn default() -> Self {
-        ConfigType { topic: "topics", client: "clients", user: "users", broker: "brokers" }
+impl ConfigType {
+    pub fn build(config_znode: &ConfigZNode) -> Self {
+        Self {
+            topic: format!("{}/topics", config_znode.path()),
+            client: format!("{}/clients", config_znode.path()),
+            user: format!("{}/users", config_znode.path()),
+            broker: format!("{}/brokers", config_znode.path()),
+        }
     }
 }
 
