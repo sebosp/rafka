@@ -206,7 +206,7 @@ impl KafkaZkClient {
     }
 
     /// `create_chroot_path_if_set` is called from the async coordinator before the real connection
-    /// done to zookeeper so that the chroot path is checked as persistent.
+    /// done to zookeeper so that the chroot path is initalized as persistent.
     #[instrument]
     pub async fn create_chroot_path_if_set(
         &mut self,
