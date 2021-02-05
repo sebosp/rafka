@@ -4,41 +4,41 @@
 //! Broker states are the possible state that a kafka broker can be in.
 //! A broker should be only in one state at a time.
 //! The expected state transition with the following defined states is:
-//!
-//!                +-----------+
-//!                |Not Running|
-//!                +-----+-----+
-//!                      |
-//!                      v
-//!                +-----+-----+
-//!                |Starting   +--+
-//!                +-----+-----+  | +----+------------+
-//!                      |        +>+RecoveringFrom   |
-//!                      v          |UncleanShutdown  |
-//!               +-------+-------+ +-------+---------+
-//!               |RunningAsBroker|            |
-//!               +-------+-------+<-----------+
-//!                       |
-//!                       v
-//!                +-----+------------+
-//!                |PendingControlled |
-//!                |Shutdown          |
-//!                +-----+------------+
-//!                      |
-//!                      v
-//!               +-----+----------+
-//!               |BrokerShutting  |
-//!               |Down            |
-//!               +-----+----------+
-//!                     |
-//!                     v
-//!               +-----+-----+
-//!               |Not Running|
-//!               +-----------+
-//!
-//! Custom states is also allowed for cases where there are custom kafka states for different
-//! scenarios.
+//                +-----------+
+//                |Not Running|
+//                +-----+-----+
+//                      |
+//                      v
+//                +-----+-----+
+//                |Starting   +--+
+//                +-----+-----+  | +----+------------+
+//                      |        +>+RecoveringFrom   |
+//                      v          |UncleanShutdown  |
+//               +-------+-------+ +-------+---------+
+//               |RunningAsBroker|            |
+//               +-------+-------+<-----------+
+//                       |
+//                       v
+//                +-----+------------+
+//                |PendingControlled |
+//                |Shutdown          |
+//                +-----+------------+
+//                      |
+//                      v
+//               +-----+----------+
+//               |BrokerShutting  |
+//               |Down            |
+//               +-----+----------+
+//                     |
+//                     v
+//               +-----+-----+
+//               |Not Running|
+//               +-----------+
+//
+// Custom states is also allowed for cases where there are custom kafka states for different
+// scenarios.
 
+#[derive(Debug)]
 pub enum BrokerState {
     NotRunning,                    // 0
     Starting,                      // 1
@@ -55,3 +55,5 @@ impl Default for BrokerState {
         BrokerState::NotRunning
     }
 }
+
+// TODO: Impl from_u8 and to_u8

@@ -43,28 +43,67 @@
 //! but avoids any race conditions  on startup where a change might be missed between the initial
 //! config load and registering for change notifications.
 
-use crate::server::rafka_server::{KafkaZkClient, ConfigHandler};
+use crate::server::kafka_server::ConfigHandler;
 use crate::zk::admin_zk_client::AdminZkClient;
+use crate::zk::kafka_zk_client::KafkaZkClient;
+use crate::zk::zk_data::{ConfigZNode, ZNodeHandle};
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::Instant;
 
 /// Represents all the entities that can be configured via ZK
-pub enum ConfigType {
-    Topic,  // = "topics"
-    Client, // = "clients"
-    User,   // = "users"
-    Broker, // = "brokers"
-    /* val all = Seq(Topic, Client, User, Broker) */
+#[derive(Debug)]
+pub struct ConfigType {
+    pub topic: String,
+    pub client: String,
+    pub user: String,
+    pub broker: String,
 }
 
-pub enum ConfigEntityName {
-    Default(String), // = "<default>"
+impl ConfigType {
+    // There's a sequence created for this
+    // val all = Seq(Topic, Client, User, Broker)
+    pub fn all(&self) -> Vec<&str> {
+        vec![&self.topic, &self.client, &self.user, &self.broker]
+    }
 }
 
-pub struct DynamicConfigManager{
+impl ConfigType {
+    pub fn build(config_znode: &ConfigZNode) -> Self {
+        Self {
+            topic: format!("{}/topics", config_znode.path()),
+            client: format!("{}/clients", config_znode.path()),
+            user: format!("{}/users", config_znode.path()),
+            broker: format!("{}/brokers", config_znode.path()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ConfigEntityName {
+    default: &'static str,
+}
+impl Default for ConfigEntityName {
+    fn default() -> Self {
+        ConfigEntityName { default: "<default>" }
+    }
+}
+#[derive(Debug)]
+pub struct DynamicConfigManager {
     zk_client: KafkaZkClient,
     config_handlers: HashMap<String, ConfigHandler>,
-    change_expirationMs: u32, // Long = 15*60*1000,
-    time: SystemTime, // = Time.SYSTEM
-    adminZkClient = new AdminZkClient(zkClient)
+    change_expiration_ms: u32,      // Long = 15*60*1000,
+    time: Instant,                  // = Time.SYSTEM
+    admin_zk_client: AdminZkClient, // = new AdminZkClient(zkClient)
+}
 
+impl Default for DynamicConfigManager {
+    fn default() -> Self {
+        DynamicConfigManager {
+            zk_client: KafkaZkClient::default(),
+            config_handlers: HashMap::new(),
+            change_expiration_ms: 15 * 60 * 1000,
+            time: Instant::now(),
+            admin_zk_client: AdminZkClient::default(),
+        }
+    }
+}

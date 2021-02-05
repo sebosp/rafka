@@ -1,13 +1,12 @@
 #![warn(rust_2018_idioms)]
-extern crate tokio;
 #[macro_use]
 extern crate failure;
-extern crate tokio_zookeeper;
+#[macro_use]
+extern crate slog_term;
 
-use tokio::prelude::*;
-use tokio_zookeeper::*;
-
-mod server;
+pub mod server;
+pub mod tokio;
+mod utils;
 mod zk;
 mod zookeeper;
 #[cfg(test)]
