@@ -62,7 +62,8 @@ pub enum ZooKeeperClientError {
 }
 
 pub struct ZooKeeperClient {
-    /// `connect_string` comma separated host:port pairs, each corresponding to a zk server
+    /// `connect_string` comma separated host:port pairs, each corresponding to a zk server, may
+    /// contain a /chroot path
     connect_string: String,
     /// `session_timeout_ms` session timeout in milliseconds
     session_timeout_ms: u32,
