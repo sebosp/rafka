@@ -257,6 +257,41 @@ impl DelegationTokensZNode {
     }
 }
 
+// source line: 854
+#[derive(Debug)]
+pub enum FeatureZNodeVersion {
+    V1(u32),
+}
+
+impl FeatureZNodeVersion {
+    // V1 contains 'version', 'status' and 'features' keys.
+    pub fn v1() -> Self {
+        FeatureZNodeVersion::V1(1)
+    }
+}
+
+// source line: 854
+#[derive(Debug)]
+pub struct FeatureZNode {
+    path: ZNode,
+    version_key: String,
+    status_key: String,
+    features_key: String,
+    current_version: FeatureZNodeVersion,
+}
+
+impl FeatureZNode {
+    pub fn build() -> Self {
+        Self {
+            path: ZNode { path: String::from("/feature") },
+            version_key: String::from("version"),
+            status_key: String::from("status"),
+            features_key: String::from("features"),
+            current_version: FeatureZNodeVersion::v1(),
+        }
+    }
+}
+
 impl Default for ZkData {
     fn default() -> Self {
         let config = ConfigZNode::build();
