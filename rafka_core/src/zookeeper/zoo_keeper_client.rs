@@ -202,13 +202,11 @@ impl Default for ZooKeeperClient {
 }
 
 pub trait ZNodeChangeHandler {
-    type Path;
     fn handle_creation();
     fn handle_deletion();
     fn handle_data_change();
 }
 
 pub trait ZNodeChildChangeHandler {
-    type Path;
     fn handle_child_change();
 }
