@@ -305,6 +305,8 @@ impl DelegationTokensZNode {
 ///    system (KIP-584). In this case, when the controller starts up with the lower IBP config, it
 ///    will switch the FeatureZNode status to disabled with empty features.
 
+// source line: 837
+#[derive(Debug)]
 pub enum FeatureZNodeStatus {
     Disabled,
     Enabled,
@@ -333,7 +335,13 @@ impl FeatureZNodeVersion {
     }
 }
 
+// TODO: for now just an empty struct, later should be implemented from
+// clients/src/main/java/org/apache/kafka/common/feature/Features.java
+#[derive(Debug)]
+pub struct Features;
+
 // source line: 854
+/// `FeatureZNode`  Represents the contents of the ZK node containing finalized feature information.
 #[derive(Debug)]
 pub struct FeatureZNode {
     path: ZNode,
@@ -341,16 +349,20 @@ pub struct FeatureZNode {
     status_key: String,
     features_key: String,
     current_version: FeatureZNodeVersion,
+    status: FeatureZNodeStatus,
+    features: Vec<Features>,
 }
 
 impl FeatureZNode {
-    pub fn build() -> Self {
+    pub fn build(status: FeatureZNodeStatus, features: Vec<Features>) -> Self {
         Self {
             path: ZNode { path: String::from("/feature") },
             version_key: String::from("version"),
             status_key: String::from("status"),
             features_key: String::from("features"),
             current_version: FeatureZNodeVersion::v1(),
+            status,
+            features,
         }
     }
 }
