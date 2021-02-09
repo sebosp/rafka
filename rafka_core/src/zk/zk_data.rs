@@ -342,9 +342,9 @@ pub struct Features;
 
 // source line: 854
 /// `FeatureZNode`  Represents the contents of the ZK node containing finalized feature information.
-#[derive(Debug)]
+#[derive(Debug, ZNodeHandle)]
 pub struct FeatureZNode {
-    path: ZNode,
+    path: String,
     version_key: String,
     status_key: String,
     features_key: String,
@@ -356,7 +356,7 @@ pub struct FeatureZNode {
 impl FeatureZNode {
     pub fn build(status: FeatureZNodeStatus, features: Vec<Features>) -> Self {
         Self {
-            path: ZNode { path: String::from("/feature") },
+            path: String::from("/feature"),
             version_key: String::from("version"),
             status_key: String::from("status"),
             features_key: String::from("features"),
