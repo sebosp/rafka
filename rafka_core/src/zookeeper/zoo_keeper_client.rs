@@ -210,3 +210,9 @@ pub trait ZNodeChangeHandler {
 pub trait ZNodeChildChangeHandler {
     fn handle_child_change();
 }
+
+pub trait StateChangeHandler {
+    fn before_initializing_session();
+    fn after_initializing_session();
+    // fn on_auth_failure();
+}
