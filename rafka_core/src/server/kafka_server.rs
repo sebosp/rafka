@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info};
 use tracing_attributes::instrument;
 #[derive(Debug)]
@@ -115,7 +115,10 @@ pub struct KafkaServer {
                                                                       * Option<> */
     pub kafka_config: KafkaConfig,
 
-    pub async_task_tx: Sender<AsyncTask>,
+    /// `async_task_tx` contains a handle to send taskt to the tokio async_coordinator
+    pub async_task_tx: mpsc::Sender<AsyncTask>,
+
+    pub shutdown_rx: oneshot::Receiver<()>,
 }
 
 // RAFKA Unimplemented:
@@ -130,7 +133,8 @@ impl Default for KafkaServer {
     fn default() -> Self {
         // TODO: Consider removing this implementation in favor of new() as the channel is basically
         // unusable
-        let (tx, _rx) = channel(4_096); // TODO: Magic number removal
+        let (tx, _rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let (_shutdown_tx, shutdown_rx) = oneshot::channel(); // TODO: Magic number removal
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -167,6 +171,7 @@ impl Default for KafkaServer {
             init_time: Instant::now(),
             kafka_config: KafkaConfig::default(),
             async_task_tx: tx,
+            shutdown_rx,
         }
     }
 }
@@ -176,9 +181,10 @@ impl KafkaServer {
     pub fn new(
         config: KafkaConfig,
         time: std::time::Instant,
-        async_task_tx: Sender<AsyncTask>,
+        async_task_tx: mpsc::Sender<AsyncTask>,
+        shutdown_rx: oneshot::Receiver<()>,
     ) -> Self {
-        let mut kafka_server = KafkaServer { async_task_tx, ..KafkaServer::default() };
+        let mut kafka_server = KafkaServer { async_task_tx, shutdown_rx, ..KafkaServer::default() };
         // TODO: In the future we can implement SSL/etc.
         // In the kotlin code, zkClientConfigFromKafkaConfig is used to build an
         // Option<ZkClientConfig>, it returns None if there's no SSL setup, we are not using SSL so
@@ -197,7 +203,8 @@ impl KafkaServer {
         kafka_server
     }
 
-    /// Main entry point for this class
+    /// `startup` initializes local and zookeeper resources
+    #[instrument]
     pub async fn startup(&mut self) -> Result<(), AsyncTaskError> {
         info!("Starting");
         // These series of if might be pointless and we might get away by using mpsc from a
@@ -211,8 +218,10 @@ impl KafkaServer {
         // }
         // let can_startup = self.is_starting_up.compare_and_swap(false, true, Ordering::Relaxed);
         // if can_startup {
+
+        // setup zookeeper
         self.broker_state = BrokerState::Starting;
-        self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await?;
+        self.async_task_tx.send(AsyncTask::Zookeeper(ZookeeperAsyncTask::Init)).await?;
         // TODO: Either move this to the async-coordinator or use the tx field to create the
         // listeners for FinalizedFeatureChangeListener
         // self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));
@@ -241,5 +250,14 @@ impl KafkaServer {
             self.init_time,
             Some(self.zk_client_config),
         )
+    }
+
+    /// `wait_for_shutdown` waits for Ctrl-C to shutdown and clean  resources
+    /// This function is used for testing the shutdown channels when Ctrl-C, not part of kafka.
+    #[instrument]
+    pub async fn wait_for_shutdown(&mut self) {
+        self.shutdown_rx.recv().await.unwrap();
+        self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await.unwrap();
+        info!("Received shutdown signal");
     }
 }

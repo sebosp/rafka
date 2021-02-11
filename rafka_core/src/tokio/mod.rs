@@ -3,7 +3,7 @@ use crate::zk::kafka_zk_client::KafkaZkClient;
 use std::error::Error;
 use std::time::Instant;
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
 use tracing::{error, info};
 use tracing_attributes::instrument;
@@ -14,7 +14,25 @@ pub enum ZookeeperBackendTask {
 }
 #[derive(Debug)]
 pub enum ZookeeperAsyncTask {
+    Init,
     EnsurePersistentPathExists(String),
+    GetDataAndVersion(oneshot::Sender<(Data, Version)>, String),
+}
+impl ZookeeperAsyncTask {
+    pub async fn ProcessTask(
+        kafka_zk_client: &mut KafkaZkClient,
+        kafka_config: &KafkaConfig,
+        zk_task: Self,
+    ) {
+        info!("coordinator zk_task is {:?}", zk_task);
+        match zk_task {
+            Self::Init => kafka_zk_client.init(&kafka_config).await.unwrap(),
+            Self::GetDataAndVersion(tx, znode_path) => {
+                kafka_zk_client.get_data_and_version(tx, znode_path)
+            },
+            _ => unimplemented!("Task not implemented"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -69,12 +87,13 @@ pub async fn async_coordinator(kafka_config: KafkaConfig, mut rx: mpsc::Receiver
         init_time,
         None,
     );
-    kafka_zk_client.init(&kafka_config).await.unwrap();
     debug!("async_coordinator: Main loop starting");
     while let Some(message) = rx.recv().await {
         debug!("async_coordinator: message: {:?}", message);
         match message {
-            AsyncTask::Zookeeper(zk_task) => info!("coordinator zk_task is {:?}", zk_task),
+            AsyncTask::Zookeeper(zk_task) => {
+                ZookeeperAsyncTask::ProcessTask(&mut kafka_zk_client, &kafka_config, zk_task).await
+            },
             AsyncTask::Coordinator(coord_task) => {
                 info!("coordinator zk_task is {:?}", coord_task);
                 break;
@@ -83,4 +102,9 @@ pub async fn async_coordinator(kafka_config: KafkaConfig, mut rx: mpsc::Receiver
     }
     kafka_zk_client.close().await.unwrap();
     error!("async_coordinator: Exiting.");
+}
+
+#[instrument]
+pub async fn shutdown(tx: mpsc::Sender<AsyncTask>) {
+    tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await;
 }
