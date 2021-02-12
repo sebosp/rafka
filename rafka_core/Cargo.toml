@@ -22,6 +22,7 @@ test-env-log = "0.2.3"
 zookeeper-async = "4.0.0"
 thiserror = "1.0"
 fs-err = "2.5"
+bytes = "1.0.1"
 
 [dependencies.rafka_derive]
 path = "../rafka_derive"

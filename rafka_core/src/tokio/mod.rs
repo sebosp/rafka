@@ -1,5 +1,6 @@
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::kafka_zk_client::KafkaZkClient;
+use bytes::Bytes;
 use std::error::Error;
 use std::time::Instant;
 use thiserror::Error;
@@ -16,7 +17,7 @@ pub enum ZookeeperBackendTask {
 pub enum ZookeeperAsyncTask {
     Init,
     EnsurePersistentPathExists(String),
-    GetDataAndVersion(oneshot::Sender<(Data, Version)>, String),
+    GetDataAndVersion(oneshot::Sender<(Vec<Bytes>, i32)>, String),
 }
 impl ZookeeperAsyncTask {
     pub async fn ProcessTask(
@@ -28,7 +29,7 @@ impl ZookeeperAsyncTask {
         match zk_task {
             Self::Init => kafka_zk_client.init(&kafka_config).await.unwrap(),
             Self::GetDataAndVersion(tx, znode_path) => {
-                kafka_zk_client.get_data_and_version(tx, znode_path)
+                kafka_zk_client.get_data_and_version(tx, znode_path);
             },
             _ => unimplemented!("Task not implemented"),
         }
