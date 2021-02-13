@@ -12,9 +12,10 @@
 
 use crate::server::kafka_config::KafkaConfig;
 use crate::tokio::{AsyncTask, AsyncTaskError};
-use crate::zk::zk_data::ZkData;
+use crate::zk::zk_data;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
+use bytes::Bytes;
 use std::error::Error;
 use std::time::Instant;
 use tracing::{debug, error};
@@ -39,7 +40,7 @@ pub struct KafkaZkClient {
     // id changes over the time for 'Session expired'. This code is part of the work around
     // done in the KAFKA-7165, once ZOOKEEPER-2985 is complete, this code must be deleted.
     current_zookeeper_session_id: i32,
-    zk_data: ZkData,
+    zk_data: zk_data::ZkData,
 }
 
 impl Default for KafkaZkClient {
@@ -48,7 +49,7 @@ impl Default for KafkaZkClient {
             zoo_keeper_client: ZooKeeperClient::default(),
             time: Instant::now(),
             current_zookeeper_session_id: -1i32,
-            zk_data: ZkData::default(),
+            zk_data: zk_data::ZkData::default(),
         }
     }
 }
@@ -59,7 +60,7 @@ impl KafkaZkClient {
             zoo_keeper_client,
             time,
             current_zookeeper_session_id: -1i32,
-            zk_data: ZkData::default(),
+            zk_data: zk_data::ZkData::default(),
         }
     }
 
@@ -260,5 +261,43 @@ impl KafkaZkClient {
         self.create_chroot_path_if_set(&kafka_config.zk_connect, &kafka_config).await?;
         self.connect().await?;
         self.create_top_level_paths().await
+    }
+
+    /// `get_data_and_version` for a given zk path, the version is equivalent to the Zookeeper Stat
+    /// if the Stat from get_data is None, then ZkVersion::UnknownVersion (-2) is returned
+    #[instrument]
+    pub async fn get_data_and_version(
+        &self,
+        path: &str,
+    ) -> Result<(Option<Vec<u8>>, i32), AsyncTaskError> {
+        let (data, stat) = self.get_data_and_stat(path).await?;
+        match stat {
+            None => Ok((data, zk_data::ZkVersion::UnknownVersion as i32)),
+            Some(zk_stat) => Ok((data, zk_stat.version)),
+        }
+    }
+
+    /// Gets the data and Stat at the given zk path, both the Data and the Stat may be empty
+    #[instrument]
+    pub async fn get_data_and_stat(
+        &self,
+        path: &str,
+    ) -> Result<(Option<Vec<u8>>, Option<zookeeper_async::Stat>), AsyncTaskError> {
+        let get_data_request = self.zoo_keeper_client.get_data_request(path).await;
+        match get_data_request {
+            Err(err) => {
+                if let Some(err) = err.source() {
+                    if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
+                        match zk_err {
+                            zookeeper_async::ZkError::NoNode => return Ok((None, None)),
+
+                            _ => return Err(crate::tokio::AsyncTaskError::ZooKeeperError(*zk_err)),
+                        }
+                    }
+                }
+                Err(err)
+            },
+            Ok((data, stat)) => Ok((Some(data), Some(stat))),
+        }
     }
 }
