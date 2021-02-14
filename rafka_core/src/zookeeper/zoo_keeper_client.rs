@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::info;
 use tracing_attributes::instrument;
-use zookeeper_async::{Acl, CreateMode, WatchedEvent, Watcher, ZooKeeper};
+use zookeeper_async::{Acl, CreateMode, Stat, WatchedEvent, Watcher, ZooKeeper};
 // TODO: Backtrace
 // use std::backtrace::Backtrace;
 
@@ -141,6 +141,17 @@ impl ZooKeeperClient {
         info!("Connection to zookeeper successful");
         self.zookeeper = Some(zk);
         Ok(())
+    }
+
+    /// `get_data_request` Peforms a get data operation to zookeeper.
+    /// For now not enabling "watching" the node
+    #[instrument]
+    pub async fn get_data_request(&self, path: &str) -> Result<(Vec<u8>, Stat), AsyncTaskError> {
+        if let Some(zk) = &self.zookeeper {
+            Ok(zk.get_data(path, false).await?)
+        } else {
+            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+        }
     }
 
     /// `create_request` Creates an operation request for zookeeper, we do not seem to get a

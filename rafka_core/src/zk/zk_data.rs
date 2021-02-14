@@ -221,6 +221,22 @@ impl ConsumerPathZNode {
     }
 }
 
+// source line: 520
+#[derive(Debug)]
+pub enum ZkVersion {
+    MatchAnyVersion = -1, /* if used in a conditional set, matches any version (the value
+                           * should match ZooKeeper codebase) */
+    UnknownVersion = -2, /* Version returned from get if node does not exist (internal
+                          * constant for Kafka codebase, unused value in ZK) */
+}
+
+// source line: 526
+//#[derive(Debug, PartialEq)]
+// pub enum ZkStat {
+//    NoStat, /* NOTE: Originally this is org.apache.zookeeper.data.Stat constructor:
+//             * val NoStat = new Stat() */
+//}
+
 // source line: 754
 #[derive(Debug, SubZNodeHandle)]
 pub struct BrokerSequenceIdZNode(ZNode);
