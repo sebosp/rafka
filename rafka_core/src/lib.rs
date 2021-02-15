@@ -4,8 +4,8 @@ extern crate failure;
 #[macro_use]
 extern crate slog_term;
 
+pub mod majordomo;
 pub mod server;
-pub mod tokio;
 mod utils;
 mod zk;
 mod zookeeper;

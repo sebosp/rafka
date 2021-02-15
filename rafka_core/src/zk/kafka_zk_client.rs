@@ -10,8 +10,8 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
-use crate::tokio::{AsyncTask, AsyncTaskError};
 use crate::zk::zk_data;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
@@ -135,7 +135,11 @@ impl KafkaZkClient {
                             zookeeper_async::ZkError::NodeExists => {
                                 break;
                             },
-                            _ => return Err(crate::tokio::AsyncTaskError::ZooKeeperError(*zk_err)),
+                            _ => {
+                                return Err(crate::majordomo::AsyncTaskError::ZooKeeperError(
+                                    *zk_err,
+                                ))
+                            },
                         }
                     }
                 }
@@ -177,13 +181,15 @@ impl KafkaZkClient {
                         zookeeper_async::ZkError::NoNode => {
                             if let Err(err) = self.create_looped_0(path).await {
                                 if fail_on_exists || !err.is_zookeeper_async_node_exists() {
-                                    return Err(crate::tokio::AsyncTaskError::KafkaZkClientError(
-                                        KafkaZkClientError::CreatePathExists,
-                                    ));
+                                    return Err(
+                                        crate::majordomo::AsyncTaskError::KafkaZkClientError(
+                                            KafkaZkClientError::CreatePathExists,
+                                        ),
+                                    );
                                 }
                             }
                         },
-                        _ => return Err(crate::tokio::AsyncTaskError::ZooKeeperError(*zk_err)),
+                        _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeperError(*zk_err)),
                     }
                 }
             }
@@ -291,7 +297,11 @@ impl KafkaZkClient {
                         match zk_err {
                             zookeeper_async::ZkError::NoNode => return Ok((None, None)),
 
-                            _ => return Err(crate::tokio::AsyncTaskError::ZooKeeperError(*zk_err)),
+                            _ => {
+                                return Err(crate::majordomo::AsyncTaskError::ZooKeeperError(
+                                    *zk_err,
+                                ))
+                            },
                         }
                     }
                 }

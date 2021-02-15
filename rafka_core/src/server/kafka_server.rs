@@ -4,13 +4,13 @@
 //! - All fields that were initially null have been coverted to Option<T>, This is probably a bad
 //!   idea, let's see how far we can go
 
+use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask, ZookeeperAsyncTask};
 use crate::server::broker_metadata_checkpoint::BrokerMetadataCheckpoint;
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
 use crate::server::kafka_config::KafkaConfig;
-use crate::tokio::{AsyncTask, AsyncTaskError, CoordinatorTask, ZookeeperAsyncTask};
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
@@ -115,7 +115,7 @@ pub struct KafkaServer {
                                                                       * Option<> */
     pub kafka_config: KafkaConfig,
 
-    /// `async_task_tx` contains a handle to send taskt to the tokio async_coordinator
+    /// `async_task_tx` contains a handle to send taskt to the majordomo async_coordinator
     pub async_task_tx: mpsc::Sender<AsyncTask>,
 
     pub shutdown_rx: oneshot::Receiver<()>,
@@ -235,7 +235,7 @@ impl KafkaServer {
 
     #[instrument]
     pub async fn init_zk_client(&mut self) -> Result<(), AsyncTaskError> {
-        // NOTE: This has been moved to crate::tokio::async_coordinator as first step before
+        // NOTE: This has been moved to crate::majordomo::async_coordinator as first step before
         // starting to process messages
         info!("Sending Connect to zookeeper on {:?}", self.kafka_config.zk_connect);
         Ok(())

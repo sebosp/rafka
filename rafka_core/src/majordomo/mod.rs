@@ -1,3 +1,10 @@
+//! Majordomo - An async message handler
+//! This module handles creation of Multiple-Producer-Single-Consumer that handles I/O operation
+//! requests from different threads to networking  resources.
+//! The coordinator was built on thoughts of tokio versions before 1.0.
+//! The name is of the module is a reference to ZMQ ZGuide Majordomo protocol, as it handles
+//! messages in a similar fasion.
+
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use bytes::Bytes;
@@ -29,11 +36,17 @@ impl ZookeeperAsyncTask {
         match zk_task {
             Self::Init => kafka_zk_client.init(&kafka_config).await.unwrap(),
             Self::GetDataAndVersion(tx, znode_path) => {
-                kafka_zk_client.get_data_and_version(tx, znode_path);
+                let response = kafka_zk_client.get_data_and_version(tx, znode_path);
             },
             _ => unimplemented!("Task not implemented"),
         }
     }
+}
+
+#[derive(Debug)]
+pub struct GetDataAndVersionResponse {
+    data: Vec<u8>,
+    version: i32,
 }
 
 #[derive(Debug)]

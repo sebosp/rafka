@@ -53,11 +53,11 @@ async fn main() {
         };
         kafka_server.wait_for_shutdown();
     });
-    rafka_core::tokio::async_coordinator(kafka_config, main_rx).await;
+    rafka_core::majordomo::async_coordinator(kafka_config, main_rx).await;
     tokio::spawn(async {
         signal::ctrl_c().await.unwrap();
         error!("ctrl-c received!");
-        rafka_core::tokio::shutdown(main_tx).await;
+        rafka_core::majordomo::shutdown(main_tx).await;
         shutdown_tx.send(());
     });
 }

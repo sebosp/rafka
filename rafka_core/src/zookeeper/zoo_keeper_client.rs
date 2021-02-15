@@ -3,8 +3,8 @@
 
 // RAFKA TODO: Check if we can do the "pipeline" with the rust libraries
 
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
-use crate::tokio::{AsyncTask, AsyncTaskError};
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use std::fmt;
 /// RAFKA Specific:
