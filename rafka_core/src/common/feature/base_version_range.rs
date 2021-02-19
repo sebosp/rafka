@@ -6,6 +6,7 @@
 //  - they are each expected to be >= 1, as we only consider positive version values to be valid.
 //  - max should be >= min.
 
+use std::collections::HashMap;
 use std::error::Error;
 #[derive(Debug)]
 pub struct BaseVersionRange {
@@ -33,6 +34,9 @@ pub enum BaseVersionRangeError {
     MinLabelKeyEmpty,
     #[error("Expected maxKeyLabel to be non-empty.")]
     MaxLabelKeyEmpty,
+    // From HashMap conversion TODO: maybe Impl From<HashMap>?
+    #[error("{0} Absent in {:?}")]
+    AbsentKeyInMap(String, &HashMap<String, i16>),
 }
 
 impl fmt::Display for BaseVersionRange {
@@ -61,5 +65,24 @@ impl BaseVersionRange {
             return Err(MaxLabelKeyEmpty);
         }
         Ok(Self { min_key_label, min_value, max_key_label, max_value })
+    }
+
+    /// Based valueOrThrow(), but returning a Result
+    pub fn try_value_from(
+        key: &str,
+        version_range_map: &HashMap<String, i16>,
+    ) -> Result<i16, BaseVersionRangeError> {
+        match version_range_map.get(key) {
+            None => Err(BaseVersionRangeError::AbsentKeyInMap(key.to_string(), version_range_map)),
+            Some(val) => Ok(val),
+        }
+    }
+
+    /// From valueOrThrow(), panics on error
+    pub fn from(key: &str, version_range_map: &HashMap<String, i16>) -> i16 {
+        match try_value_from(key, version_range_map) {
+            Ok(val) => val,
+            Err(err) => panic!(err),
+        }
     }
 }
