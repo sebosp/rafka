@@ -85,4 +85,14 @@ impl BaseVersionRange {
             Err(err) => panic!(err),
         }
     }
+
+    /// Returns the minimum value for the version range
+    pub fn min(&self) -> i16 {
+        self.min_value
+    }
+
+    /// Returns the maximum value for the version range
+    pub fn max(&self) -> i16 {
+        self.max_value
+    }
 }
