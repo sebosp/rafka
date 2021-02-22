@@ -10,12 +10,11 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
-use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::majordomo::{AsyncTask, AsyncTaskError, GetDataAndVersionResponse};
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
-use bytes::Bytes;
 use std::error::Error;
 use std::time::Instant;
 use tracing::{debug, error};
@@ -135,11 +134,7 @@ impl KafkaZkClient {
                             zookeeper_async::ZkError::NodeExists => {
                                 break;
                             },
-                            _ => {
-                                return Err(crate::majordomo::AsyncTaskError::ZooKeeperError(
-                                    *zk_err,
-                                ))
-                            },
+                            _ => return Err(AsyncTaskError::ZooKeeper(*zk_err)),
                         }
                     }
                 }
@@ -173,7 +168,7 @@ impl KafkaZkClient {
                     match zk_err {
                         zookeeper_async::ZkError::NodeExists => {
                             if fail_on_exists {
-                                return Err(AsyncTaskError::KafkaZkClientError(
+                                return Err(AsyncTaskError::KafkaZkClient(
                                     KafkaZkClientError::CreatePathExists,
                                 ));
                             }
@@ -181,15 +176,13 @@ impl KafkaZkClient {
                         zookeeper_async::ZkError::NoNode => {
                             if let Err(err) = self.create_looped_0(path).await {
                                 if fail_on_exists || !err.is_zookeeper_async_node_exists() {
-                                    return Err(
-                                        crate::majordomo::AsyncTaskError::KafkaZkClientError(
-                                            KafkaZkClientError::CreatePathExists,
-                                        ),
-                                    );
+                                    return Err(AsyncTaskError::KafkaZkClient(
+                                        KafkaZkClientError::CreatePathExists,
+                                    ));
                                 }
                             }
                         },
-                        _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeperError(*zk_err)),
+                        _ => return Err(AsyncTaskError::ZooKeeper(*zk_err)),
                     }
                 }
             }
@@ -275,11 +268,14 @@ impl KafkaZkClient {
     pub async fn get_data_and_version(
         &self,
         path: &str,
-    ) -> Result<(Option<Vec<u8>>, i32), AsyncTaskError> {
+    ) -> Result<GetDataAndVersionResponse, AsyncTaskError> {
         let (data, stat) = self.get_data_and_stat(path).await?;
         match stat {
-            None => Ok((data, zk_data::ZkVersion::UnknownVersion as i32)),
-            Some(zk_stat) => Ok((data, zk_stat.version)),
+            None => Ok(GetDataAndVersionResponse {
+                data,
+                version: zk_data::ZkVersion::UnknownVersion as i32,
+            }),
+            Some(zk_stat) => Ok(GetDataAndVersionResponse { data, version: zk_stat.version }),
         }
     }
 
@@ -297,11 +293,7 @@ impl KafkaZkClient {
                         match zk_err {
                             zookeeper_async::ZkError::NoNode => return Ok((None, None)),
 
-                            _ => {
-                                return Err(crate::majordomo::AsyncTaskError::ZooKeeperError(
-                                    *zk_err,
-                                ))
-                            },
+                            _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeper(*zk_err)),
                         }
                     }
                 }
