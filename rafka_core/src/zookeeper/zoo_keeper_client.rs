@@ -150,7 +150,7 @@ impl ZooKeeperClient {
         if let Some(zk) = &self.zookeeper {
             Ok(zk.get_data(path, false).await?)
         } else {
-            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
         }
     }
 
@@ -167,7 +167,7 @@ impl ZooKeeperClient {
         if let Some(zk) = &self.zookeeper {
             Ok(zk.create(path, data, acls, mode).await?)
         } else {
-            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
         }
     }
 
@@ -177,11 +177,11 @@ impl ZooKeeperClient {
     pub async fn close(&mut self) -> Result<(), AsyncTaskError> {
         if let Some(zk) = &self.zookeeper {
             match zk.close().await {
-                Err(err) => Err(AsyncTaskError::ZooKeeperError(err)),
+                Err(err) => Err(AsyncTaskError::ZooKeeper(err)),
                 Ok(()) => Ok(()),
             }
         } else {
-            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
         }
     }
 }
