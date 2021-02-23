@@ -5,9 +5,10 @@
 //! The name is of the module is a reference to ZMQ ZGuide Majordomo protocol, as it handles
 //! messages in a similar fasion.
 
+use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
+use crate::server::finalized_feature_cache::FinalizedFeatureCacheAsyncTask;
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::kafka_zk_client::KafkaZkClient;
-use bytes::Bytes;
 use std::error::Error;
 use std::time::Instant;
 use thiserror::Error;
@@ -24,29 +25,33 @@ pub enum ZookeeperBackendTask {
 pub enum ZookeeperAsyncTask {
     Init,
     EnsurePersistentPathExists(String),
-    GetDataAndVersion(oneshot::Sender<(Vec<Bytes>, i32)>, String),
+    GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
 }
+
 impl ZookeeperAsyncTask {
-    pub async fn ProcessTask(
+    #[instrument]
+    pub async fn process_task(
         kafka_zk_client: &mut KafkaZkClient,
         kafka_config: &KafkaConfig,
-        zk_task: Self,
-    ) {
-        info!("coordinator zk_task is {:?}", zk_task);
-        match zk_task {
-            Self::Init => kafka_zk_client.init(&kafka_config).await.unwrap(),
+        task: Self,
+    ) -> Result<(), AsyncTaskError> {
+        info!("process_task {:?}", task);
+        match task {
+            Self::Init => kafka_zk_client.init(&kafka_config).await?,
             Self::GetDataAndVersion(tx, znode_path) => {
-                let response = kafka_zk_client.get_data_and_version(tx, znode_path);
+                let result = kafka_zk_client.get_data_and_version(&znode_path).await?;
+                tx.send(result);
             },
             _ => unimplemented!("Task not implemented"),
         }
+        Ok(())
     }
 }
 
 #[derive(Debug)]
 pub struct GetDataAndVersionResponse {
-    data: Vec<u8>,
-    version: i32,
+    pub data: Option<Vec<u8>>,
+    pub version: i32,
 }
 
 #[derive(Debug)]
@@ -58,19 +63,24 @@ pub enum CoordinatorTask {
 #[derive(Debug)]
 pub enum AsyncTask {
     Zookeeper(ZookeeperAsyncTask),
+    FinalizedFeatureCache(FinalizedFeatureCacheAsyncTask),
     Coordinator(CoordinatorTask),
 }
 
 #[derive(Error, Debug)]
 pub enum AsyncTaskError {
     #[error("ZookeeperError {0:?}")]
-    ZooKeeperError(#[from] zookeeper_async::ZkError),
-    #[error("Mpsc SendError {0:?}")]
-    MpscSendError(#[from] tokio::sync::mpsc::error::SendError<AsyncTask>),
+    ZooKeeper(#[from] zookeeper_async::ZkError),
+    #[error("Tokio Mpsc SendError {0:?}")]
+    MpscSend(#[from] tokio::sync::mpsc::error::SendError<AsyncTask>),
+    #[error("Tokio OneShot SendError {0:?}")]
+    OneShotTryRecv(#[from] tokio::sync::oneshot::error::TryRecvError),
     #[error("ZooKeeperClientError {0:?}")]
-    ZooKeeperClientError(#[from] crate::zookeeper::zoo_keeper_client::ZooKeeperClientError),
+    ZooKeeperClient(#[from] crate::zookeeper::zoo_keeper_client::ZooKeeperClientError),
     #[error("KafkaZkClientError {0:?}")]
-    KafkaZkClientError(#[from] crate::zk::kafka_zk_client::KafkaZkClientError),
+    KafkaZkClient(#[from] crate::zk::kafka_zk_client::KafkaZkClientError),
+    #[error(" FeatureCacheUpdaterError {0:?}")]
+    FeatureCacheUpdater(#[from] FeatureCacheUpdaterError),
 }
 
 impl AsyncTaskError {
@@ -91,7 +101,10 @@ impl AsyncTaskError {
 }
 
 #[instrument]
-pub async fn async_coordinator(kafka_config: KafkaConfig, mut rx: mpsc::Receiver<AsyncTask>) {
+pub async fn async_coordinator(
+    kafka_config: KafkaConfig,
+    mut rx: mpsc::Receiver<AsyncTask>,
+) -> Result<(), AsyncTaskError> {
     debug!("async_coordinator: Preparing");
     let init_time = Instant::now();
     let mut kafka_zk_client = KafkaZkClient::build(
@@ -105,17 +118,18 @@ pub async fn async_coordinator(kafka_config: KafkaConfig, mut rx: mpsc::Receiver
     while let Some(message) = rx.recv().await {
         debug!("async_coordinator: message: {:?}", message);
         match message {
-            AsyncTask::Zookeeper(zk_task) => {
-                ZookeeperAsyncTask::ProcessTask(&mut kafka_zk_client, &kafka_config, zk_task).await
+            AsyncTask::Zookeeper(task) => {
+                ZookeeperAsyncTask::process_task(&mut kafka_zk_client, &kafka_config, task).await?
             },
             AsyncTask::Coordinator(coord_task) => {
-                info!("coordinator zk_task is {:?}", coord_task);
+                info!("coordinator coord_task is {:?}", coord_task);
                 break;
             },
         }
     }
     kafka_zk_client.close().await.unwrap();
     error!("async_coordinator: Exiting.");
+    Ok(())
 }
 
 #[instrument]
