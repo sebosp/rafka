@@ -8,51 +8,14 @@
 use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
 use crate::server::finalized_feature_cache::FinalizedFeatureCacheAsyncTask;
 use crate::server::kafka_config::KafkaConfig;
-use crate::zk::kafka_zk_client::KafkaZkClient;
+use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use std::error::Error;
 use std::time::Instant;
 use thiserror::Error;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tracing::debug;
 use tracing::{error, info};
 use tracing_attributes::instrument;
-
-#[derive(Debug)]
-pub enum ZookeeperBackendTask {
-    EnsurePersistentPathExists(String),
-}
-#[derive(Debug)]
-pub enum ZookeeperAsyncTask {
-    Init,
-    EnsurePersistentPathExists(String),
-    GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
-}
-
-impl ZookeeperAsyncTask {
-    #[instrument]
-    pub async fn process_task(
-        kafka_zk_client: &mut KafkaZkClient,
-        kafka_config: &KafkaConfig,
-        task: Self,
-    ) -> Result<(), AsyncTaskError> {
-        info!("process_task {:?}", task);
-        match task {
-            Self::Init => kafka_zk_client.init(&kafka_config).await?,
-            Self::GetDataAndVersion(tx, znode_path) => {
-                let result = kafka_zk_client.get_data_and_version(&znode_path).await?;
-                tx.send(result);
-            },
-            _ => unimplemented!("Task not implemented"),
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-pub struct GetDataAndVersionResponse {
-    pub data: Option<Vec<u8>>,
-    pub version: i32,
-}
 
 #[derive(Debug)]
 pub enum CoordinatorTask {
@@ -62,7 +25,7 @@ pub enum CoordinatorTask {
 /// `AsyncTask` contains message types that async_coordinator can work on
 #[derive(Debug)]
 pub enum AsyncTask {
-    Zookeeper(ZookeeperAsyncTask),
+    Zookeeper(KafkaZkClientAsyncTask),
     FinalizedFeatureCache(FinalizedFeatureCacheAsyncTask),
     Coordinator(CoordinatorTask),
 }
@@ -119,7 +82,8 @@ pub async fn async_coordinator(
         debug!("async_coordinator: message: {:?}", message);
         match message {
             AsyncTask::Zookeeper(task) => {
-                ZookeeperAsyncTask::process_task(&mut kafka_zk_client, &kafka_config, task).await?
+                KafkaZkClientAsyncTask::process_task(&mut kafka_zk_client, &kafka_config, task)
+                    .await?
             },
             AsyncTask::Coordinator(coord_task) => {
                 info!("coordinator coord_task is {:?}", coord_task);

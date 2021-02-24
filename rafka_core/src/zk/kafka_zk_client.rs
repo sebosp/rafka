@@ -10,14 +10,15 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
-use crate::majordomo::{AsyncTask, AsyncTaskError, GetDataAndVersionResponse};
+use crate::majordomo::AsyncTaskError;
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
 use std::error::Error;
 use std::time::Instant;
-use tracing::{debug, error};
+use tokio::sync::oneshot;
+use tracing::{debug, error, info};
 use tracing_attributes::instrument;
 use zookeeper_async::CreateMode;
 
@@ -301,5 +302,46 @@ impl KafkaZkClient {
             },
             Ok((data, stat)) => Ok((Some(data), Some(stat))),
         }
+    }
+}
+
+/// -----------------------
+/// Rafka Async tasks/messages related to this module
+/// -----------------------
+
+/// For sending GetDataAndVersionResponse across a channel
+#[derive(Debug)]
+pub struct GetDataAndVersionResponse {
+    pub data: Option<Vec<u8>>,
+    pub version: i32,
+}
+
+// TODO: Consider renaming to KafkaZkClientAsyncTask, "ZooKeeper" is way too broad
+/// Rafka Async tasks/messages related to this module
+#[derive(Debug)]
+pub enum KafkaZkClientAsyncTask {
+    Init,
+    EnsurePersistentPathExists(String),
+    GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
+}
+
+impl KafkaZkClientAsyncTask {
+    /// Handles a message that this module should provide
+    #[instrument]
+    pub async fn process_task(
+        kafka_zk_client: &mut KafkaZkClient,
+        kafka_config: &KafkaConfig,
+        task: Self,
+    ) -> Result<(), AsyncTaskError> {
+        info!("process_task {:?}", task);
+        match task {
+            Self::Init => kafka_zk_client.init(&kafka_config).await?,
+            Self::GetDataAndVersion(tx, znode_path) => {
+                let result = kafka_zk_client.get_data_and_version(&znode_path).await?;
+                tx.send(result);
+            },
+            _ => unimplemented!("Task not implemented"),
+        }
+        Ok(())
     }
 }
