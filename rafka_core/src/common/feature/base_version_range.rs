@@ -7,7 +7,7 @@
 //  - max should be >= min.
 
 use std::collections::HashMap;
-use std::error::Error;
+use std::fmt;
 #[derive(Debug)]
 pub struct BaseVersionRange {
     // Non-empty label for the min version key, that's used only to convert to/from a map.
@@ -36,7 +36,7 @@ pub enum BaseVersionRangeError {
     MaxLabelKeyEmpty,
     // From HashMap conversion TODO: maybe Impl From<HashMap>?
     #[error("{0} Absent in {:?}")]
-    AbsentKeyInMap(String, &HashMap<String, i16>),
+    AbsentKeyInMap(String, HashMap<String, i16>),
 }
 
 impl fmt::Display for BaseVersionRange {
@@ -55,20 +55,20 @@ impl BaseVersionRange {
         max_key_label: String,
         max_value: i16,
     ) -> Result<Self, BaseVersionRangeError> {
-        if (min_value < 1 || max_value < 1 || max_value < min_value) {
-            return Err(IncompatibleVersionRange(min_value, max_value));
+        if min_value < 1 || max_value < 1 || max_value < min_value {
+            return Err(BaseVersionRangeError::IncompatibleVersionRange(min_value, max_value));
         }
-        if (min_key_label.is_empty()) {
-            return Err(MinLabelKeyEmpty);
+        if min_key_label.is_empty() {
+            return Err(BaseVersionRangeError::MinLabelKeyEmpty);
         }
-        if (max_key_label.is_empty()) {
-            return Err(MaxLabelKeyEmpty);
+        if max_key_label.is_empty() {
+            return Err(BaseVersionRangeError::MaxLabelKeyEmpty);
         }
         Ok(Self { min_key_label, min_value, max_key_label, max_value })
     }
 
     /// Based valueOrThrow(), but returning a Result
-    pub fn try_value_from(
+    pub fn try_get_value(
         key: &str,
         version_range_map: &HashMap<String, i16>,
     ) -> Result<i16, BaseVersionRangeError> {
@@ -80,7 +80,7 @@ impl BaseVersionRange {
 
     /// From valueOrThrow(), panics on error
     pub fn from(key: &str, version_range_map: &HashMap<String, i16>) -> i16 {
-        match try_value_from(key, version_range_map) {
+        match BaseVersionRange::try_get_value(key, version_range_map) {
             Ok(val) => val,
             Err(err) => panic!(err),
         }
