@@ -256,7 +256,7 @@ impl KafkaServer {
     /// This function is used for testing the shutdown channels when Ctrl-C, not part of kafka.
     #[instrument]
     pub async fn wait_for_shutdown(&mut self) {
-        self.shutdown_rx.recv().await.unwrap();
+        self.shutdown_rx.try_recv().unwrap();
         self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await.unwrap();
         info!("Received shutdown signal");
     }
