@@ -44,7 +44,7 @@ impl fmt::Display for BaseVersionRange {
         write!(
             f,
             "BaseVersionRange[{}:{}, {}:{}]",
-            self.min_key_label, self.min, self.max_key_label, self.max
+            self.min_key_label, self.min_value, self.max_key_label, self.max_value
         )
     }
 }
@@ -73,8 +73,11 @@ impl BaseVersionRange {
         version_range_map: &HashMap<String, i16>,
     ) -> Result<i16, BaseVersionRangeError> {
         match version_range_map.get(key) {
-            None => Err(BaseVersionRangeError::AbsentKeyInMap(key.to_string(), version_range_map)),
-            Some(val) => Ok(val),
+            None => Err(BaseVersionRangeError::AbsentKeyInMap(
+                key.to_string(),
+                version_range_map.clone(),
+            )),
+            Some(val) => Ok(*val),
         }
     }
 
