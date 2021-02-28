@@ -14,6 +14,35 @@ pub enum VersionRangeType {
     Finalized(HashMap<String, FinalizedVersionRange>),
 }
 
+impl fmt::Display for VersionRangeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let collection_str: String = match &self {
+            // RAFKA TODO: Consider printing which type of Version Range is being used.
+            Self::Supported(supported) => supported
+                .iter()
+                .map(|(key, val)| format!("({} -> {})", key, val))
+                .collect::<Vec<String>>()
+                .join(", "),
+            Self::Finalized(finalized) => finalized
+                .iter()
+                .map(|(key, val)| format!("({} -> {})", key, val))
+                .collect::<Vec<String>>()
+                .join(", "),
+        };
+        write!(f, "{}", collection_str)
+    }
+}
+
+impl VersionRangeType {
+    /// Returns the internal HashMap is empty status
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Supported(supported) => supported.is_empty(),
+            Self::Finalized(finalized) => finalized.is_empty(),
+        }
+    }
+}
+
 /// Represents an immutable dictionary with key being feature name, and value being
 /// either Supported or Finalized VersionRanges
 #[derive(Debug)]
@@ -29,19 +58,17 @@ pub enum FeaturesError {
 
 impl Features {
     /// Creates a Features struct of type SupportedVersionRange
-    pub fn supported_features(
-        features: HashMap<String, SupportedVersionRange>,
-    ) -> Result<Self, FeaturesError> {
-        Self::new(VersionRangeType::Supported(features))
+    pub fn supported_features(features: HashMap<String, SupportedVersionRange>) -> Self {
+        Self { features: VersionRangeType::Supported(features) }
     }
 
     /// Creates a Features struct of type FinalizedVersionRange
     pub fn finalized_features(features: HashMap<String, FinalizedVersionRange>) -> Self {
-        Self::new(VersionRangeType::Finalized(features))
+        Self { features: VersionRangeType::Finalized(features) }
     }
 
     pub fn is_empty(&self) {
-        self.features.0.is_empty();
+        self.features.is_empty();
     }
 
     /// Looks up an item from the features HashMap and returns an Optional found VersionRangeType
@@ -50,16 +77,8 @@ impl Features {
     }
 }
 
-impl<T> fmt::Display for Features<T> {
+impl fmt::Display for Features {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Features{}",
-            &self
-                .features
-                .map(|(key, val)| format!("({} -> {})", key, val))
-                .collect::<String>()
-                .join(", ")
-        )
+        write!(f, "Features{}", &self.features)
     }
 }
