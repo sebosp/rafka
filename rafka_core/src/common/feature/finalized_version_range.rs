@@ -4,6 +4,7 @@
 use super::base_version_range::{BaseVersionRange, BaseVersionRangeError};
 use super::supported_version_range::SupportedVersionRange;
 use std::collections::HashMap;
+use std::fmt;
 use tracing::debug;
 #[derive(Debug)]
 pub struct FinalizedVersionRange {
@@ -66,5 +67,18 @@ impl FinalizedVersionRange {
     /// Provides access to the maximum value from the version range
     pub fn max(&self) -> i16 {
         self.version_range.max()
+    }
+}
+
+impl fmt::Display for FinalizedVersionRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "FinalizedVersionRange[{}:{}, {},{}]",
+            MIN_VERSION_LEVEL_KEY_LABEL,
+            self.min(),
+            MAX_VERSION_LEVEL_KEY_LABEL,
+            self.max()
+        )
     }
 }
