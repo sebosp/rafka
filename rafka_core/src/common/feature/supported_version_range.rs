@@ -2,6 +2,7 @@
 use super::base_version_range::{BaseVersionRange, BaseVersionRangeError};
 /// Represents the min/max versions for supported features.
 use std::collections::HashMap;
+use std::fmt;
 use tracing::debug;
 
 #[derive(Debug)]
@@ -47,5 +48,18 @@ impl SupportedVersionRange {
     /// Provides access to the maximum value from the version range
     pub fn max(&self) -> i16 {
         self.version_range.max()
+    }
+}
+
+impl fmt::Display for SupportedVersionRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "SupportedVersionRange[{}:{}, {},{}]",
+            MIN_VERSION_KEY_LABEL,
+            self.min(),
+            MAX_VERSION_KEY_LABEL,
+            self.max()
+        )
     }
 }
