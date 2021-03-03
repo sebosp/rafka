@@ -1,4 +1,5 @@
 use clap::{App, Arg};
+use rafka_core::majordomo::Coordinator;
 use rafka_core::server::kafka_config::KafkaConfig;
 use rafka_core::server::kafka_server::KafkaServer;
 use std::time::Instant;
@@ -39,25 +40,26 @@ async fn main() {
 
     let config_file = matches.value_of("INPUT").unwrap();
     println!("Using input file: {}", config_file);
-    let (main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let kafka_config = KafkaConfig::get_kafka_config(config_file).unwrap();
-    let kafka_config_tmp = kafka_config.clone();
-    let kafka_server_main_tx = main_tx.clone();
+    let mut majordomo = Coordinator::new(kafka_config.clone());
+    let kafka_server_async_tx = majordomo.main_tx();
     tokio::spawn(async move {
         let mut kafka_server =
-            KafkaServer::new(kafka_config_tmp, Instant::now(), kafka_server_main_tx, shutdown_rx);
+            KafkaServer::new(kafka_config, Instant::now(), kafka_server_async_tx, shutdown_rx);
         match kafka_server.startup().await {
             Ok(()) => info!("Kafka startup Complete"),
             Err(err) => error!("Kafka startup failed: {:?}", err),
         };
-        kafka_server.wait_for_shutdown();
+        kafka_server.wait_for_shutdown().await;
     });
-    rafka_core::majordomo::async_coordinator(kafka_config, main_rx).await;
+    // Start the main messaging bus
+    majordomo.async_coordinator().await.unwrap();
+    let coordinator_shutdown_tx_handle = majordomo.main_tx();
     tokio::spawn(async {
         signal::ctrl_c().await.unwrap();
         error!("ctrl-c received!");
-        rafka_core::majordomo::shutdown(main_tx).await;
-        shutdown_tx.send(());
+        rafka_core::majordomo::Coordinator::shutdown(coordinator_shutdown_tx_handle).await;
+        shutdown_tx.send(()).unwrap();
     });
 }

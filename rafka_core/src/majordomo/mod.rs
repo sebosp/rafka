@@ -6,7 +6,9 @@
 //! messages in a similar fasion.
 
 use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
-use crate::server::finalized_feature_cache::FinalizedFeatureCacheAsyncTask;
+use crate::server::finalized_feature_cache::{
+    FinalizedFeatureCache, FinalizedFeatureCacheAsyncTask,
+};
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use std::error::Error;
@@ -42,7 +44,7 @@ pub enum AsyncTaskError {
     ZooKeeperClient(#[from] crate::zookeeper::zoo_keeper_client::ZooKeeperClientError),
     #[error("KafkaZkClientError {0:?}")]
     KafkaZkClient(#[from] crate::zk::kafka_zk_client::KafkaZkClientError),
-    #[error(" FeatureCacheUpdaterError {0:?}")]
+    #[error("FeatureCacheUpdaterError {0:?}")]
     FeatureCacheUpdater(#[from] FeatureCacheUpdaterError),
 }
 
@@ -63,40 +65,69 @@ impl AsyncTaskError {
     }
 }
 
-#[instrument]
-pub async fn async_coordinator(
+/// A Coordinator that keeps the state to be shared across async tasks
+#[derive(Debug)]
+pub struct Coordinator {
     kafka_config: KafkaConfig,
-    mut rx: mpsc::Receiver<AsyncTask>,
-) -> Result<(), AsyncTaskError> {
-    debug!("async_coordinator: Preparing");
-    let init_time = Instant::now();
-    let mut kafka_zk_client = KafkaZkClient::build(
-        &kafka_config.zk_connect,
-        &kafka_config,
-        Some(String::from("Async Coordinator")),
-        init_time,
-        None,
-    );
-    debug!("async_coordinator: Main loop starting");
-    while let Some(message) = rx.recv().await {
-        debug!("async_coordinator: message: {:?}", message);
-        match message {
-            AsyncTask::Zookeeper(task) => {
-                KafkaZkClientAsyncTask::process_task(&mut kafka_zk_client, &kafka_config, task)
-                    .await?
-            },
-            AsyncTask::Coordinator(coord_task) => {
-                info!("coordinator coord_task is {:?}", coord_task);
-                break;
-            },
-        }
-    }
-    kafka_zk_client.close().await.unwrap();
-    error!("async_coordinator: Exiting.");
-    Ok(())
+    finalized_feature_cache: FinalizedFeatureCache,
+    pub tx: mpsc::Sender<AsyncTask>,
+    rx: mpsc::Receiver<AsyncTask>,
 }
 
-#[instrument]
-pub async fn shutdown(tx: mpsc::Sender<AsyncTask>) {
-    tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await;
+impl Coordinator {
+    pub fn new(kafka_config: KafkaConfig) -> Self {
+        let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let finalized_feature_cache = FinalizedFeatureCache::default();
+        Coordinator { kafka_config, finalized_feature_cache, tx, rx }
+    }
+
+    pub fn main_tx(&self) -> mpsc::Sender<AsyncTask> {
+        self.tx.clone()
+    }
+
+    #[instrument]
+    pub async fn async_coordinator(&mut self) -> Result<(), AsyncTaskError> {
+        debug!("async_coordinator: Preparing");
+        let init_time = Instant::now();
+        let mut kafka_zk_client = KafkaZkClient::build(
+            &self.kafka_config.zk_connect,
+            &self.kafka_config,
+            Some(String::from("Async Coordinator")),
+            init_time,
+            None,
+        );
+        debug!("async_coordinator: Main loop starting");
+        while let Some(message) = self.rx.recv().await {
+            debug!("async_coordinator: message: {:?}", message);
+            match message {
+                AsyncTask::Zookeeper(task) => {
+                    KafkaZkClientAsyncTask::process_task(
+                        &mut kafka_zk_client,
+                        &self.kafka_config,
+                        task,
+                    )
+                    .await?
+                },
+                AsyncTask::Coordinator(task) => {
+                    info!("coordinator coord_task is {:?}", task);
+                },
+                AsyncTask::FinalizedFeatureCache(task) => {
+                    info!("finalized feature cache task is {:?}", task);
+                    FinalizedFeatureCacheAsyncTask::process_task(
+                        &mut self.finalized_feature_cache,
+                        task,
+                    )
+                    .await?;
+                },
+            }
+        }
+        kafka_zk_client.close().await.unwrap();
+        error!("async_coordinator: Exiting.");
+        Ok(())
+    }
+
+    #[instrument]
+    pub async fn shutdown(tx: mpsc::Sender<AsyncTask>) {
+        tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await.unwrap();
+    }
 }
