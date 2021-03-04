@@ -5,12 +5,11 @@ use crate::common::feature::features::Features;
 use crate::common::feature::finalized_version_range::FinalizedVersionRange;
 use crate::majordomo::AsyncTaskError;
 use std::fmt;
-use tokio::sync::mpsc;
 use tracing::info;
 use tracing_attributes::instrument;
 
 /// Represents finalized features along with an epoch value #[derive(Debug)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FinalizedFeaturesAndEpoch {
     features: Features,
     epoch: i32,
@@ -35,24 +34,19 @@ impl fmt::Display for FinalizedFeaturesAndEpoch {
 #[derive(Debug)]
 pub struct FinalizedFeatureCache {
     features_and_epoch: Option<FinalizedFeaturesAndEpoch>,
-    /// A clonable tx to send messages to the control loop
-    pub tx: mpsc::Sender<FinalizedFeatureCacheAsyncTask>,
-    /// A receiver of tasks
-    rx: mpsc::Receiver<FinalizedFeatureCacheAsyncTask>,
+}
+
+impl Default for FinalizedFeatureCache {
+    fn default() -> Self {
+        FinalizedFeatureCache { features_and_epoch: None }
+    }
 }
 
 impl FinalizedFeatureCache {
-    pub fn new() -> Self {
-        // TODO: Magic number removal
-        let (tx, rx) = tokio::sync::mpsc::channel(4_096);
-        FinalizedFeatureCache { features_and_epoch: None, tx, rx }
-    }
-
     /// Returns the latest known FinalizedFeaturesAndEpoch or empty if not defined in the
     /// cache.
     pub fn get(&self) -> Option<FinalizedFeaturesAndEpoch> {
-        // RAFKA TODO is this Copy?
-        self.features_and_epoch
+        self.features_and_epoch.clone()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -64,18 +58,9 @@ impl FinalizedFeatureCache {
         info!("Cleared cache");
         self.features_and_epoch = None;
     }
-
-    #[instrument]
-    pub async fn async_coordinator(&mut self) {
-        while let Some(message) = self.rx.recv().await {
-            info!("FinalizedFeatureCache::async_coordinator: message: {:?}", message);
-            match message {
-                FinalizedFeatureCacheAsyncTask::Clear => self.features_and_epoch = None,
-            }
-        }
-    }
 }
 
+/// Majordomo Coordinator handling of async tasks
 #[derive(Debug)]
 pub enum FinalizedFeatureCacheAsyncTask {
     Clear,
@@ -83,7 +68,7 @@ pub enum FinalizedFeatureCacheAsyncTask {
 
 impl FinalizedFeatureCacheAsyncTask {
     #[instrument]
-    pub async fn process_tasks(
+    pub async fn process_task(
         cache: &mut FinalizedFeatureCache,
         task: Self,
     ) -> Result<(), AsyncTaskError> {

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 use tracing::debug;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SupportedVersionRange {
     version_range: BaseVersionRange,
 }

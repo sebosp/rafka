@@ -4,7 +4,7 @@
 //! - All fields that were initially null have been coverted to Option<T>, This is probably a bad
 //!   idea, let's see how far we can go
 
-use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask, ZookeeperAsyncTask};
+use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask};
 use crate::server::broker_metadata_checkpoint::BrokerMetadataCheckpoint;
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
@@ -12,11 +12,10 @@ use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
 use crate::server::kafka_config::KafkaConfig;
 use crate::utils::kafka_scheduler::KafkaScheduler;
-use crate::zk::kafka_zk_client::KafkaZkClient;
+use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info};
@@ -221,7 +220,7 @@ impl KafkaServer {
 
         // setup zookeeper
         self.broker_state = BrokerState::Starting;
-        self.async_task_tx.send(AsyncTask::Zookeeper(ZookeeperAsyncTask::Init)).await?;
+        self.async_task_tx.send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::Init)).await?;
         // TODO: Either move this to the async-coordinator or use the tx field to create the
         // listeners for FinalizedFeatureChangeListener
         // self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));

@@ -72,7 +72,7 @@ pub struct ZooKeeperClient {
     /// `max_in_flight_requests` maximum number of unacknowledged requests the client will send
     /// before blocking
     max_in_flight_requests: u32,
-    /// name name of the client instance
+    /// name of the client instance
     name: Option<String>,
     time: Instant,
     // zk_client_config ZooKeeper client configuration, for TLS configs if desired

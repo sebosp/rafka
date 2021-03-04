@@ -6,7 +6,7 @@ use super::supported_version_range::SupportedVersionRange;
 use std::collections::HashMap;
 use std::fmt;
 use tracing::debug;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FinalizedVersionRange {
     version_range: BaseVersionRange,
 }

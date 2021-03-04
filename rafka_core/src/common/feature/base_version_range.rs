@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BaseVersionRange {
     // Non-empty label for the min version key, that's used only to convert to/from a map.
     min_key_label: String,
