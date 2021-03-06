@@ -3,6 +3,7 @@
 
 use crate::server::dynamic_config_manager::ConfigType;
 use rafka_derive::{SubZNodeHandle, ZNodeHandle};
+use tracing::error;
 use zookeeper_async::Acl;
 // NOTE: Maybe all of this could be moved into a hashmap or something?
 
@@ -16,6 +17,20 @@ impl Default for ZNode {
     fn default() -> Self {
         Self { path: String::from("unset") }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ZNodeDecodeError {
+    #[error("SerdeError {0:?}")]
+    Serde(#[from] serde_json::Error),
+    #[error("ParseInt {0:?}")]
+    ParseInt(#[from] std::num::ParseIntError),
+    #[error("KeyNotFound {0}")]
+    KeyNotFound(String),
+    #[error("Unsupported version: {0} of feature information: {1:?})")]
+    UnsupportedVersion(i32, String),
+    #[error("Unable to transform data to String: {0}")]
+    Utf8Error(std::string::FromUtf8Error),
 }
 
 pub trait ZNodeHandle {
@@ -341,14 +356,7 @@ impl FeatureZNodeStatus {
 // source line: 854
 #[derive(Debug)]
 pub enum FeatureZNodeVersion {
-    V1(u32),
-}
-
-impl FeatureZNodeVersion {
-    // V1 contains 'version', 'status' and 'features' keys.
-    pub fn v1() -> Self {
-        FeatureZNodeVersion::V1(1)
-    }
+    V1 = 1,
 }
 
 // TODO: for now just an empty struct, later should be implemented from
@@ -357,13 +365,67 @@ impl FeatureZNodeVersion {
 pub struct Features;
 
 // source line: 854
+/// A helper function that builds the FeatureZNode
+#[derive(Debug)]
+pub struct FeatureZNodeBuilder {
+    version_key: String,
+    status_key: String,
+    features_key: String,
+}
+
+impl Default for FeatureZNodeBuilder {
+    fn default() -> Self {
+        Self {
+            version_key: String::from("version"),
+            status_key: String::from("status"),
+            features_key: String::from("features"),
+        }
+    }
+}
+
+impl FeatureZNodeBuilder {
+    /// Attempts to get a key from a json value
+    pub fn get_key(input: serde_json::Value, key: &str) -> Result<String, ZNodeDecodeError> {
+        match input[key].as_str() {
+            Some(val) => Ok(val.to_string()),
+            None => return Err(ZNodeDecodeError::KeyNotFound(key.to_string())),
+        }
+    }
+
+    /// Attempts to create a FeatureZNode from an input Vec<u8> read from ???
+    pub fn build(input: Vec<u8>) -> Result<FeatureZNode, ZNodeDecodeError> {
+        let data = match String::from_utf8(input) {
+            Ok(val) => val,
+            Err(err) => {
+                error!("Unable to transform data: {:?} to String: {}", input, err);
+                return Err(ZNodeDecodeError::Utf8Error(err));
+            },
+        };
+        let decoded_data: serde_json::Value = match serde_json::from_str(&data) {
+            Err(err) => {
+                // Instead of using the `?` operator we do the match here to preserve the previous
+                // error message. Granted, the error message does some convertion that should be
+                // emulated, right after the `:` below: s"${new String(jsonBytes, UTF_8)}", e)
+                error!("Failed to parse feature information: {:?} ", err);
+                return Err(ZNodeDecodeError::Serde(err));
+            },
+            Ok(val) => val,
+        };
+        let builder = Self::default();
+        let version = Self::get_key(decoded_data, &builder.version_key)?.parse::<i32>()?;
+        // RAFKA NOTE: This looks really silly, the current version number is within an enum and
+        // can only be pulled like this.
+        if version < FeatureZNodeVersion::V1 as i32 {
+            return Err(ZNodeDecodeError::UnsupportedVersion(version, data));
+        }
+        let features_map = Self::get_key(decoded_data, &builder.features_key);
+    }
+}
+// source line: 854
 /// `FeatureZNode`  Represents the contents of the ZK node containing finalized feature information.
 #[derive(Debug, ZNodeHandle)]
 pub struct FeatureZNode {
     path: String,
-    version_key: String,
-    status_key: String,
-    features_key: String,
     current_version: FeatureZNodeVersion,
     status: FeatureZNodeStatus,
     features: Vec<Features>,
@@ -373,13 +435,14 @@ impl FeatureZNode {
     pub fn build(status: FeatureZNodeStatus, features: Vec<Features>) -> Self {
         Self {
             path: String::from("/feature"),
-            version_key: String::from("version"),
-            status_key: String::from("status"),
-            features_key: String::from("features"),
-            current_version: FeatureZNodeVersion::v1(),
+            current_version: FeatureZNodeVersion::V1,
             status,
             features,
         }
+    }
+
+    pub fn decode(data: Vec<u8>) -> Result<Self, ZNodeDecodeError> {
+        FeatureZNodeBuilder::build(data)
     }
 }
 
