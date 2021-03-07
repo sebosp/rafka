@@ -34,17 +34,17 @@ pub enum AsyncTask {
 
 #[derive(Error, Debug)]
 pub enum AsyncTaskError {
-    #[error("ZookeeperError {0:?}")]
+    #[error("Zookeeper {0:?}")]
     ZooKeeper(#[from] zookeeper_async::ZkError),
-    #[error("Tokio Mpsc SendError {0:?}")]
+    #[error("Tokio Mpsc Send {0:?}")]
     MpscSend(#[from] tokio::sync::mpsc::error::SendError<AsyncTask>),
-    #[error("Tokio OneShot SendError {0:?}")]
+    #[error("Tokio OneShot TryRecv {0:?}")]
     OneShotTryRecv(#[from] tokio::sync::oneshot::error::TryRecvError),
-    #[error("ZooKeeperClientError {0:?}")]
+    #[error("ZooKeeperClient {0:?}")]
     ZooKeeperClient(#[from] crate::zookeeper::zoo_keeper_client::ZooKeeperClientError),
-    #[error("KafkaZkClientError {0:?}")]
+    #[error("KafkaZkClient {0:?}")]
     KafkaZkClient(#[from] crate::zk::kafka_zk_client::KafkaZkClientError),
-    #[error("FeatureCacheUpdaterError {0:?}")]
+    #[error("FeatureCacheUpdater {0:?}")]
     FeatureCacheUpdater(#[from] FeatureCacheUpdaterError),
 }
 
