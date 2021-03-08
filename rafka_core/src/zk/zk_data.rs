@@ -3,8 +3,9 @@
 
 use crate::server::dynamic_config_manager::ConfigType;
 use rafka_derive::{SubZNodeHandle, ZNodeHandle};
-use tracing::error;
 use zookeeper_async::Acl;
+use std::collections::HashMap;
+use tracing::{debug, error};
 // NOTE: Maybe all of this could be moved into a hashmap or something?
 
 /// `ZNode` contains a known path or parent path of a node that could be stored in ZK
@@ -13,24 +14,37 @@ pub struct ZNode {
     path: String,
 }
 
-impl Default for ZNode {
-    fn default() -> Self {
-        Self { path: String::from("unset") }
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum ZNodeDecodeError {
     #[error("SerdeError {0:?}")]
     Serde(#[from] serde_json::Error),
     #[error("ParseInt {0:?}")]
     ParseInt(#[from] std::num::ParseIntError),
-    #[error("KeyNotFound {0}")]
-    KeyNotFound(String),
+    #[error("KeyNotFound {1} in {0}")]
+    KeyNotFound(String, String),
     #[error("Unsupported version: {0} of feature information: {1:?})")]
     UnsupportedVersion(i32, String),
     #[error("Unable to transform data to String: {0}")]
     Utf8Error(std::string::FromUtf8Error),
+    #[error("Features map can not be absent in: {0}")]
+    FeaturesMapEmpty(String),
+    #[error("Features map is invalid, .features value is malformed.")]
+    FeaturesMapInvalid(String),
+}
+
+impl ZNode {
+    /// Attempts to get a key from a json value
+    pub fn get_key(input: &serde_json::Value, key: &str) -> Result<String, ZNodeDecodeError> {
+        match input[key].as_str() {
+            Some(val) => Ok(val.to_string()),
+            None => return Err(ZNodeDecodeError::KeyNotFound(input.to_string(),key.to_string())),
+        }
+    }
+}
+impl Default for ZNode {
+    fn default() -> Self {
+        Self { path: String::from("unset") }
+    }
 }
 
 pub trait ZNodeHandle {
@@ -384,15 +398,35 @@ impl Default for FeatureZNodeBuilder {
 }
 
 impl FeatureZNodeBuilder {
-    /// Attempts to get a key from a json value
-    pub fn get_key(input: serde_json::Value, key: &str) -> Result<String, ZNodeDecodeError> {
-        match input[key].as_str() {
-            Some(val) => Ok(val.to_string()),
-            None => return Err(ZNodeDecodeError::KeyNotFound(key.to_string())),
+
+    /// Attemps to parse the "features" value, which contains an internal JSON that should map into
+    /// the features vector
+    pub fn parse_features_json_value(&self, input: &serde_json::Value ) -> Result<Vec<Features>, ZNodeDecodeError> {
+        let decoded_data = match ZNode::get_key(input, &self.features_key) {
+            Ok(val) => {
+                debug!("Decoding features value from json");
+                // decode the data into a _.to[Option[Map[String, Map[String, Int]]]]
+                match serde_json::from_str(&val) {
+                    Err(err) => {
+                        error!("Unable to parse features value from json");
+                        return Err(ZNodeDecodeError::Serde(err));
+                    }
+                    Ok(val) => val,
+                }
+            },
+            Err(ZNodeDecodeError::KeyNotFound(feature_znode_data, _key)) => return Err(ZNodeDecodeError::FeaturesMapEmpty(feature_znode_data)),
+            Err(err) => return Err(err),
+        };
+        match decoded_data {
+            serde_json::Value::Object(data) => {
+                // Transform the data HashMap<String, serde_json::Value into Vec<features>
+            },
+            _ => Err(ZNodeDecodeError::FeaturesMapInvalid(input.to_string())),
         }
     }
 
     /// Attempts to create a FeatureZNode from an input Vec<u8> read from ???
+    /// See the tests for the format of the data.
     pub fn build(input: Vec<u8>) -> Result<FeatureZNode, ZNodeDecodeError> {
         let data = match String::from_utf8(input) {
             Ok(val) => val,
@@ -401,7 +435,7 @@ impl FeatureZNodeBuilder {
                 return Err(ZNodeDecodeError::Utf8Error(err));
             },
         };
-        let decoded_data: serde_json::Value = match serde_json::from_str(&data) {
+        let decoded_data : serde_json::Value = match serde_json::from_str(&data) {
             Err(err) => {
                 // Instead of using the `?` operator we do the match here to preserve the previous
                 // error message. Granted, the error message does some convertion that should be
