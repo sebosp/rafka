@@ -59,6 +59,17 @@ impl FinalizedVersionRange {
         )
     }
 
+    /// Attempts to create an instance from a string that contains a json
+    pub fn try_from_json_string(input: &str) -> Result<Self, BaseVersionRangeError> {
+        Ok(FinalizedVersionRange {
+            version_range: BaseVersionRange::try_from_json_string(
+                input,
+                MIN_VERSION_LEVEL_KEY_LABEL.to_string(),
+                MAX_VERSION_LEVEL_KEY_LABEL.to_string(),
+            )?,
+        })
+    }
+
     /// Provides access to the minimum value from the version range
     pub fn min(&self) -> i16 {
         self.version_range.min()
