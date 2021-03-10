@@ -27,6 +27,25 @@ impl FinalizedVersionRange {
         }
     }
 
+    /// Trues to build from a serde_json Value, the Value should be of type Map and should contain
+    /// keys for the min and max labels as keys.
+    pub fn try_from_json(input: &serde_json::Value) -> Result<Self, BaseVersionRangeError> {
+        match input {
+            serde_json::Value::Object(data) => {
+                let min_level = match data.get(MIN_VERSION_LEVEL_KEY_LABEL) {
+                    Some(val) => val.to_string().parse::<i16>()?,
+                    None => return Err(BaseVersionRangeError::IncorrectJsonFormat),
+                };
+                let max_level = match data.get(MAX_VERSION_LEVEL_KEY_LABEL) {
+                    Some(val) => val.to_string().parse::<i16>()?,
+                    None => return Err(BaseVersionRangeError::IncorrectJsonFormat),
+                };
+                Self::new(min_level, max_level)
+            },
+            _ => return Err(BaseVersionRangeError::IncorrectJsonFormat),
+        }
+    }
+
     pub fn new(
         min_version_level: i16,
         max_version_level: i16,
@@ -57,17 +76,6 @@ impl FinalizedVersionRange {
             BaseVersionRange::from(MIN_VERSION_LEVEL_KEY_LABEL, version_range_map),
             BaseVersionRange::from(MAX_VERSION_LEVEL_KEY_LABEL, version_range_map),
         )
-    }
-
-    /// Attempts to create an instance from a string that contains a json
-    pub fn try_from_json_string(input: &str) -> Result<Self, BaseVersionRangeError> {
-        Ok(FinalizedVersionRange {
-            version_range: BaseVersionRange::try_from_json_string(
-                input,
-                MIN_VERSION_LEVEL_KEY_LABEL.to_string(),
-                MAX_VERSION_LEVEL_KEY_LABEL.to_string(),
-            )?,
-        })
     }
 
     /// Provides access to the minimum value from the version range

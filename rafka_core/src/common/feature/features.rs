@@ -41,6 +41,25 @@ impl VersionRangeType {
             Self::Finalized(finalized) => finalized.is_empty(),
         }
     }
+
+    /// Attempts to return the a VersionRangeType from a string containing json
+    pub fn try_from_json_string_as_finalized(input: &str) -> Result<Self, BaseVersionRangeError> {
+        debug!("Attempting to build VersionRangeType from String: {}", input);
+        match serde_json::from_str(input)? {
+            serde_json::Value::Object(data) => {
+                let res: HashMap<String, FinalizedVersionRange> = HashMap::new();
+                for (feature_name, feature_map) in &data {
+                    debug!("Processing feature {}", feature_name);
+                    res.insert(
+                        feature_name.to_string(),
+                        FinalizedVersionRange::try_from_json(feature_map)?,
+                    );
+                }
+                Ok(Self::Finalized(res))
+            },
+            _ => Err(BaseVersionRangeError::IncorrectJsonFormat),
+        }
+    }
 }
 
 /// Represents an immutable dictionary with key being feature name, and value being
@@ -54,6 +73,12 @@ pub struct Features {
 pub enum FeaturesError {
     #[error("Provided features can not be empty")]
     EmptyVersionRangeType,
+    #[error("Features map can not be absent in: {0}")]
+    FeaturesMapEmpty(String),
+    #[error("Features map is invalid, .features value is malformed.")]
+    FeaturesMapInvalid(String),
+    #[error("BaseVersionRange {0:?}")]
+    BaseVersionRange(#[from] BaseVersionRangeError),
 }
 
 impl Features {
@@ -74,6 +99,23 @@ impl Features {
     /// Looks up an item from the features HashMap and returns an Optional found VersionRangeType
     pub fn get(&self, feature: &str) -> Option<VersionRangeType> {
         self.get(feature)
+    }
+
+    /// Attemps to parse the "features" value, which contains an internal JSON that should map into
+    /// the features vector
+    pub fn parse_features_json_value(
+        input: &serde_json::Value,
+        features_key: &str,
+    ) -> Result<Self, FeaturesError> {
+        match input[features_key].as_str() {
+            Some(val) => {
+                debug!("Decoding features value from json");
+                Ok(Features {
+                    features: VersionRangeType::try_from_json_string_as_finalized(&val)?,
+                })
+            },
+            None => Err(FeaturesError::FeaturesMapEmpty(input.to_string())),
+        }
     }
 }
 
