@@ -1,11 +1,13 @@
 //! This file contains objects for encoding/decoding data stored in ZooKeeper nodes (znodes).
 //! core/src/main/scala/kafka/zk/ZkData.scala
 
+use crate::common::feature::features::FeaturesError;
+use crate::common::feature::features::{Features, VersionRangeType};
 use crate::server::dynamic_config_manager::ConfigType;
 use rafka_derive::{SubZNodeHandle, ZNodeHandle};
-use zookeeper_async::Acl;
 use std::collections::HashMap;
 use tracing::{debug, error};
+use zookeeper_async::Acl;
 // NOTE: Maybe all of this could be moved into a hashmap or something?
 
 /// `ZNode` contains a known path or parent path of a node that could be stored in ZK
@@ -16,7 +18,7 @@ pub struct ZNode {
 
 #[derive(thiserror::Error, Debug)]
 pub enum ZNodeDecodeError {
-    #[error("SerdeError {0:?}")]
+    #[error("Serde {0:?}")]
     Serde(#[from] serde_json::Error),
     #[error("ParseInt {0:?}")]
     ParseInt(#[from] std::num::ParseIntError),
@@ -26,10 +28,8 @@ pub enum ZNodeDecodeError {
     UnsupportedVersion(i32, String),
     #[error("Unable to transform data to String: {0}")]
     Utf8Error(std::string::FromUtf8Error),
-    #[error("Features map can not be absent in: {0}")]
-    FeaturesMapEmpty(String),
-    #[error("Features map is invalid, .features value is malformed.")]
-    FeaturesMapInvalid(String),
+    #[error("Features {0:?}")]
+    Features(#[from] FeaturesError),
 }
 
 impl ZNode {
@@ -37,7 +37,7 @@ impl ZNode {
     pub fn get_key(input: &serde_json::Value, key: &str) -> Result<String, ZNodeDecodeError> {
         match input[key].as_str() {
             Some(val) => Ok(val.to_string()),
-            None => return Err(ZNodeDecodeError::KeyNotFound(input.to_string(),key.to_string())),
+            None => return Err(ZNodeDecodeError::KeyNotFound(input.to_string(), key.to_string())),
         }
     }
 }
@@ -373,11 +373,6 @@ pub enum FeatureZNodeVersion {
     V1 = 1,
 }
 
-// TODO: for now just an empty struct, later should be implemented from
-// clients/src/main/java/org/apache/kafka/common/feature/Features.java
-#[derive(Debug)]
-pub struct Features;
-
 // source line: 854
 /// A helper function that builds the FeatureZNode
 #[derive(Debug)]
@@ -398,44 +393,17 @@ impl Default for FeatureZNodeBuilder {
 }
 
 impl FeatureZNodeBuilder {
-
-    /// Attemps to parse the "features" value, which contains an internal JSON that should map into
-    /// the features vector
-    pub fn parse_features_json_value(&self, input: &serde_json::Value ) -> Result<Vec<Features>, ZNodeDecodeError> {
-        let decoded_data = match ZNode::get_key(input, &self.features_key) {
-            Ok(val) => {
-                debug!("Decoding features value from json");
-                // decode the data into a _.to[Option[Map[String, Map[String, Int]]]]
-                match serde_json::from_str(&val) {
-                    Err(err) => {
-                        error!("Unable to parse features value from json");
-                        return Err(ZNodeDecodeError::Serde(err));
-                    }
-                    Ok(val) => val,
-                }
-            },
-            Err(ZNodeDecodeError::KeyNotFound(feature_znode_data, _key)) => return Err(ZNodeDecodeError::FeaturesMapEmpty(feature_znode_data)),
-            Err(err) => return Err(err),
-        };
-        match decoded_data {
-            serde_json::Value::Object(data) => {
-                // Transform the data HashMap<String, serde_json::Value into Vec<features>
-            },
-            _ => Err(ZNodeDecodeError::FeaturesMapInvalid(input.to_string())),
-        }
-    }
-
     /// Attempts to create a FeatureZNode from an input Vec<u8> read from ???
     /// See the tests for the format of the data.
     pub fn build(input: Vec<u8>) -> Result<FeatureZNode, ZNodeDecodeError> {
         let data = match String::from_utf8(input) {
             Ok(val) => val,
             Err(err) => {
-                error!("Unable to transform data: {:?} to String: {}", input, err);
+                error!("Unable to transform data string: {}", err);
                 return Err(ZNodeDecodeError::Utf8Error(err));
             },
         };
-        let decoded_data : serde_json::Value = match serde_json::from_str(&data) {
+        let decoded_data: serde_json::Value = match serde_json::from_str(&data) {
             Err(err) => {
                 // Instead of using the `?` operator we do the match here to preserve the previous
                 // error message. Granted, the error message does some convertion that should be
@@ -462,11 +430,12 @@ pub struct FeatureZNode {
     path: String,
     current_version: FeatureZNodeVersion,
     status: FeatureZNodeStatus,
-    features: Vec<Features>,
+    features: Features,
 }
 
 impl FeatureZNode {
-    pub fn build(status: FeatureZNodeStatus, features: Vec<Features>) -> Self {
+    // RAFKA TODO: This struct already has a builder...
+    pub fn build(status: FeatureZNodeStatus, features: Features) -> Self {
         Self {
             path: String::from("/feature"),
             current_version: FeatureZNodeVersion::V1,

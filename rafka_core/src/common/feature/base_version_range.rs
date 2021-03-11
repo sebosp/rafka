@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::fmt;
 use tracing::debug;
+// RAFKA NOTE: This does not seem to be Serde-derivable because the jsons have different keys for
+// Supported vs Finalized Version Ranges.
 #[derive(Debug, Clone)]
 pub struct BaseVersionRange {
     // Non-empty label for the min version key, that's used only to convert to/from a map.
@@ -93,29 +95,6 @@ impl BaseVersionRange {
         match BaseVersionRange::try_get_value(key, version_range_map) {
             Ok(val) => val,
             Err(err) => panic!(err),
-        }
-    }
-
-    /// Attempts to return the minimum and maximum levels from a string that contaains a json.
-    pub fn try_from_json_string(
-        input: &str,
-        min_key: String,
-        max_key: String,
-    ) -> Result<Self, BaseVersionRangeError> {
-        debug!("Attempting to build BaseVersionRange from String: {}", input);
-        match serde_json::from_str(input)? {
-            serde_json::Value::Object(data) => {
-                let min_level = match data.get(&min_key) {
-                    Some(val) => val.to_string().parse::<i16>()?,
-                    None => return Err(BaseVersionRangeError::IncorrectJsonFormat),
-                };
-                let max_level = match data.get(&max_key) {
-                    Some(val) => val.to_string().parse::<i16>()?,
-                    None => return Err(BaseVersionRangeError::IncorrectJsonFormat),
-                };
-                Self::new(min_key, min_level, max_key, max_level)
-            },
-            _ => Err(BaseVersionRangeError::IncorrectJsonFormat),
         }
     }
 

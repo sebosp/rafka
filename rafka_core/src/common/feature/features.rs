@@ -47,7 +47,7 @@ impl VersionRangeType {
         debug!("Attempting to build VersionRangeType from String: {}", input);
         match serde_json::from_str(input)? {
             serde_json::Value::Object(data) => {
-                let res: HashMap<String, FinalizedVersionRange> = HashMap::new();
+                let mut res: HashMap<String, FinalizedVersionRange> = HashMap::new();
                 for (feature_name, feature_map) in &data {
                     debug!("Processing feature {}", feature_name);
                     res.insert(
