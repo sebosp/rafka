@@ -414,13 +414,18 @@ impl FeatureZNodeBuilder {
             Ok(val) => val,
         };
         let builder = Self::default();
-        let version = Self::get_key(decoded_data, &builder.version_key)?.parse::<i32>()?;
-        // RAFKA NOTE: This looks really silly, the current version number is within an enum and
-        // can only be pulled like this.
+        let version = ZNode::get_key(&decoded_data, &builder.version_key)?.parse::<i32>()?;
         if version < FeatureZNodeVersion::V1 as i32 {
             return Err(ZNodeDecodeError::UnsupportedVersion(version, data));
         }
-        let features_map = Self::get_key(decoded_data, &builder.features_key);
+
+        // RAFKA TODO temp for testing
+        Ok(FeatureZNode {
+            path: String::from("/feature"),
+            current_version: FeatureZNodeVersion::V1,
+            status: FeatureZNodeStatus::Enabled,
+            features: Features::parse_features_json_value(&decoded_data, &builder.features_key)?,
+        })
     }
 }
 // source line: 854
