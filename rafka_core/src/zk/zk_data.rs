@@ -6,6 +6,7 @@ use crate::common::feature::features::{Features, VersionRangeType};
 use crate::server::dynamic_config_manager::ConfigType;
 use rafka_derive::{SubZNodeHandle, ZNodeHandle};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use tracing::{debug, error};
 use zookeeper_async::Acl;
 // NOTE: Maybe all of this could be moved into a hashmap or something?
@@ -20,9 +21,9 @@ pub struct ZNode {
 pub enum ZNodeDecodeError {
     #[error("Serde {0:?}")]
     Serde(#[from] serde_json::Error),
-    #[error("ParseInt {0:?}")]
-    ParseInt(#[from] std::num::ParseIntError),
-    #[error("KeyNotFound {1} in {0}")]
+    #[error("TryFromInt {0:?}")]
+    TryFromInt(#[from] std::num::TryFromIntError),
+    #[error("KeyNotFound {0} in {1}")]
     KeyNotFound(String, String),
     #[error("Unsupported version: {0} of feature information: {1:?})")]
     UnsupportedVersion(i32, String),
@@ -32,15 +33,6 @@ pub enum ZNodeDecodeError {
     Features(#[from] FeaturesError),
 }
 
-impl ZNode {
-    /// Attempts to get a key from a json value
-    pub fn get_key(input: &serde_json::Value, key: &str) -> Result<String, ZNodeDecodeError> {
-        match input[key].as_str() {
-            Some(val) => Ok(val.to_string()),
-            None => return Err(ZNodeDecodeError::KeyNotFound(input.to_string(), key.to_string())),
-        }
-    }
-}
 impl Default for ZNode {
     fn default() -> Self {
         Self { path: String::from("unset") }
@@ -351,14 +343,14 @@ impl DelegationTokensZNode {
 ///    will switch the FeatureZNode status to disabled with empty features.
 
 // source line: 837
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum FeatureZNodeStatus {
     Disabled,
     Enabled,
 }
 
 impl FeatureZNodeStatus {
-    pub fn withNameOpt(value: i32) -> Option<Self> {
+    pub fn with_name_opt(value: i32) -> Option<Self> {
         match value {
             1 => Some(FeatureZNodeStatus::Disabled),
             2 => Some(FeatureZNodeStatus::Enabled),
@@ -414,7 +406,15 @@ impl FeatureZNodeBuilder {
             Ok(val) => val,
         };
         let builder = Self::default();
-        let version = ZNode::get_key(&decoded_data, &builder.version_key)?.parse::<i32>()?;
+        let version = match &decoded_data[&builder.version_key].as_u64() {
+            Some(val) => i32::try_from(*val)?,
+            None => {
+                return Err(ZNodeDecodeError::KeyNotFound(
+                    builder.version_key.to_string(),
+                    decoded_data.to_string(),
+                ))
+            },
+        };
         if version < FeatureZNodeVersion::V1 as i32 {
             return Err(ZNodeDecodeError::UnsupportedVersion(version, data));
         }
@@ -486,5 +486,35 @@ impl Default for ZkData {
             config_types,
             config,
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::common::feature::finalized_version_range::FinalizedVersionRange;
+    use tracing::info;
+    // From core/src/test/scala/kafka/zk/FeatureZNodeTest.scala
+    #[test_env_log::test]
+    fn feature_builder_decodes() {
+        let valid_features = serde_json::json!({
+            "version":1,
+            "status":1,
+            "features": r#"{"feature1":{ "min_version_level": 1, "max_version_level": 2}, "feature2": {"min_version_level": 2, "max_version_level": 4}}"#
+        });
+        info!("valid_features.version: {:?}", valid_features["version"]);
+        info!("features_json_str: {}", valid_features.to_string());
+        let build_res = FeatureZNode::decode(valid_features.to_string().as_bytes().to_vec());
+        let built_znode = build_res.unwrap();
+        assert_eq!(built_znode.status, FeatureZNodeStatus::Enabled);
+        let mut expected_features: HashMap<String, FinalizedVersionRange> = HashMap::new();
+        expected_features
+            .insert(String::from("feature1"), FinalizedVersionRange::new(1, 2).unwrap());
+        expected_features
+            .insert(String::from("feature2"), FinalizedVersionRange::new(2, 4).unwrap());
+        assert_eq!(
+            Features { features: VersionRangeType::Finalized(expected_features) },
+            built_znode.features
+        );
     }
 }

@@ -11,7 +11,7 @@ use std::fmt;
 use tracing::debug;
 // RAFKA NOTE: This does not seem to be Serde-derivable because the jsons have different keys for
 // Supported vs Finalized Version Ranges.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BaseVersionRange {
     // Non-empty label for the min version key, that's used only to convert to/from a map.
     min_key_label: String,

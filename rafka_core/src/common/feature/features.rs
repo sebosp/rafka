@@ -8,7 +8,7 @@ use std::fmt;
 use thiserror::Error;
 use tracing::debug;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum VersionRangeType {
     Supported(HashMap<String, SupportedVersionRange>),
     Finalized(HashMap<String, FinalizedVersionRange>),
@@ -64,9 +64,9 @@ impl VersionRangeType {
 
 /// Represents an immutable dictionary with key being feature name, and value being
 /// either Supported or Finalized VersionRanges
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Features {
-    features: VersionRangeType,
+    pub features: VersionRangeType,
 }
 
 #[derive(Debug, Error)]
