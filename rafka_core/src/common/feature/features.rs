@@ -103,7 +103,7 @@ impl Features {
 
     /// Attemps to parse the "features" value, which contains an internal JSON that should map into
     /// the features vector
-    pub fn parse_features_json_value(
+    pub fn parse_finalized_features_json_value(
         input: &serde_json::Value,
         features_key: &str,
     ) -> Result<Self, FeaturesError> {

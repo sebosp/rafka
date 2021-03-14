@@ -31,6 +31,8 @@ pub enum ZNodeDecodeError {
     Utf8Error(std::string::FromUtf8Error),
     #[error("Features {0:?}")]
     Features(#[from] FeaturesError),
+    #[error("MalformedStatus {0} found in feature information")]
+    MalformedStatus(i32, String),
 }
 
 impl Default for ZNode {
@@ -352,8 +354,8 @@ pub enum FeatureZNodeStatus {
 impl FeatureZNodeStatus {
     pub fn with_name_opt(value: i32) -> Option<Self> {
         match value {
-            1 => Some(FeatureZNodeStatus::Disabled),
-            2 => Some(FeatureZNodeStatus::Enabled),
+            0 => Some(FeatureZNodeStatus::Disabled), // RAFKA TODO: verify this is 0-based enum
+            1 => Some(FeatureZNodeStatus::Enabled),
             _ => None,
         }
     }
@@ -419,12 +421,29 @@ impl FeatureZNodeBuilder {
             return Err(ZNodeDecodeError::UnsupportedVersion(version, data));
         }
 
-        // RAFKA TODO temp for testing
+        let status_int = match &decoded_data[&builder.status_key].as_u64() {
+            Some(val) => i32::try_from(*val)?,
+            None => {
+                return Err(ZNodeDecodeError::KeyNotFound(
+                    builder.version_key.to_string(),
+                    decoded_data.to_string(),
+                ))
+            },
+        };
+        let status = match FeatureZNodeStatus::with_name_opt(status_int) {
+            Some(val) => val,
+            None => {
+                return Err(ZNodeDecodeError::MalformedStatus(status_int, decoded_data.to_string()))
+            },
+        };
         Ok(FeatureZNode {
             path: String::from("/feature"),
             current_version: FeatureZNodeVersion::V1,
-            status: FeatureZNodeStatus::Enabled,
-            features: Features::parse_features_json_value(&decoded_data, &builder.features_key)?,
+            status,
+            features: Features::parse_finalized_features_json_value(
+                &decoded_data,
+                &builder.features_key,
+            )?,
         })
     }
 }
@@ -439,16 +458,6 @@ pub struct FeatureZNode {
 }
 
 impl FeatureZNode {
-    // RAFKA TODO: This struct already has a builder...
-    pub fn build(status: FeatureZNodeStatus, features: Features) -> Self {
-        Self {
-            path: String::from("/feature"),
-            current_version: FeatureZNodeVersion::V1,
-            status,
-            features,
-        }
-    }
-
     pub fn decode(data: Vec<u8>) -> Result<Self, ZNodeDecodeError> {
         FeatureZNodeBuilder::build(data)
     }
@@ -496,7 +505,7 @@ mod test {
     use tracing::info;
     // From core/src/test/scala/kafka/zk/FeatureZNodeTest.scala
     #[test_env_log::test]
-    fn feature_builder_decodes() {
+    fn feature_znode_builder_decodes() {
         let valid_features = serde_json::json!({
             "version":1,
             "status":1,
@@ -515,6 +524,20 @@ mod test {
         assert_eq!(
             Features { features: VersionRangeType::Finalized(expected_features) },
             built_znode.features
+        );
+        let empty_features = serde_json::json!({
+            "version":1,
+            "status":1,
+            "features": "{}",
+        });
+        let empty_features_build_res =
+            FeatureZNode::decode(empty_features.to_string().as_bytes().to_vec());
+        info!("Empty Feature ZNode: {:?}", empty_features_build_res);
+        let empty_features_built_znode = empty_features_build_res.unwrap();
+        let expected_features: HashMap<String, FinalizedVersionRange> = HashMap::new();
+        assert_eq!(
+            Features { features: VersionRangeType::Finalized(expected_features) },
+            empty_features_built_znode.features
         );
     }
 }
