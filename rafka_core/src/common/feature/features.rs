@@ -57,6 +57,11 @@ impl VersionRangeType {
                 }
                 Ok(Self::Finalized(res))
             },
+            serde_json::Value::Null => {
+                // The features may be empty
+                let res: HashMap<String, FinalizedVersionRange> = HashMap::new();
+                Ok(Self::Finalized(res))
+            },
             _ => Err(BaseVersionRangeError::IncorrectJsonFormat),
         }
     }
