@@ -2,7 +2,6 @@
 //
 // Helper class that represents finalized features along with an epoch value.
 use crate::common::feature::features::Features;
-use crate::common::feature::finalized_version_range::FinalizedVersionRange;
 use crate::majordomo::AsyncTaskError;
 use std::fmt;
 use tracing::info;
@@ -57,6 +56,10 @@ impl FinalizedFeatureCache {
     pub fn clear(&mut self) {
         info!("Cleared cache");
         self.features_and_epoch = None;
+    }
+
+    pub fn update_or_throw() {
+        unimplemented!();
     }
 }
 
