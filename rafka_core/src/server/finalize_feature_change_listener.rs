@@ -24,6 +24,11 @@ pub struct FinalizedFeatureChangeListener {
 pub enum FeatureCacheUpdaterError {
     #[error("Can not notify after update_latest_or_throw was called more than once successfully.")]
     CalledMoreThanOnce,
+    #[error(
+        "FinalizedFeatureCache update failed due to invalid epoch in new finalized {0}. The \
+         existing cache contents are {:1}"
+    )]
+    InvalidEpoch(String, String),
 }
 
 #[derive(Debug)]
@@ -60,6 +65,8 @@ impl FeatureCacheUpdater {
         &mut self,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
+        // TODO: This data should be owned by the async_coordinator and no tx/rx would be needed
+        // except from zookeeper change listeners to the async coordinator thread.
         if let Some(notifier) = self.maybe_notify_once {
             if notifier != 1u8 {
                 return Err(AsyncTaskError::FeatureCacheUpdater(
@@ -81,7 +88,7 @@ impl FeatureCacheUpdater {
         // From the original code:
         // There are 4 cases:
         //
-        // - (empty dataBytes, valid version)w
+        // - (empty dataBytes, valid version)
         // The empty dataBytes will fail FeatureZNode deserialization.
         //    FeatureZNode, when present in ZK, can not have empty contents.
         // - (non-empty dataBytes, valid version)
