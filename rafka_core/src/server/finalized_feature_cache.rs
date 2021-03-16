@@ -3,6 +3,7 @@
 // Helper class that represents finalized features along with an epoch value.
 use crate::common::feature::features::Features;
 use crate::majordomo::AsyncTaskError;
+use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
 use std::fmt;
 use tracing::info;
 use tracing_attributes::instrument;
@@ -58,8 +59,28 @@ impl FinalizedFeatureCache {
         self.features_and_epoch = None;
     }
 
-    pub fn update_or_throw() {
-        unimplemented!();
+    /// Updates the cache to the latestFeatures, and updates the existing epoch to latestEpoch.
+    /// Expects that the latestEpoch should be always greater than the existing epoch (when the
+    /// existing epoch is defined).
+    pub fn update_or_throw(
+        &mut self,
+        latest_features: Features,
+        latest_epoch: i32,
+    ) -> Result<(), AsyncTaskError> {
+        let latest = FinalizedFeaturesAndEpoch::new(latest_features, latest_epoch);
+        match self.features_and_epoch {
+            Some(val) => {
+                if val.epoch > latest.epoch {
+                    return Err(AsyncTaskError::FeatureCacheUpdater(
+                        FeatureCacheUpdaterError::InvalidEpoch(
+                            format!("{}", latest),
+                            format!("{}", val),
+                        ),
+                    ));
+                }
+            },
+            None => String::from("<empty>"),
+        };
     }
 }
 
