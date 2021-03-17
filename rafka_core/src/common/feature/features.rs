@@ -42,6 +42,28 @@ impl VersionRangeType {
         }
     }
 
+    /// Tries to fetch an item by key in the underlying finalized store
+    pub fn get_finalized_key(&self, key: &str) -> Option<&FinalizedVersionRange> {
+        match self {
+            Self::Supported(_) => {
+                // RAFKA TODO: Maybe use Traits and this wouldn't happen
+                panic!("Attempt to fetch Finalized key from SupportedVersionRange")
+            },
+            Self::Finalized(finalized) => finalized.get(key),
+        }
+    }
+
+    /// Tries to fetch an item by key in the underlying supported store
+    pub fn get_supported_key(&self, key: &str) -> Option<&SupportedVersionRange> {
+        match self {
+            Self::Supported(supported) => supported.get(key),
+            Self::Finalized(_) => {
+                // RAFKA TODO: Maybe use Traits and this wouldn't happen
+                panic!("Attempt to fetch Finalized key from SupportedVersionRange")
+            },
+        }
+    }
+
     /// Attempts to return the a VersionRangeType from a string containing json
     pub fn try_from_json_string_as_finalized(input: &str) -> Result<Self, BaseVersionRangeError> {
         debug!("Attempting to build VersionRangeType from String: {}", input);
@@ -102,8 +124,23 @@ impl Features {
     }
 
     /// Looks up an item from the features HashMap and returns an Optional found VersionRangeType
-    pub fn get(&self, feature: &str) -> Option<VersionRangeType> {
-        self.get(feature)
+    pub fn get_finalized(&self, feature: &str) -> Option<&FinalizedVersionRange> {
+        self.features.get_finalized_key(feature)
+    }
+
+    /// Looks up an item from the features HashMap and returns an Optional found VersionRangeType
+    pub fn get_supported(&self, feature: &str) -> Option<&SupportedVersionRange> {
+        self.features.get_supported_key(feature)
+    }
+
+    pub fn empty_supported_features() -> Self {
+        let res: HashMap<String, SupportedVersionRange> = HashMap::new();
+        Self { features: VersionRangeType::Supported(res) }
+    }
+
+    pub fn empty_finalized_features() -> Self {
+        let res: HashMap<String, FinalizedVersionRange> = HashMap::new();
+        Self { features: VersionRangeType::Finalized(res) }
     }
 
     /// Attemps to parse the "features" value, which contains an internal JSON that should map into
