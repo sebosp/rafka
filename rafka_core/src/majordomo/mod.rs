@@ -10,6 +10,7 @@ use crate::server::finalized_feature_cache::{
     FinalizedFeatureCache, FinalizedFeatureCacheAsyncTask,
 };
 use crate::server::kafka_config::KafkaConfig;
+use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use std::error::Error;
 use std::time::Instant;
@@ -70,6 +71,7 @@ impl AsyncTaskError {
 pub struct Coordinator {
     kafka_config: KafkaConfig,
     finalized_feature_cache: FinalizedFeatureCache,
+    supported_features: SupportedFeatures,
     pub tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
 }
@@ -78,7 +80,8 @@ impl Coordinator {
     pub fn new(kafka_config: KafkaConfig) -> Self {
         let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
         let finalized_feature_cache = FinalizedFeatureCache::default();
-        Coordinator { kafka_config, finalized_feature_cache, tx, rx }
+        let supported_features = SupportedFeatures::default();
+        Coordinator { kafka_config, finalized_feature_cache, tx, rx, supported_features }
     }
 
     pub fn main_tx(&self) -> mpsc::Sender<AsyncTask> {
