@@ -29,12 +29,19 @@ pub enum FeatureCacheUpdaterError {
          existing cache contents are {:1}"
     )]
     InvalidEpoch(String, String),
+    #[error(
+        "FinalizedFeatureCache update failed since feature compatibility checks failed! Supported \
+         {0} has incompatibilities with the latest {1}."
+    )]
+    Incompatible(String, String),
 }
 
 #[derive(Debug)]
 pub struct FeatureCacheUpdater {
     feature_zk_node_path: String,
-    maybe_notify_once: Option<u8>, // TODO: implement this with CountDownLatch
+    maybe_notify_once: Option<u8>, /* TODO: initially this was CountDownLatch but since this is
+                                    * no longer being used across threads and there is a clear
+                                    * ownership, then we won't run into this. */
 }
 
 impl FeatureCacheUpdater {
