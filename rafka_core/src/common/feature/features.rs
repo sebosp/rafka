@@ -119,8 +119,8 @@ impl Features {
         Self { features: VersionRangeType::Finalized(features) }
     }
 
-    pub fn is_empty(&self) {
-        self.features.is_empty();
+    pub fn is_empty(&self) -> bool {
+        self.features.is_empty()
     }
 
     /// Looks up an item from the features HashMap and returns an Optional found VersionRangeType
