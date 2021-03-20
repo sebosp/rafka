@@ -118,6 +118,7 @@ impl Coordinator {
                     info!("finalized feature cache task is {:?}", task);
                     FinalizedFeatureCacheAsyncTask::process_task(
                         &mut self.finalized_feature_cache,
+                        &mut self.supported_features,
                         task,
                     )
                     .await?;

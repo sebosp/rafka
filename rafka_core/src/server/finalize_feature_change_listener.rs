@@ -8,12 +8,14 @@ use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::finalized_feature_cache::{
     FinalizedFeatureCache, FinalizedFeatureCacheAsyncTask,
 };
+use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data;
+use crate::zookeeper::zoo_keeper_client::ZNodeChangeHandler;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use tracing_attributes::instrument;
 #[derive(Debug)]
 pub struct FinalizedFeatureChangeListener {
@@ -70,6 +72,8 @@ impl FeatureCacheUpdater {
     #[instrument]
     pub async fn update_latest_or_throw(
         &mut self,
+        supported_features: &mut SupportedFeatures,
+        finalized_feature_cache: &mut FinalizedFeatureCache,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         // TODO: This data should be owned by the async_coordinator and no tx/rx would be needed
@@ -128,7 +132,11 @@ impl FeatureCacheUpdater {
                     zk_data::FeatureZNodeStatus::Enabled => {
                         // RAFKA TODO: The ZK Reader and the FinalizedFeatureCache may be owned by
                         // the same thread and so no need for sending messages between them...
-                        FinalizedFeatureCache::update_or_throw(val.features, response.version);
+                        finalized_feature_cache.update_or_throw(
+                            supported_features,
+                            val.features,
+                            response.version,
+                        );
                     },
                     /* RAFKA NOTE: The original code checks for other possible values on the
                      * FeatureZNodeStatus However, if when decoded, the value
@@ -146,6 +154,39 @@ impl FeatureCacheUpdater {
             }
         }
         Ok(())
+    }
+
+    pub async fn handle_creation(
+        &mut self,
+        supported_features: &mut SupportedFeatures,
+        finalized_feature_cache: &mut FinalizedFeatureCache,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<(), AsyncTaskError> {
+        info!("Feature ZK node created at path: {}", self.feature_zk_node_path);
+        self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
+    }
+
+    pub async fn handle_data_change(
+        &mut self,
+        supported_features: &mut SupportedFeatures,
+        finalized_feature_cache: &mut FinalizedFeatureCache,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<(), AsyncTaskError> {
+        info!("Feature ZK node updated at path: {}", self.feature_zk_node_path);
+        self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
+    }
+
+    pub async fn handle_deletion(
+        &mut self,
+        supported_features: &mut SupportedFeatures,
+        finalized_feature_cache: &mut FinalizedFeatureCache,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<(), AsyncTaskError> {
+        warn!("Feature ZK node deleted at path: {}", self.feature_zk_node_path);
+        // This event may happen, rarely (ex: ZK corruption or operational error).
+        // In such a case, we prefer to just log a warning and treat the case as if the node is
+        // absent, and populate the FinalizedFeatureCache with empty finalized features.
+        self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
     }
 }
 
