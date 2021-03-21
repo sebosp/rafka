@@ -453,8 +453,8 @@ impl FeatureZNodeBuilder {
 pub struct FeatureZNode {
     path: String,
     current_version: FeatureZNodeVersion,
-    status: FeatureZNodeStatus,
-    features: Features,
+    pub status: FeatureZNodeStatus,
+    pub features: Features,
 }
 
 impl FeatureZNode {
