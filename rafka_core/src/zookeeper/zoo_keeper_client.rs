@@ -1,5 +1,12 @@
 //! A ZooKeeper client that encourages pipelined requests.
 //! core/src/main/scala/kafka/zookeeper/ZooKeeperClient.scala
+//! RAFKA Specific:
+//! - While the library uses re-entrant locks and concurrent structures extensively, this crate will
+//!   rather use mpsc channels to communicate back and forth and have a main loop.
+//! - The Kafkascheduler is not used, it creates an executor and schedules tasks, rather, the tokio
+//!   scheduler will be used.
+//! - Need to figure out reconnection to zookeeper
+//! (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
 
 // RAFKA TODO: Check if we can do the "pipeline" with the rust libraries
 
@@ -7,13 +14,6 @@ use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use std::fmt;
-/// RAFKA Specific:
-/// - While the library uses re-entrant locks and concurrent structures extensively, this crate
-///   will rather use mpsc channels to communicate back and forth and have a main loop.
-/// - The Kafkascheduler is not used, it creates an executor and schedules tasks, rather, the
-///   tokio scheduler will be used.
-/// - Need to figure out reconnection to zookeeper
-/// (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::info;
@@ -213,9 +213,9 @@ impl Default for ZooKeeperClient {
 }
 
 pub trait ZNodeChangeHandler {
-    fn handle_creation();
-    fn handle_deletion();
-    fn handle_data_change();
+    fn handle_creation(&mut self);
+    fn handle_deletion(&mut self);
+    fn handle_data_change(&mut self);
 }
 
 pub trait ZNodeChildChangeHandler {
