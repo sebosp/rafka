@@ -1,9 +1,20 @@
 //! Majordomo - An async message handler
-//! This module handles creation of Multiple-Producer-Single-Consumer that handles I/O operation
-//! requests from different threads to networking  resources.
+//! This module provides Multiple-Producer-Single-Consumer functionality to handles I/O operation
+//! requests from different threads to networking resources.
 //! The coordinator was built on thoughts of tokio versions before 1.0.
 //! The name is of the module is a reference to ZMQ ZGuide Majordomo protocol, as it handles
 //! messages in a similar fasion.
+//! Several times an object has been found as volatile in the source code, it has been moved
+//! ownership here so that there's its state can be shared across threads, for example:
+//! - featuresAndEpoch from FinalizedFeatureCache
+//! - supportedFeatures from SupportedFeatures
+//! - ZookeeperClient (This was moved here because the zookeeper-async client cannot be shared
+//! between threads.
+//! - KafkaConfig may be moved here so that hot-reloads are possible and its state shared.
+//! Currently the Config is read once and then copied, once for background kafka server and another
+//! for Majordomo.
+//! TODO:
+//! - Add zookeeper watcher ties for the FeatureZNode
 
 use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
 use crate::server::finalized_feature_cache::{
