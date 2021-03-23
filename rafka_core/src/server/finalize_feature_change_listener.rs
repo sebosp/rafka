@@ -36,6 +36,8 @@ pub enum FeatureCacheUpdaterError {
          {0} has incompatibilities with the latest {1}."
     )]
     Incompatible(String, String),
+    #[error("Expected waitOnceForCacheUpdateMs > 0, but provided: {0}")]
+    InvalidWaitForCacheValue(i64),
 }
 
 #[derive(Debug)]
@@ -53,9 +55,11 @@ impl FeatureCacheUpdater {
 
     /// Sends the Clear operation to the majordomo coordinator that holds the shared state.
     #[instrument]
-    pub async fn clear_finalized_feature_cache(
+    pub async fn send_clear_finalized_feature_cache(
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
+        // TODO: Remove: This is not needed anymore an the Majordomo Coordinator owns both the
+        // supported and finalized features.
         debug!("Sending the FinalizedFeatureCacheAsyncTask::Clear message");
         // Clear the finalized feature cache:
         majordomo_tx
@@ -76,8 +80,6 @@ impl FeatureCacheUpdater {
         finalized_feature_cache: &mut FinalizedFeatureCache,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
-        // TODO: This data should be owned by the async_coordinator and no tx/rx would be needed
-        // except from zookeeper change listeners to the async coordinator thread.
         if let Some(notifier) = self.maybe_notify_once {
             if notifier != 1u8 {
                 return Err(AsyncTaskError::FeatureCacheUpdater(
@@ -116,7 +118,7 @@ impl FeatureCacheUpdater {
 
         if response.version == zk_data::ZkVersion::UnknownVersion as i32 {
             info!("Feature ZK node at path: {} does not exist", self.feature_zk_node_path);
-            Self::clear_finalized_feature_cache(majordomo_tx.clone()).await?;
+            finalized_feature_cache.clear();
             return Ok(());
         }
         if let Some(data) = response.data {
@@ -127,16 +129,17 @@ impl FeatureCacheUpdater {
                             "Feature ZK node at path: {} is in disabled status.",
                             self.feature_zk_node_path
                         );
-                        Self::clear_finalized_feature_cache(majordomo_tx.clone()).await?;
+                        finalized_feature_cache.clear();
                     },
                     zk_data::FeatureZNodeStatus::Enabled => {
-                        // RAFKA TODO: The ZK Reader and the FinalizedFeatureCache may be owned by
-                        // the same thread and so no need for sending messages between them...
+                        // RAFKA SPECIFIC: The supported and finalized features are owned by the
+                        // same coordinator thread and so no need to make them shared across
+                        // threads.
                         finalized_feature_cache.update_or_throw(
                             supported_features,
                             val.features,
                             response.version,
-                        );
+                        )?;
                     },
                     /* RAFKA NOTE: The original code checks for other possible values on the
                      * FeatureZNodeStatus However, if when decoded, the value
@@ -149,23 +152,28 @@ impl FeatureCacheUpdater {
                         "Unable to deserialize feature ZK node at path: {} error: {}",
                         self.feature_zk_node_path, err
                     );
-                    Self::clear_finalized_feature_cache(majordomo_tx.clone()).await?;
+                    finalized_feature_cache.clear();
                 },
             }
         }
         Ok(())
     }
 
+    /// From the Trait ZNodeChangeHandler, should be made trait once the trait fns can be async
+    #[instrument]
     pub async fn handle_creation(
         &mut self,
         supported_features: &mut SupportedFeatures,
         finalized_feature_cache: &mut FinalizedFeatureCache,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
+        // RAFKA TODO: Tie to zookeeper watcher
         info!("Feature ZK node created at path: {}", self.feature_zk_node_path);
         self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
     }
 
+    /// From the Trait ZNodeChangeHandler, should be made trait once the trait fns can be async
+    #[instrument]
     pub async fn handle_data_change(
         &mut self,
         supported_features: &mut SupportedFeatures,
@@ -176,6 +184,8 @@ impl FeatureCacheUpdater {
         self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
     }
 
+    /// From the Trait ZNodeChangeHandler, should be made trait once the trait fns can be async
+    #[instrument]
     pub async fn handle_deletion(
         &mut self,
         supported_features: &mut SupportedFeatures,
