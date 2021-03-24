@@ -16,13 +16,16 @@
 //! TODO:
 //! - Add zookeeper watcher ties for the FeatureZNode
 
-use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
+use crate::server::finalize_feature_change_listener::{
+    FeatureCacheUpdater, FeatureCacheUpdaterError,
+};
 use crate::server::finalized_feature_cache::{
     FinalizedFeatureCache, FinalizedFeatureCacheAsyncTask,
 };
 use crate::server::kafka_config::KafkaConfig;
 use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
+use crate::zk::zk_data::FeatureZNode;
 use std::error::Error;
 use std::time::Instant;
 use thiserror::Error;
@@ -81,18 +84,35 @@ impl AsyncTaskError {
 #[derive(Debug)]
 pub struct Coordinator {
     kafka_config: KafkaConfig,
-    finalized_feature_cache: FinalizedFeatureCache,
+    feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
+    kafka_zk_client: KafkaZkClient,
     pub tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
 }
 
 impl Coordinator {
-    pub fn new(kafka_config: KafkaConfig) -> Self {
+    pub async fn new(kafka_config: KafkaConfig) -> Result<Self, AsyncTaskError> {
         let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let finalized_feature_cache = FinalizedFeatureCache::default();
         let supported_features = SupportedFeatures::default();
-        Coordinator { kafka_config, finalized_feature_cache, tx, rx, supported_features }
+        let init_time = Instant::now();
+        let mut kafka_zk_client = KafkaZkClient::build(
+            &kafka_config.zk_connect,
+            &kafka_config,
+            Some(String::from("Async Coordinator")),
+            init_time,
+            None,
+        );
+        let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
+        kafka_zk_client.init(&kafka_config).await?;
+        Ok(Coordinator {
+            kafka_config,
+            tx,
+            rx,
+            feature_cache_updater,
+            kafka_zk_client,
+            supported_features,
+        })
     }
 
     pub fn main_tx(&self) -> mpsc::Sender<AsyncTask> {
@@ -102,21 +122,19 @@ impl Coordinator {
     #[instrument]
     pub async fn async_coordinator(&mut self) -> Result<(), AsyncTaskError> {
         debug!("async_coordinator: Preparing");
-        let init_time = Instant::now();
-        let mut kafka_zk_client = KafkaZkClient::build(
-            &self.kafka_config.zk_connect,
-            &self.kafka_config,
-            Some(String::from("Async Coordinator")),
-            init_time,
-            None,
-        );
+        self.feature_cache_updater
+            .init_or_throw(
+                &mut self.kafka_zk_client,
+                self.kafka_config.zk_connection_timeout_ms.into(),
+            )
+            .await?;
         debug!("async_coordinator: Main loop starting");
         while let Some(message) = self.rx.recv().await {
             debug!("async_coordinator: message: {:?}", message);
             match message {
                 AsyncTask::Zookeeper(task) => {
                     KafkaZkClientAsyncTask::process_task(
-                        &mut kafka_zk_client,
+                        &mut self.kafka_zk_client,
                         &self.kafka_config,
                         task,
                     )
@@ -128,7 +146,7 @@ impl Coordinator {
                 AsyncTask::FinalizedFeatureCache(task) => {
                     info!("finalized feature cache task is {:?}", task);
                     FinalizedFeatureCacheAsyncTask::process_task(
-                        &mut self.finalized_feature_cache,
+                        &mut self.feature_cache_updater,
                         &mut self.supported_features,
                         task,
                     )
@@ -136,7 +154,7 @@ impl Coordinator {
                 },
             }
         }
-        kafka_zk_client.close().await.unwrap();
+        self.kafka_zk_client.close().await.unwrap();
         error!("async_coordinator: Exiting.");
         Ok(())
     }
