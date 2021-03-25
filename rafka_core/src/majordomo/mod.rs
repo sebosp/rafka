@@ -17,10 +17,7 @@
 //! - Add zookeeper watcher ties for the FeatureZNode
 
 use crate::server::finalize_feature_change_listener::{
-    FeatureCacheUpdater, FeatureCacheUpdaterError,
-};
-use crate::server::finalized_feature_cache::{
-    FinalizedFeatureCache, FinalizedFeatureCacheAsyncTask,
+    FeatureCacheUpdater, FeatureCacheUpdaterAsyncTask, FeatureCacheUpdaterError,
 };
 use crate::server::kafka_config::KafkaConfig;
 use crate::server::supported_features::SupportedFeatures;
@@ -43,7 +40,7 @@ pub enum CoordinatorTask {
 #[derive(Debug)]
 pub enum AsyncTask {
     Zookeeper(KafkaZkClientAsyncTask),
-    FinalizedFeatureCache(FinalizedFeatureCacheAsyncTask),
+    FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask),
     Coordinator(CoordinatorTask),
 }
 
@@ -145,7 +142,7 @@ impl Coordinator {
                 },
                 AsyncTask::FinalizedFeatureCache(task) => {
                     info!("finalized feature cache task is {:?}", task);
-                    FinalizedFeatureCacheAsyncTask::process_task(
+                    FeatureCacheUpdaterAsyncTask::process_task(
                         &mut self.feature_cache_updater,
                         &mut self.supported_features,
                         task,

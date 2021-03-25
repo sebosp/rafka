@@ -1,14 +1,14 @@
 // From kafka/server/FinalizedFeatureCache.scala
 //
-// Helper class that represents finalized features along with an epoch value.
 use crate::common::feature::features::Features;
 use crate::majordomo::AsyncTaskError;
 use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
+use crate::server::supported_features::SupportedFeatures;
 use std::fmt;
 use tracing::info;
 use tracing_attributes::instrument;
 
-/// Represents finalized features along with an epoch value #[derive(Debug)]
+/// Represents finalized features along with an epoch value
 #[derive(Debug, Clone)]
 pub struct FinalizedFeaturesAndEpoch {
     features: Features,
@@ -64,41 +64,37 @@ impl FinalizedFeatureCache {
     /// existing epoch is defined).
     pub fn update_or_throw(
         &mut self,
+        supported_features: &mut SupportedFeatures,
         latest_features: Features,
         latest_epoch: i32,
     ) -> Result<(), AsyncTaskError> {
+        // FeatureCacheUpdateException if the cache update operation fails
+        // due to invalid parameters or incompatibilities with the broker's
+        // supported features. In such a case, the existing cache contents
+        // are not modified.
         let latest = FinalizedFeaturesAndEpoch::new(latest_features, latest_epoch);
-        match self.features_and_epoch {
-            Some(val) => {
-                if val.epoch > latest.epoch {
-                    return Err(AsyncTaskError::FeatureCacheUpdater(
-                        FeatureCacheUpdaterError::InvalidEpoch(
-                            format!("{}", latest),
-                            format!("{}", val),
-                        ),
-                    ));
-                }
-            },
-            None => String::from("<empty>"),
-        };
-    }
-}
-
-/// Majordomo Coordinator handling of async tasks
-#[derive(Debug)]
-pub enum FinalizedFeatureCacheAsyncTask {
-    Clear,
-}
-
-impl FinalizedFeatureCacheAsyncTask {
-    #[instrument]
-    pub async fn process_task(
-        cache: &mut FinalizedFeatureCache,
-        task: Self,
-    ) -> Result<(), AsyncTaskError> {
-        match task {
-            Self::Clear => cache.clear(),
+        let old_feature_and_epoch =
+            self.features_and_epoch.as_ref().map_or(String::from("<empty>"), |val| val.to_string());
+        if let Some(val) = &self.features_and_epoch {
+            if val.epoch > latest.epoch {
+                return Err(AsyncTaskError::FeatureCacheUpdater(
+                    FeatureCacheUpdaterError::InvalidEpoch(latest.to_string(), val.to_string()),
+                ));
+            }
         }
-        Ok(())
+        let incompatible_features = supported_features.incompatible_features(&latest.features);
+        if incompatible_features.is_empty() {
+            info!(
+                "Updated cache from existing finalized {} to latest finalized {}",
+                old_feature_and_epoch, latest
+            );
+            self.features_and_epoch = Some(latest);
+            Ok(())
+        } else {
+            Err(AsyncTaskError::FeatureCacheUpdater(FeatureCacheUpdaterError::Incompatible(
+                supported_features.get().to_string(),
+                latest.to_string(),
+            )))
+        }
     }
 }
