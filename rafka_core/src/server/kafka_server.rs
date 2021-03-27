@@ -220,7 +220,6 @@ impl KafkaServer {
 
         // setup zookeeper
         self.broker_state = BrokerState::Starting;
-        self.async_task_tx.send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::Init)).await?;
         // TODO: Either move this to the async-coordinator or use the tx field to create the
         // listeners for FinalizedFeatureChangeListener
         // self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));
@@ -232,13 +231,9 @@ impl KafkaServer {
         Ok(())
     }
 
-    #[instrument]
-    pub async fn init_zk_client(&mut self) -> Result<(), AsyncTaskError> {
-        // NOTE: This has been moved to crate::majordomo::async_coordinator as first step before
-        // starting to process messages
-        info!("Sending Connect to zookeeper on {:?}", self.kafka_config.zk_connect);
-        Ok(())
-    }
+    // pub async fn init_zk_client(&mut self)
+    // NOTE: This has been moved to crate::majordomo::async_coordinator as first step before
+    // starting to process messages
 
     /// Creates a new zk_client for the zk_connect parameter
     fn create_zk_client(&self, zk_connect: &str) -> KafkaZkClient {
