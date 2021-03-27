@@ -461,6 +461,10 @@ impl FeatureZNode {
     pub fn decode(data: Vec<u8>) -> Result<Self, ZNodeDecodeError> {
         FeatureZNodeBuilder::build(data)
     }
+
+    pub fn default_path() -> String {
+        String::from("/feature")
+    }
 }
 
 impl Default for ZkData {
