@@ -10,13 +10,16 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
-use crate::majordomo::AsyncTaskError;
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
 use std::error::Error;
+use std::thread;
 use std::time::Instant;
+use tokio::runtime::Handle;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 use tracing_attributes::instrument;
@@ -40,7 +43,7 @@ pub struct KafkaZkClient {
     // id changes over the time for 'Session expired'. This code is part of the work around
     // done in the KAFKA-7165, once ZOOKEEPER-2985 is complete, this code must be deleted.
     current_zookeeper_session_id: i32,
-    zk_data: zk_data::ZkData,
+    pub zk_data: zk_data::ZkData,
 }
 
 impl Default for KafkaZkClient {
@@ -316,32 +319,76 @@ pub struct GetDataAndVersionResponse {
     pub version: i32,
 }
 
-// TODO: Consider renaming to KafkaZkClientAsyncTask, "ZooKeeper" is way too broad
 /// Rafka Async tasks/messages related to this module
 #[derive(Debug)]
 pub enum KafkaZkClientAsyncTask {
-    Init,
     EnsurePersistentPathExists(String),
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
+    Shutdown,
 }
 
-impl KafkaZkClientAsyncTask {
-    /// Handles a message that this module should provide
-    #[instrument]
-    pub async fn process_task(
-        kafka_zk_client: &mut KafkaZkClient,
-        kafka_config: &KafkaConfig,
-        task: Self,
-    ) -> Result<(), AsyncTaskError> {
-        info!("process_task {:?}", task);
-        match task {
-            Self::Init => kafka_zk_client.init(&kafka_config).await?,
-            Self::GetDataAndVersion(tx, znode_path) => {
-                let result = kafka_zk_client.get_data_and_version(&znode_path).await?;
-                tx.send(result);
-            },
-            _ => unimplemented!("Task not implemented"),
+#[derive(Debug)]
+pub struct KafkaZkClientCoordinator {
+    kafka_zk_client: KafkaZkClient,
+    pub tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    rx: mpsc::Receiver<KafkaZkClientAsyncTask>,
+}
+
+impl KafkaZkClientCoordinator {
+    async fn new(kafka_config: KafkaConfig) -> Result<KafkaZkClientCoordinator, AsyncTaskError> {
+        let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let init_time = Instant::now();
+        let mut kafka_zk_client = KafkaZkClient::build(
+            &kafka_config.zk_connect,
+            &kafka_config,
+            Some(String::from("Async Coordinator")),
+            init_time,
+            None,
+        );
+        kafka_zk_client.init(&kafka_config).await?;
+        Ok(KafkaZkClientCoordinator { kafka_zk_client, tx, rx })
+    }
+
+    async fn coordinator(&mut self) -> Result<(), AsyncTaskError> {
+        while let Some(task) = self.rx.recv().await {
+            info!("KafkaZkClient coordinator {:?}", task);
+            match task {
+                KafkaZkClientAsyncTask::GetDataAndVersion(tx, znode_path) => {
+                    // TODO: This blocks, send the tx to the get_data_and_version and tokio::spawn
+                    // its ZK call
+                    let result = self.kafka_zk_client.get_data_and_version(&znode_path).await?;
+                    tx.send(result);
+                },
+                _ => unimplemented!("Task not implemented"),
+            }
         }
         Ok(())
+    }
+
+    /// Creates a thread that will handle tasks that should be forwarded to zookeeper
+    /// # Arguments
+    /// * `kafka_config` -  a KafkaConfig that contains the zookeeper endpoints/timeouts
+    /// * `handle_tx` - A tx channel to send the local `tx` field so that the caller can send
+    /// requests to the main coordinator loop
+    #[instrument]
+    pub async fn setup_coordinator_thread(
+        kafka_config: KafkaConfig,
+        handle_tx: std::sync::mpsc::Sender<mpsc::Sender<KafkaZkClientAsyncTask>>,
+    ) -> Result<thread::JoinHandle<()>, AsyncTaskError> {
+        let current_tokio_handle = Handle::current();
+        let coordinator_thread = ::std::thread::Builder::new()
+            .name("KafkaZkClientCoordinator I/O".to_owned())
+            .spawn(move || {
+                current_tokio_handle.spawn(async move {
+                    let mut kzk_coordinator = Self::new(kafka_config)
+                        .await
+                        .expect("Unable to create KafkaZkClientCoordinator");
+                    handle_tx
+                        .send(kzk_coordinator.tx.clone())
+                        .expect("Unable to send back the tx channel handle");
+                });
+            })
+            .expect("Unable to start KafkaZkClientCoordinator async I/O thread");
+        Ok(coordinator_thread)
     }
 }
