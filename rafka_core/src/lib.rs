@@ -8,7 +8,7 @@ pub mod common;
 pub mod majordomo;
 pub mod server;
 mod utils;
-mod zk;
+pub mod zk;
 mod zookeeper;
 
 #[cfg(test)]
