@@ -2,6 +2,7 @@ use clap::{App, Arg};
 use rafka_core::majordomo::Coordinator;
 use rafka_core::server::kafka_config::KafkaConfig;
 use rafka_core::server::kafka_server::KafkaServer;
+use rafka_core::zk::kafka_zk_client::KafkaZkClient;
 use std::time::Instant;
 use tokio::signal;
 use tokio::sync::{mpsc, oneshot};
@@ -42,7 +43,9 @@ async fn main() {
     println!("Using input file: {}", config_file);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let kafka_config = KafkaConfig::get_kafka_config(config_file).unwrap();
-    let mut majordomo = Coordinator::new(kafka_config.clone());
+    let (kfk_zk_tx, kafka_zk_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+    let kafka_zk_thread_handle = KafkaZkClient::coordinator(kafka_config.clone(), kafka_zk_rx);
+    let mut majordomo = Coordinator::new(kafka_config.clone(), kfk_zk_tx);
     let kafka_server_async_tx = majordomo.main_tx();
     tokio::spawn(async move {
         let mut kafka_server =
