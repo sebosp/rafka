@@ -6,7 +6,7 @@
 //! messages in a similar fasion.
 //! Several times an object has been found as volatile in the source code, it has been moved
 //! ownership here so that there's its state can be shared across threads, for example:
-//! - featuresAndEpoch from FinalizedFeatureCache
+//! - FeatureCacheUpdater from Finalize Feature Cache Change Listener
 //! - supportedFeatures from SupportedFeatures
 //! - ZookeeperClient (This was moved here because the zookeeper-async client cannot be shared
 //! between threads.
@@ -21,11 +21,12 @@ use crate::server::finalize_feature_change_listener::{
 };
 use crate::server::kafka_config::KafkaConfig;
 use crate::server::supported_features::SupportedFeatures;
-use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
+use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask, KafkaZkClientCoordinator};
 use crate::zk::zk_data::FeatureZNode;
 use std::error::Error;
-use std::time::Instant;
+use std::thread;
 use thiserror::Error;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tracing::debug;
 use tracing::{error, info};
@@ -36,7 +37,7 @@ pub enum CoordinatorTask {
     Shutdown,
 }
 
-/// `AsyncTask` contains message types that async_coordinator can work on
+/// `AsyncTask` contains message types that majordomo coordinator can work on
 #[derive(Debug)]
 pub enum AsyncTask {
     Zookeeper(KafkaZkClientAsyncTask),
@@ -83,31 +84,25 @@ pub struct Coordinator {
     kafka_config: KafkaConfig,
     feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
-    kafka_zk_client: KafkaZkClient,
+    kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
     pub tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
 }
 
 impl Coordinator {
-    pub async fn new(kafka_config: KafkaConfig) -> Result<Self, AsyncTaskError> {
+    pub async fn new(
+        kafka_config: KafkaConfig,
+        kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    ) -> Result<Self, AsyncTaskError> {
         let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
         let supported_features = SupportedFeatures::default();
-        let init_time = Instant::now();
-        let mut kafka_zk_client = KafkaZkClient::build(
-            &kafka_config.zk_connect,
-            &kafka_config,
-            Some(String::from("Async Coordinator")),
-            init_time,
-            None,
-        );
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
-        kafka_zk_client.init(&kafka_config).await?;
         Ok(Coordinator {
             kafka_config,
             tx,
             rx,
             feature_cache_updater,
-            kafka_zk_client,
+            kafka_zk_tx,
             supported_features,
         })
     }
@@ -117,25 +112,18 @@ impl Coordinator {
     }
 
     #[instrument]
-    pub async fn async_coordinator(&mut self) -> Result<(), AsyncTaskError> {
-        debug!("async_coordinator: Preparing");
+    pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
+        debug!("majordomo coordinator: Preparing");
         self.feature_cache_updater
-            .init_or_throw(
-                &mut self.kafka_zk_client,
-                self.kafka_config.zk_connection_timeout_ms.into(),
-            )
+            .init_or_throw(self.kafka_zk_tx, self.kafka_config.zk_connection_timeout_ms.into())
             .await?;
-        debug!("async_coordinator: Main loop starting");
+        debug!("majordomo coordinator: Main loop starting");
         while let Some(message) = self.rx.recv().await {
-            debug!("async_coordinator: message: {:?}", message);
+            debug!("majordomo coordinator: message: {:?}", message);
             match message {
                 AsyncTask::Zookeeper(task) => {
-                    KafkaZkClientAsyncTask::process_task(
-                        &mut self.kafka_zk_client,
-                        &self.kafka_config,
-                        task,
-                    )
-                    .await?
+                    // Forward the task to KafkaZkClient coordinator
+                    tokio::spawn(async { self.kafka_zk_tx.send(task).await });
                 },
                 AsyncTask::Coordinator(task) => {
                     info!("coordinator coord_task is {:?}", task);
@@ -151,9 +139,34 @@ impl Coordinator {
                 },
             }
         }
-        self.kafka_zk_client.close().await.unwrap();
-        error!("async_coordinator: Exiting.");
+        self.kafka_zk_tx.send(KafkaZkClientAsyncTask::Shutdown).await;
+        error!("majordomo coordinator: Exiting.");
         Ok(())
+    }
+
+    /// Creates a thread that will handle tasks that should be forwarded to zookeeper
+    /// # Arguments
+    /// * `kafka_config` -  a KafkaConfig that contains the zookeeper endpoints/timeouts
+    /// * `handle_tx` - A tx channel to send the local `tx` field so that the caller can send
+    /// requests to the main coordinator loop
+    #[instrument]
+    pub async fn init_coordinator_thread(
+        kafka_config: KafkaConfig,
+        kfk_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    ) -> Result<thread::JoinHandle<()>, AsyncTaskError> {
+        let current_tokio_handle = Handle::current();
+        let coordinator_thread = ::std::thread::Builder::new()
+            .name("KafkaZkClientCoordinator I/O".to_owned())
+            .spawn(move || {
+                current_tokio_handle.spawn(async move {
+                    let mut majordomo_coordinator = Self::new(kafka_config, kfk_zk_tx)
+                        .await
+                        .expect("Unable to create KafkaZkClientCoordinator");
+                    majordomo_coordinator.process_message_queue().await;
+                });
+            })
+            .expect("Unable to start KafkaZkClientCoordinator async I/O thread");
+        Ok(coordinator_thread)
     }
 
     #[instrument]
