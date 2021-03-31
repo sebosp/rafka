@@ -49,8 +49,10 @@ pub enum AsyncTask {
 pub enum AsyncTaskError {
     #[error("Zookeeper {0:?}")]
     ZooKeeper(#[from] zookeeper_async::ZkError),
-    #[error("Tokio Mpsc Send {0:?}")]
-    MpscSend(#[from] tokio::sync::mpsc::error::SendError<AsyncTask>),
+    #[error("Majordomo Tokio Mpsc Send {0:?}")]
+    MajordomoMpscSend(#[from] tokio::sync::mpsc::error::SendError<AsyncTask>),
+    #[error("KafkaZk Tokio Mpsc Send {0:?}")]
+    KafkaZkMpscSend(#[from] tokio::sync::mpsc::error::SendError<KafkaZkClientAsyncTask>),
     #[error("Tokio OneShot TryRecv {0:?}")]
     OneShotTryRecv(#[from] tokio::sync::oneshot::error::TryRecvError),
     #[error("ZooKeeperClient {0:?}")]
@@ -115,7 +117,10 @@ impl Coordinator {
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
         debug!("majordomo coordinator: Preparing");
         self.feature_cache_updater
-            .init_or_throw(self.kafka_zk_tx, self.kafka_config.zk_connection_timeout_ms.into())
+            .init_or_throw(
+                self.kafka_zk_tx.clone(),
+                self.kafka_config.zk_connection_timeout_ms.into(),
+            )
             .await?;
         debug!("majordomo coordinator: Main loop starting");
         while let Some(message) = self.rx.recv().await {
@@ -123,7 +128,8 @@ impl Coordinator {
             match message {
                 AsyncTask::Zookeeper(task) => {
                     // Forward the task to KafkaZkClient coordinator
-                    tokio::spawn(async { self.kafka_zk_tx.send(task).await });
+                    let kfk_zk_tx_copy = self.kafka_zk_tx.clone();
+                    tokio::spawn(async move { kfk_zk_tx_copy.send(task).await });
                 },
                 AsyncTask::Coordinator(task) => {
                     info!("coordinator coord_task is {:?}", task);
@@ -139,7 +145,7 @@ impl Coordinator {
                 },
             }
         }
-        self.kafka_zk_tx.send(KafkaZkClientAsyncTask::Shutdown).await;
+        self.kafka_zk_tx.send(KafkaZkClientAsyncTask::Shutdown).await?;
         error!("majordomo coordinator: Exiting.");
         Ok(())
     }
