@@ -153,8 +153,8 @@ impl Coordinator {
     /// Creates a thread that will handle tasks that should be forwarded to zookeeper
     /// # Arguments
     /// * `kafka_config` -  a KafkaConfig that contains the zookeeper endpoints/timeouts
-    /// * `handle_tx` - A tx channel to send the local `tx` field so that the caller can send
-    /// requests to the main coordinator loop
+    /// * `kfk_zk_tx` - A tx channel to send zookeeper data requests to the KafkaZkClient that runs
+    /// on the foreground thread
     #[instrument]
     pub async fn init_coordinator_thread(
         kafka_config: KafkaConfig,
@@ -162,16 +162,19 @@ impl Coordinator {
     ) -> Result<thread::JoinHandle<()>, AsyncTaskError> {
         let current_tokio_handle = Handle::current();
         let coordinator_thread = ::std::thread::Builder::new()
-            .name("KafkaZkClientCoordinator I/O".to_owned())
+            .name("Majordomo Coordinator I/O".to_owned())
             .spawn(move || {
                 current_tokio_handle.spawn(async move {
                     let mut majordomo_coordinator = Self::new(kafka_config, kfk_zk_tx)
                         .await
-                        .expect("Unable to create KafkaZkClientCoordinator");
-                    majordomo_coordinator.process_message_queue().await;
+                        .expect("Unable to create Majordomo Coordinator");
+                    majordomo_coordinator
+                        .process_message_queue()
+                        .await
+                        .expect("Majordomo coordinator exited with error.");
                 });
             })
-            .expect("Unable to start KafkaZkClientCoordinator async I/O thread");
+            .expect("Unable to start Majordomo Coordinator async I/O thread");
         Ok(coordinator_thread)
     }
 
