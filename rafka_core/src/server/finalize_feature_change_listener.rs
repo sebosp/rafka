@@ -4,14 +4,15 @@
 //! is received from ZK, the feature cache in FinalizedFeatureCache is asynchronously updated
 //! to the latest features read from ZK. The cache updates are serialized through a single
 //! notification processor thread.
+//! RAFKA Specific:
+//! In the original code, a volatile var contains the finalized feature cache and seems to be
+//! accessed mostly from here. In this version, the feature cache is owned by the
+//! FeatureCacheUpdater and the FeatureCacheUpdater itself is owned by the Majordomo coordinator.
 use crate::majordomo::{AsyncTask, AsyncTaskError};
-use crate::server::finalized_feature_cache::{
-    FinalizedFeatureCache, FinalizedFeatureCacheAsyncTask,
-};
+use crate::server::finalized_feature_cache::FinalizedFeatureCache;
 use crate::server::supported_features::SupportedFeatures;
-use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
+use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use crate::zk::zk_data;
-use crate::zookeeper::zoo_keeper_client::ZNodeChangeHandler;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
@@ -24,8 +25,6 @@ pub struct FinalizedFeatureChangeListener {
 
 #[derive(Debug, Error)]
 pub enum FeatureCacheUpdaterError {
-    #[error("Can not notify after update_latest_or_throw was called more than once successfully.")]
-    CalledMoreThanOnce,
     #[error(
         "FinalizedFeatureCache update failed due to invalid epoch in new finalized {0}. The \
          existing cache contents are {:1}"
@@ -43,29 +42,17 @@ pub enum FeatureCacheUpdaterError {
 #[derive(Debug)]
 pub struct FeatureCacheUpdater {
     feature_zk_node_path: String,
-    maybe_notify_once: Option<u8>, /* TODO: initially this was CountDownLatch but since this is
-                                    * no longer being used across threads and there is a clear
-                                    * ownership, then we won't run into this. */
+    finalized_feature_cache: FinalizedFeatureCache,
 }
 
 impl FeatureCacheUpdater {
     pub fn new(feature_zk_node_path: String) -> Self {
-        Self { maybe_notify_once: None, feature_zk_node_path }
+        Self { feature_zk_node_path, finalized_feature_cache: FinalizedFeatureCache::default() }
     }
 
-    /// Sends the Clear operation to the majordomo coordinator that holds the shared state.
-    #[instrument]
-    pub async fn send_clear_finalized_feature_cache(
-        majordomo_tx: mpsc::Sender<AsyncTask>,
-    ) -> Result<(), AsyncTaskError> {
-        // TODO: Remove: This is not needed anymore an the Majordomo Coordinator owns both the
-        // supported and finalized features.
-        debug!("Sending the FinalizedFeatureCacheAsyncTask::Clear message");
-        // Clear the finalized feature cache:
-        majordomo_tx
-            .send(AsyncTask::FinalizedFeatureCache(FinalizedFeatureCacheAsyncTask::Clear))
-            .await?;
-        Ok(())
+    /// Clears the finalized feature cache
+    pub fn clear_finalized_feature_cache(&mut self) {
+        self.finalized_feature_cache.clear();
     }
 
     /// Updates the feature cache in FinalizedFeatureCache with the latest features read from the
@@ -77,18 +64,8 @@ impl FeatureCacheUpdater {
     pub async fn update_latest_or_throw(
         &mut self,
         supported_features: &mut SupportedFeatures,
-        finalized_feature_cache: &mut FinalizedFeatureCache,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
-        if let Some(notifier) = self.maybe_notify_once {
-            if notifier != 1u8 {
-                return Err(AsyncTaskError::FeatureCacheUpdater(
-                    FeatureCacheUpdaterError::CalledMoreThanOnce,
-                ));
-            }
-        }
-        self.maybe_notify_once = None;
-
         debug!("Requesting read on feature ZK node at path: {}", self.feature_zk_node_path);
         let (tx, mut rx) = oneshot::channel();
         majordomo_tx
@@ -118,7 +95,7 @@ impl FeatureCacheUpdater {
 
         if response.version == zk_data::ZkVersion::UnknownVersion as i32 {
             info!("Feature ZK node at path: {} does not exist", self.feature_zk_node_path);
-            finalized_feature_cache.clear();
+            self.finalized_feature_cache.clear();
             return Ok(());
         }
         if let Some(data) = response.data {
@@ -129,13 +106,13 @@ impl FeatureCacheUpdater {
                             "Feature ZK node at path: {} is in disabled status.",
                             self.feature_zk_node_path
                         );
-                        finalized_feature_cache.clear();
+                        self.finalized_feature_cache.clear();
                     },
                     zk_data::FeatureZNodeStatus::Enabled => {
                         // RAFKA SPECIFIC: The supported and finalized features are owned by the
                         // same coordinator thread and so no need to make them shared across
                         // threads.
-                        finalized_feature_cache.update_or_throw(
+                        self.finalized_feature_cache.update_or_throw(
                             supported_features,
                             val.features,
                             response.version,
@@ -152,7 +129,7 @@ impl FeatureCacheUpdater {
                         "Unable to deserialize feature ZK node at path: {} error: {}",
                         self.feature_zk_node_path, err
                     );
-                    finalized_feature_cache.clear();
+                    self.finalized_feature_cache.clear();
                 },
             }
         }
@@ -164,12 +141,11 @@ impl FeatureCacheUpdater {
     pub async fn handle_creation(
         &mut self,
         supported_features: &mut SupportedFeatures,
-        finalized_feature_cache: &mut FinalizedFeatureCache,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         // RAFKA TODO: Tie to zookeeper watcher
         info!("Feature ZK node created at path: {}", self.feature_zk_node_path);
-        self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
+        self.update_latest_or_throw(supported_features, majordomo_tx).await
     }
 
     /// From the Trait ZNodeChangeHandler, should be made trait once the trait fns can be async
@@ -177,11 +153,10 @@ impl FeatureCacheUpdater {
     pub async fn handle_data_change(
         &mut self,
         supported_features: &mut SupportedFeatures,
-        finalized_feature_cache: &mut FinalizedFeatureCache,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         info!("Feature ZK node updated at path: {}", self.feature_zk_node_path);
-        self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
+        self.update_latest_or_throw(supported_features, majordomo_tx).await
     }
 
     /// From the Trait ZNodeChangeHandler, should be made trait once the trait fns can be async
@@ -189,7 +164,6 @@ impl FeatureCacheUpdater {
     pub async fn handle_deletion(
         &mut self,
         supported_features: &mut SupportedFeatures,
-        finalized_feature_cache: &mut FinalizedFeatureCache,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         warn!("Feature ZK node deleted at path: {}", self.feature_zk_node_path);
@@ -218,5 +192,26 @@ impl ChangeNotificationProcessor {
         while let Some(message) = self.rx.recv().await {
             info!("do_work: Got request: {}", message);
         }
+    }
+}
+
+/// Majordomo Coordinator handling of async tasks. This may not be needed as the supported and
+/// finalized features are owned by the majordomo coordinator
+#[derive(Debug)]
+pub enum FeatureCacheUpdaterAsyncTask {
+    Clear,
+}
+
+impl FeatureCacheUpdaterAsyncTask {
+    #[instrument]
+    pub async fn process_task(
+        cache: &mut FeatureCacheUpdater,
+        supported_features: &mut SupportedFeatures,
+        task: Self,
+    ) -> Result<(), AsyncTaskError> {
+        match task {
+            Self::Clear => cache.clear_finalized_feature_cache(),
+        }
+        Ok(())
     }
 }
