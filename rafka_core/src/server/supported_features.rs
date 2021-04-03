@@ -42,13 +42,13 @@ impl SupportedFeatures {
     pub fn incompatible_features(&self, finalized: &Features) -> Features {
         let incompatibilities = Features::empty_finalized_features();
         let mut res: HashMap<String, FinalizedVersionRange> = HashMap::new();
-        if let VersionRangeType::Finalized(finalized) = finalized.features {
-            let incompatible_human_readable = String::from("");
+        if let VersionRangeType::Finalized(finalized) = &finalized.features {
+            let mut incompatible_human_readable = String::from("");
             for (feature, version_levels) in finalized.iter() {
                 match self.supported_features.get_supported(feature) {
                     None => {
                         res.insert(feature.to_string(), version_levels.clone());
-                        incompatible_human_readable.push_str(format!(
+                        incompatible_human_readable.push_str(&format!(
                             "{{feature={}, reason='Unsupported feature'}}",
                             feature
                         ));
@@ -56,7 +56,7 @@ impl SupportedFeatures {
                     Some(supported_versions) => {
                         if version_levels.is_incompatible_with(supported_versions) {
                             res.insert(feature.to_string(), version_levels.clone());
-                            incompatible_human_readable.push_str(format!(
+                            incompatible_human_readable.push_str(&format!(
                                 "{{feature={}, reason='{} is incompatible with {}'}}",
                                 feature, version_levels, supported_versions
                             ));
@@ -79,5 +79,10 @@ impl SupportedFeatures {
     // For testing only.
     fn clear(&mut self) {
         self.supported_features = Features::empty_supported_features();
+    }
+
+    /// Returns a reference to the latest features supported by the Broker.
+    pub fn get(&self) -> &Features {
+        &self.supported_features
     }
 }
