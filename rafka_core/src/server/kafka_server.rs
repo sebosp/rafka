@@ -235,16 +235,11 @@ impl KafkaServer {
     // NOTE: This has been moved to crate::majordomo::async_coordinator as first step before
     // starting to process messages
 
-    /// Creates a new zk_client for the zk_connect parameter
-    fn create_zk_client(&self, zk_connect: &str) -> KafkaZkClient {
-        KafkaZkClient::build(
-            zk_connect,
-            &self.kafka_config,
-            Some(String::from("Kafka server")),
-            self.init_time,
-            Some(self.zk_client_config),
-        )
-    }
+    // Creates a new zk_client for the zk_connect parameter
+    // fn create_zk_client(&self, zk_connect: &str)
+    // This has been moved to rafka/src/main.rs where KafkaZkClient is created and its channel
+    // endpoints shared with majordomo
+    //
 
     /// `wait_for_shutdown` waits for Ctrl-C to shutdown and clean  resources
     /// This function is used for testing the shutdown channels when Ctrl-C, not part of kafka.
