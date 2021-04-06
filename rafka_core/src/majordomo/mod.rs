@@ -87,7 +87,6 @@ pub struct Coordinator {
     feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
     kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
-    pub tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
 }
 
@@ -95,22 +94,17 @@ impl Coordinator {
     pub async fn new(
         kafka_config: KafkaConfig,
         kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
-        let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
         Ok(Coordinator {
             kafka_config,
-            tx,
-            rx,
+            rx: main_rx,
             feature_cache_updater,
             kafka_zk_tx,
             supported_features,
         })
-    }
-
-    pub fn main_tx(&self) -> mpsc::Sender<AsyncTask> {
-        self.tx.clone()
     }
 
     #[instrument]
@@ -155,17 +149,20 @@ impl Coordinator {
     /// * `kafka_config` -  a KafkaConfig that contains the zookeeper endpoints/timeouts
     /// * `kfk_zk_tx` - A tx channel to send zookeeper data requests to the KafkaZkClient that runs
     /// on the foreground thread
+    /// * `main_rx` - A rx channel that will be used by the coordinator internally to communicate
+    /// with other tasks.
     #[instrument]
     pub async fn init_coordinator_thread(
         kafka_config: KafkaConfig,
         kfk_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<thread::JoinHandle<()>, AsyncTaskError> {
         let current_tokio_handle = Handle::current();
         let coordinator_thread = ::std::thread::Builder::new()
             .name("Majordomo Coordinator I/O".to_owned())
             .spawn(move || {
                 current_tokio_handle.spawn(async move {
-                    let mut majordomo_coordinator = Self::new(kafka_config, kfk_zk_tx)
+                    let mut majordomo_coordinator = Self::new(kafka_config, kfk_zk_tx, main_rx)
                         .await
                         .expect("Unable to create Majordomo Coordinator");
                     majordomo_coordinator
