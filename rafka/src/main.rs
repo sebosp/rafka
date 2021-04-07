@@ -43,15 +43,13 @@ async fn main() {
     println!("Using input file: {}", config_file);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let kafka_config = KafkaConfig::get_kafka_config(config_file).unwrap();
-    let kafka_zk = KafkaZkClientCoordinator::new(kafka_config.clone()).await.unwrap();
-    let kafka_server_async_tx = kafka_zk.main_tx();
-    tokio::spawn(async move {
-        let mut majordomo =
-            Coordinator::init_coordinator_thread(kafka_config.clone(), kafka_server_async_tx);
-    });
+    let kafka_config_clone = kafka_config.clone();
+    let mut kafka_zk = KafkaZkClientCoordinator::new(kafka_config.clone()).await.unwrap();
+    let (majordomo_tx, majordomo_rx) = mpsc::channel(4096); // TODO: Magic number removal
+    let majordomo_tx_clone = majordomo_tx.clone();
     tokio::spawn(async move {
         let mut kafka_server =
-            KafkaServer::new(kafka_config, Instant::now(), kafka_server_async_tx, shutdown_rx);
+            KafkaServer::new(kafka_config_clone, Instant::now(), majordomo_tx_clone, shutdown_rx);
         match kafka_server.startup().await {
             Ok(()) => info!("Kafka startup Complete"),
             Err(err) => error!("Kafka startup failed: {:?}", err),
@@ -59,12 +57,21 @@ async fn main() {
         kafka_server.wait_for_shutdown().await;
     });
     // Start the main messaging bus
-    majordomo.async_coordinator().await.unwrap();
-    let coordinator_shutdown_tx_handle = majordomo.main_tx();
+    let kafka_server_async_tx = kafka_zk.main_tx();
+    tokio::spawn(async move {
+        Coordinator::init_coordinator_thread(
+            kafka_config.clone(),
+            kafka_server_async_tx,
+            majordomo_rx,
+        )
+        .await
+        .unwrap();
+    });
+    kafka_zk.process_message_queue().await.unwrap();
     tokio::spawn(async {
         signal::ctrl_c().await.unwrap();
         error!("ctrl-c received!");
-        rafka_core::majordomo::Coordinator::shutdown(coordinator_shutdown_tx_handle).await;
+        rafka_core::majordomo::Coordinator::shutdown(majordomo_tx).await;
         shutdown_tx.send(()).unwrap();
     });
 }
