@@ -246,7 +246,7 @@ impl KafkaServer {
     #[instrument]
     pub async fn wait_for_shutdown(&mut self) {
         self.shutdown_rx.try_recv().unwrap();
-        self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await.unwrap();
+        crate::majordomo::Coordinator::shutdown(self.async_task_tx.clone()).await;
         info!("Received shutdown signal");
     }
 }
