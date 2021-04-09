@@ -170,7 +170,57 @@ impl FeatureCacheUpdater {
         // This event may happen, rarely (ex: ZK corruption or operational error).
         // In such a case, we prefer to just log a warning and treat the case as if the node is
         // absent, and populate the FinalizedFeatureCache with empty finalized features.
-        self.update_latest_or_throw(supported_features, finalized_feature_cache, majordomo_tx).await
+        self.update_latest_or_throw(supported_features, majordomo_tx).await
+    }
+
+    /// From the Trait StateChangeHandler, should be made trait once the trait fns can be async
+    #[instrument]
+    pub async fn after_initializing_session(
+        &mut self,
+        supported_features: &mut SupportedFeatures,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<(), AsyncTaskError> {
+        self.update_latest_or_throw(supported_features, majordomo_tx).await
+    }
+
+    /// This method initializes the feature ZK node change listener. Optionally, it also ensures to
+    /// update the FinalizedFeatureCache once with the latest contents of the feature ZK node
+    /// (if the node exists). This step helps ensure that feature incompatibilities (if any) in
+    /// brokers are conveniently detected before the initOrThrow() method returns to the caller.
+    /// If feature incompatibilities are detected, this method will throw an Exception to the
+    /// caller, and the Broker will exit eventually.
+    /// # Arguments
+    /// * `wait_once_for_cache_update_ms` number of milli seconds to wait for feature cache to be
+    ///   updated once.
+    /// If this parameter <= 0, no wait operation happens.
+    #[instrument]
+    pub async fn init_or_throw(
+        &mut self,
+        kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        wait_once_for_cache_update_ms: i64,
+    ) -> Result<(), AsyncTaskError> {
+        if wait_once_for_cache_update_ms <= 0 {
+            return Err(AsyncTaskError::from(FeatureCacheUpdaterError::InvalidWaitForCacheValue(
+                wait_once_for_cache_update_ms,
+            )));
+        }
+        // Register a tx channel that receives the updates from the ZNode
+        kafka_zk_tx.send(KafkaZkClientAsyncTask::RegisterDeleteHandler(self.tx.clone())).await?;
+        // thread.start()
+        // kafka_zk_client.registerStateChangeHandler(ZkStateChangeHandler)
+        // kafka_zk_client.registerZNodeChangeHandlerAndCheckExistence(FeatureZNodeChangeHandler)
+        // val ensureCacheUpdateOnce = new FeatureCacheUpdater(
+        // FeatureZNodeChangeHandler.path, Some(new CountDownLatch(1)))
+        // queue.add(ensureCacheUpdateOnce)
+        // try {
+        // ensureCacheUpdateOnce.awaitUpdateOrThrow(waitOnceForCacheUpdateMs)
+        // } catch {
+        // case e: Exception => {
+        // close()
+        // throw e
+        // }
+        // }
+        Ok(())
     }
 }
 
