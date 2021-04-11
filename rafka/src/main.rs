@@ -58,10 +58,12 @@ async fn main() {
     });
     // Start the main messaging bus
     let kafka_server_async_tx = kafka_zk.main_tx();
+    let majordomo_tx_clone = majordomo_tx.clone();
     tokio::spawn(async move {
         Coordinator::init_coordinator_thread(
             kafka_config.clone(),
             kafka_server_async_tx,
+            majordomo_tx_clone,
             majordomo_rx,
         )
         .await

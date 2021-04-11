@@ -87,6 +87,7 @@ pub struct Coordinator {
     feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
     kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
 }
 
@@ -94,12 +95,14 @@ impl Coordinator {
     pub async fn new(
         kafka_config: KafkaConfig,
         kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
         Ok(Coordinator {
             kafka_config,
+            tx: main_tx,
             rx: main_rx,
             feature_cache_updater,
             kafka_zk_tx,
@@ -111,10 +114,7 @@ impl Coordinator {
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
         debug!("majordomo coordinator: Preparing");
         self.feature_cache_updater
-            .init_or_throw(
-                self.kafka_zk_tx.clone(),
-                self.kafka_config.zk_connection_timeout_ms.into(),
-            )
+            .init_or_throw(self.tx.clone(), self.kafka_config.zk_connection_timeout_ms.into())
             .await?;
         debug!("majordomo coordinator: Main loop starting");
         while let Some(message) = self.rx.recv().await {
@@ -133,6 +133,7 @@ impl Coordinator {
                     FeatureCacheUpdaterAsyncTask::process_task(
                         &mut self.feature_cache_updater,
                         &mut self.supported_features,
+                        self.tx.clone(),
                         task,
                     )
                     .await?;
@@ -155,6 +156,7 @@ impl Coordinator {
     pub async fn init_coordinator_thread(
         kafka_config: KafkaConfig,
         kfk_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<thread::JoinHandle<()>, AsyncTaskError> {
         let current_tokio_handle = Handle::current();
@@ -162,9 +164,10 @@ impl Coordinator {
             .name("Majordomo Coordinator I/O".to_owned())
             .spawn(move || {
                 current_tokio_handle.spawn(async move {
-                    let mut majordomo_coordinator = Self::new(kafka_config, kfk_zk_tx, main_rx)
-                        .await
-                        .expect("Unable to create Majordomo Coordinator");
+                    let mut majordomo_coordinator =
+                        Self::new(kafka_config, kfk_zk_tx, main_tx, main_rx)
+                            .await
+                            .expect("Unable to create Majordomo Coordinator");
                     majordomo_coordinator
                         .process_message_queue()
                         .await

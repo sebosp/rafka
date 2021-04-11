@@ -59,7 +59,7 @@ impl FeatureCacheUpdater {
     /// ZK node in featureZkNodePath. If the cache update is not successful, then, a suitable
     /// Error is returned
     /// NOTE: if a notifier was provided in the constructor, then, this method can be invoked
-    /// exactly once successfully. A subsequent invocation will return CalledMoreThanOnce
+    /// once
     #[instrument]
     pub async fn update_latest_or_throw(
         &mut self,
@@ -196,7 +196,7 @@ impl FeatureCacheUpdater {
     #[instrument]
     pub async fn init_or_throw(
         &mut self,
-        kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
         wait_once_for_cache_update_ms: i64,
     ) -> Result<(), AsyncTaskError> {
         if wait_once_for_cache_update_ms <= 0 {
@@ -205,7 +205,11 @@ impl FeatureCacheUpdater {
             )));
         }
         // Register a tx channel that receives the updates from the ZNode
-        kafka_zk_tx.send(KafkaZkClientAsyncTask::RegisterDeleteHandler(self.tx.clone())).await?;
+        majordomo_tx
+            .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::RegisterFeatureChange(
+                majordomo_tx.clone(),
+            )))
+            .await?;
         // thread.start()
         // kafka_zk_client.registerStateChangeHandler(ZkStateChangeHandler)
         // kafka_zk_client.registerZNodeChangeHandlerAndCheckExistence(FeatureZNodeChangeHandler)
@@ -250,6 +254,7 @@ impl ChangeNotificationProcessor {
 #[derive(Debug)]
 pub enum FeatureCacheUpdaterAsyncTask {
     Clear,
+    TriggerChange,
 }
 
 impl FeatureCacheUpdaterAsyncTask {
@@ -257,10 +262,15 @@ impl FeatureCacheUpdaterAsyncTask {
     pub async fn process_task(
         cache: &mut FeatureCacheUpdater,
         supported_features: &mut SupportedFeatures,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
         task: Self,
     ) -> Result<(), AsyncTaskError> {
         match task {
             Self::Clear => cache.clear_finalized_feature_cache(),
+            Self::TriggerChange => cache
+                .update_latest_or_throw(supported_features, majordomo_tx.clone())
+                .await
+                .unwrap(),
         }
         Ok(())
     }
