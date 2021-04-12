@@ -322,6 +322,7 @@ pub struct GetDataAndVersionResponse {
 pub enum KafkaZkClientAsyncTask {
     EnsurePersistentPathExists(String),
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
+    RegisterFeatureChange(mpsc::Sender<AsyncTask>),
     Shutdown,
 }
 
@@ -370,6 +371,10 @@ impl KafkaZkClientCoordinator {
                     }
                 },
                 KafkaZkClientAsyncTask::Shutdown => self.kafka_zk_client.close().await.unwrap(),
+                KafkaZkClientAsyncTask::RegisterFeatureChange(majordomo_tx) => self
+                    .kafka_zk_client
+                    .zoo_keeper_client
+                    .register_feature_cache_change(majordomo_tx)?,
                 _ => unimplemented!("Task not implemented"),
             }
         }
