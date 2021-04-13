@@ -11,13 +11,16 @@
 // RAFKA TODO: Check if we can do the "pipeline" with the rust libraries
 
 use crate::majordomo::{AsyncTask, AsyncTaskError};
-use crate::server::kafka_config::KafkaConfig;
-use crate::utils::kafka_scheduler::KafkaScheduler;
+use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterAsyncTask;
+use crate::zk::zk_data::FeatureZNode;
 use std::fmt;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::info;
+use tokio::sync::mpsc;
+use tracing::{debug, info};
 use tracing_attributes::instrument;
+use zookeeper_async::recipes::cache::PathChildrenCache;
 use zookeeper_async::{Acl, CreateMode, Stat, WatchedEvent, Watcher, ZooKeeper};
 // TODO: Backtrace
 // use std::backtrace::Backtrace;
@@ -131,7 +134,7 @@ impl ZooKeeperClient {
     /// `connect` peforms a connection to the zookeeper server.
     #[instrument]
     pub async fn connect(&mut self) -> Result<(), AsyncTaskError> {
-        // NOTE: If zookeeper is not up, then it will continue forever trying to connect
+        // RAFKA TODO: If zookeeper is not up, then it will continue forever trying to connect
         let zk = ZooKeeper::connect(
             &self.connect_string,
             Duration::from_millis(self.connection_timeout_ms.into()),
@@ -180,6 +183,40 @@ impl ZooKeeperClient {
                 Err(err) => Err(AsyncTaskError::ZooKeeper(err)),
                 Ok(()) => Ok(()),
             }
+        } else {
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
+        }
+    }
+
+    /// `register_change_handler` Registers a state or znode watcher.
+    /// The state change is for connection/disconnection/auth failures to zookeeper in general
+    /// The ZNode change is for a specific path being created/deleted/updated.
+    /// # Arguments
+    /// * `tx` a channel to the coordinator to send watch events to
+    /// RAFKA TODO: For now only using feature cache znode, to be made generic later, maybe
+    /// FnOnce(WatchedEvent)
+    #[instrument]
+    pub async fn register_feature_cache_change(
+        &self,
+        tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<(), AsyncTaskError> {
+        debug!(
+            "register_feature_cache_change event SEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEB"
+        );
+        if let Some(zk) = &self.zookeeper {
+            // A listener to the Zookeeper State change
+            zk.add_listener(move |_s| {
+                let tx_clone = tx.clone();
+                tokio::spawn(async move {
+                    tx_clone
+                        .send(AsyncTask::FinalizedFeatureCache(
+                            FeatureCacheUpdaterAsyncTask::TriggerChange,
+                        ))
+                        .await
+                        .unwrap();
+                });
+            });
+            Ok(())
         } else {
             Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
         }
