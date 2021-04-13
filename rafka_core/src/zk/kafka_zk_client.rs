@@ -371,10 +371,12 @@ impl KafkaZkClientCoordinator {
                     }
                 },
                 KafkaZkClientAsyncTask::Shutdown => self.kafka_zk_client.close().await.unwrap(),
-                KafkaZkClientAsyncTask::RegisterFeatureChange(majordomo_tx) => self
-                    .kafka_zk_client
-                    .zoo_keeper_client
-                    .register_feature_cache_change(majordomo_tx)?,
+                KafkaZkClientAsyncTask::RegisterFeatureChange(majordomo_tx) => {
+                    self.kafka_zk_client
+                        .zoo_keeper_client
+                        .register_feature_cache_change(majordomo_tx)
+                        .await?
+                },
                 _ => unimplemented!("Task not implemented"),
             }
         }
