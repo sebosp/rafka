@@ -12,6 +12,7 @@
 
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterAsyncTask;
+use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
 use std::fmt;
 use std::sync::Arc;
@@ -91,7 +92,7 @@ pub struct ZooKeeperClient {
     // zNodeChangeHandlers: HashMap<String, N>,
     // zNodeChildChangeHandlers: HashMap<String, C>,
     /// A connection to ZooKeeper.
-    zookeeper: Option<ZooKeeper>,
+    zookeeper: Option<Arc<ZooKeeper>>,
 }
 
 impl fmt::Debug for ZooKeeperClient {
@@ -142,7 +143,7 @@ impl ZooKeeperClient {
         )
         .await?;
         info!("Connection to zookeeper successful");
-        self.zookeeper = Some(zk);
+        self.zookeeper = Some(Arc::new(zk));
         Ok(())
     }
 
@@ -197,7 +198,7 @@ impl ZooKeeperClient {
     /// FnOnce(WatchedEvent)
     #[instrument]
     pub async fn register_feature_cache_change(
-        &self,
+        &mut self,
         tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         debug!(
@@ -205,13 +206,29 @@ impl ZooKeeperClient {
         );
         if let Some(zk) = &self.zookeeper {
             // A listener to the Zookeeper State change
+            let tx_0 = tx.clone();
             zk.add_listener(move |_s| {
-                let tx_clone = tx.clone();
+                let tx_clone = tx_0.clone();
                 tokio::spawn(async move {
                     tx_clone
                         .send(AsyncTask::FinalizedFeatureCache(
                             FeatureCacheUpdaterAsyncTask::TriggerChange,
                         ))
+                        .await
+                        .unwrap();
+                });
+            });
+            let mut pcc =
+                PathChildrenCache::new(zk.clone(), &FeatureZNode::default_path()).await.unwrap();
+            pcc.start()?;
+            let tx_1 = tx.clone();
+            pcc.add_listener(move |e| {
+                let tx_clone = tx_1.clone();
+                tokio::spawn(async move {
+                    tx_clone
+                        .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::PathChildrenCacheEvent(
+                            e,
+                        )))
                         .await
                         .unwrap();
                 });
