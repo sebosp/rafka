@@ -201,9 +201,6 @@ impl ZooKeeperClient {
         &mut self,
         tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
-        debug!(
-            "register_feature_cache_change event SEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEB"
-        );
         if let Some(zk) = &self.zookeeper {
             // A listener to the Zookeeper State change
             let tx_0 = tx.clone();
@@ -226,9 +223,9 @@ impl ZooKeeperClient {
                 let tx_clone = tx_1.clone();
                 tokio::spawn(async move {
                     tx_clone
-                        .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::PathChildrenCacheEvent(
-                            e,
-                        )))
+                        .send(AsyncTask::Zookeeper(
+                            KafkaZkClientAsyncTask::FeaturePathChildrenCacheEvent(e),
+                        ))
                         .await
                         .unwrap();
                 });

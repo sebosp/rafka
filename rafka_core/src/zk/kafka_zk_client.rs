@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 use tracing_attributes::instrument;
+use zookeeper_async::recipes::cache::PathChildrenCacheEvent;
 use zookeeper_async::CreateMode;
 
 #[derive(thiserror::Error, Debug)]
@@ -323,6 +324,7 @@ pub enum KafkaZkClientAsyncTask {
     EnsurePersistentPathExists(String),
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
     RegisterFeatureChange(mpsc::Sender<AsyncTask>),
+    FeaturePathChildrenCacheEvent(PathChildrenCacheEvent),
     Shutdown,
 }
 
@@ -377,6 +379,7 @@ impl KafkaZkClientCoordinator {
                         .register_feature_cache_change(majordomo_tx)
                         .await?
                 },
+                KafkaZkClientAsyncTask::FeaturePathChildrenCacheEvent(cache_event) => {},
                 _ => unimplemented!("Task not implemented"),
             }
         }
