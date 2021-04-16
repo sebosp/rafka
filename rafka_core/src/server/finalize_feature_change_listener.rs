@@ -74,7 +74,7 @@ impl FeatureCacheUpdater {
                 self.feature_zk_node_path.clone(),
             )))
             .await?;
-        let response = rx.try_recv()?;
+        let response = rx.await?;
         // From the original code:
         // There are 4 cases:
         //

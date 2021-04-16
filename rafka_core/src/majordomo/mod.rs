@@ -54,7 +54,7 @@ pub enum AsyncTaskError {
     #[error("KafkaZk Tokio Mpsc Send {0:?}")]
     KafkaZkMpscSend(#[from] tokio::sync::mpsc::error::SendError<KafkaZkClientAsyncTask>),
     #[error("Tokio OneShot TryRecv {0:?}")]
-    OneShotTryRecv(#[from] tokio::sync::oneshot::error::TryRecvError),
+    OneShotRecvErrorRecv(#[from] tokio::sync::oneshot::error::RecvError),
     #[error("ZooKeeperClient {0:?}")]
     ZooKeeperClient(#[from] crate::zookeeper::zoo_keeper_client::ZooKeeperClientError),
     #[error("KafkaZkClient {0:?}")]
