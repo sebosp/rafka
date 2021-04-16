@@ -6,7 +6,6 @@ use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterError;
 use crate::server::supported_features::SupportedFeatures;
 use std::fmt;
 use tracing::info;
-use tracing_attributes::instrument;
 
 /// Represents finalized features along with an epoch value
 #[derive(Debug, Clone)]
