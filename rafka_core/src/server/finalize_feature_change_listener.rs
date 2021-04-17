@@ -67,7 +67,7 @@ impl FeatureCacheUpdater {
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         debug!("Requesting read on feature ZK node at path: {}", self.feature_zk_node_path);
-        let (tx, mut rx) = oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         majordomo_tx
             .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetDataAndVersion(
                 tx,
