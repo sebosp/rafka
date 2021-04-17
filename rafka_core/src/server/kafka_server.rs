@@ -133,7 +133,7 @@ impl Default for KafkaServer {
         // TODO: Consider removing this implementation in favor of new() as the channel is basically
         // unusable
         let (tx, _rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let (_shutdown_tx, shutdown_rx) = oneshot::channel(); // TODO: Magic number removal
+        let (_shutdown_tx, shutdown_rx) = oneshot::channel();
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
