@@ -56,6 +56,11 @@ pub struct MetadataCache;
 struct BrokerTopicStats;
 
 #[derive(Debug)]
+pub enum KafkaServerAsyncTask {
+    Shutdown,
+}
+
+#[derive(Debug)]
 pub struct KafkaServer {
     // startup_complete: Arc<AtomicBool>, // false
     // is_shutting_down: Arc<AtomicBool>, // false
@@ -117,7 +122,7 @@ pub struct KafkaServer {
     /// `async_task_tx` contains a handle to send taskt to the majordomo async_coordinator
     pub async_task_tx: mpsc::Sender<AsyncTask>,
 
-    pub shutdown_rx: oneshot::Receiver<()>,
+    pub rx: mpsc::Receiver<KafkaServerAsyncTask>,
 }
 
 // RAFKA Unimplemented:
@@ -131,9 +136,9 @@ pub struct KafkaServer {
 impl Default for KafkaServer {
     fn default() -> Self {
         // TODO: Consider removing this implementation in favor of new() as the channel is basically
-        // unusable
-        let (tx, _rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let (_shutdown_tx, shutdown_rx) = oneshot::channel();
+        // unusable, maybe this is usable for testing
+        let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -169,8 +174,8 @@ impl Default for KafkaServer {
             feature_change_listener: None,
             init_time: Instant::now(),
             kafka_config: KafkaConfig::default(),
-            async_task_tx: tx,
-            shutdown_rx,
+            async_task_tx: majordomo_tx,
+            rx: main_rx,
         }
     }
 }
@@ -181,9 +186,9 @@ impl KafkaServer {
         config: KafkaConfig,
         time: std::time::Instant,
         async_task_tx: mpsc::Sender<AsyncTask>,
-        shutdown_rx: oneshot::Receiver<()>,
+        rx: mpsc::Receiver<KafkaServerAsyncTask>,
     ) -> Self {
-        let mut kafka_server = KafkaServer { async_task_tx, shutdown_rx, ..KafkaServer::default() };
+        let mut kafka_server = KafkaServer { async_task_tx, rx, ..KafkaServer::default() };
         // TODO: In the future we can implement SSL/etc.
         // In the kotlin code, zkClientConfigFromKafkaConfig is used to build an
         // Option<ZkClientConfig>, it returns None if there's no SSL setup, we are not using SSL so
@@ -241,12 +246,21 @@ impl KafkaServer {
     // endpoints shared with majordomo
     //
 
-    /// `wait_for_shutdown` waits for Ctrl-C to shutdown and clean  resources
-    /// This function is used for testing the shutdown channels when Ctrl-C, not part of kafka.
-    #[instrument]
-    pub async fn wait_for_shutdown(&mut self) {
-        self.shutdown_rx.try_recv().unwrap();
-        crate::majordomo::Coordinator::shutdown(self.async_task_tx.clone()).await;
-        info!("Received shutdown signal");
+    /// `process_message_queue` receives KafkaServerAsyncTask requests from clients
+    /// If a client wants a response it may use a oneshot::channel for it
+    pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
+        while let Some(task) = self.rx.recv().await {
+            info!("KafkaServer coordinator {:?}", task);
+            match task {
+                KafkaServerAsyncTask::Shutdown => break,
+                _ => unimplemented!("Task not implemented"),
+            }
+        }
+        Ok(())
+    }
+
+    /// Sends the shutdown signal to the KafkaServer loop
+    pub async fn shutdown(tx: mpsc::Sender<KafkaServerAsyncTask>) {
+        tx.send(KafkaServerAsyncTask::Shutdown).await.unwrap();
     }
 }
