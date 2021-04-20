@@ -41,20 +41,24 @@ async fn main() {
 
     let config_file = matches.value_of("INPUT").unwrap();
     println!("Using input file: {}", config_file);
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let (kafka_server_tx, kafka_server_rx) = mpsc::channel(4_096); // TODO: Magic number removal
     let kafka_config = KafkaConfig::get_kafka_config(config_file).unwrap();
     let kafka_config_clone = kafka_config.clone();
     let mut kafka_zk = KafkaZkClientCoordinator::new(kafka_config.clone()).await.unwrap();
     let (majordomo_tx, majordomo_rx) = mpsc::channel(4096); // TODO: Magic number removal
     let majordomo_tx_clone = majordomo_tx.clone();
     tokio::spawn(async move {
-        let mut kafka_server =
-            KafkaServer::new(kafka_config_clone, Instant::now(), majordomo_tx_clone, shutdown_rx);
+        let mut kafka_server = KafkaServer::new(
+            kafka_config_clone,
+            Instant::now(),
+            majordomo_tx_clone,
+            kafka_server_rx,
+        );
         match kafka_server.startup().await {
             Ok(()) => info!("Kafka startup Complete"),
             Err(err) => error!("Kafka startup failed: {:?}", err),
         };
-        kafka_server.wait_for_shutdown().await;
+        kafka_server.process_message_queue().await.unwrap();
     });
     // Start the main messaging bus
     let kafka_server_async_tx = kafka_zk.main_tx();
@@ -74,6 +78,6 @@ async fn main() {
         signal::ctrl_c().await.unwrap();
         error!("ctrl-c received!");
         rafka_core::majordomo::Coordinator::shutdown(majordomo_tx).await;
-        shutdown_tx.send(()).unwrap();
+        rafka_core::server::kafka_server::KafkaServer::shutdown(kafka_server_tx).await;
     });
 }
