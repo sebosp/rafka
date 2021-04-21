@@ -94,7 +94,7 @@ impl BaseVersionRange {
     pub fn from(key: &str, version_range_map: &HashMap<String, i16>) -> i16 {
         match BaseVersionRange::try_get_value(key, version_range_map) {
             Ok(val) => val,
-            Err(err) => panic!(err),
+            Err(err) => panic!("{}", err),
         }
     }
 

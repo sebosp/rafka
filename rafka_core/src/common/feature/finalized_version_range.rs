@@ -23,7 +23,7 @@ impl FinalizedVersionRange {
         debug!("Attempting to build from HashMap: {:?}", version_range_map);
         match Self::try_from_map(&version_range_map) {
             Ok(val) => val,
-            Err(err) => panic!(err),
+            Err(err) => panic!("{}", err),
         }
     }
 
