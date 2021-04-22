@@ -16,7 +16,7 @@ use crate::zk::zk_data;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 use tracing_attributes::instrument;
 #[derive(Debug)]
 pub struct FinalizedFeatureChangeListener {
@@ -66,7 +66,7 @@ impl FeatureCacheUpdater {
         supported_features: &mut SupportedFeatures,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
-        debug!("Requesting read on feature ZK node at path: {}", self.feature_zk_node_path);
+        trace!("Requesting read on feature ZK node at path: {}", self.feature_zk_node_path);
         let (tx, rx) = oneshot::channel();
         majordomo_tx
             .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetDataAndVersion(
@@ -74,7 +74,9 @@ impl FeatureCacheUpdater {
                 self.feature_zk_node_path.clone(),
             )))
             .await?;
+        trace!("Sent read request on feature ZK node to majordomo, awaiting response");
         let response = rx.await?;
+        trace!("Received feature ZK node response");
         // From the original code:
         // There are 4 cases:
         //

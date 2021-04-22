@@ -324,7 +324,6 @@ pub enum KafkaZkClientAsyncTask {
     EnsurePersistentPathExists(String),
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
     RegisterFeatureChange(mpsc::Sender<AsyncTask>),
-    FeaturePathChildrenCacheEvent(PathChildrenCacheEvent),
     Shutdown,
 }
 
@@ -364,9 +363,9 @@ impl KafkaZkClientCoordinator {
             info!("KafkaZkClient coordinator {:?}", task);
             match task {
                 KafkaZkClientAsyncTask::GetDataAndVersion(tx, znode_path) => {
-                    // TODO: This blocks, send the tx to the get_data_and_version and tokio::spawn
-                    // its ZK call
+                    debug!("KafkaZkClientAsyncTask calling get_data_and_version");
                     let result = self.kafka_zk_client.get_data_and_version(&znode_path).await?;
+                    debug!("KafkaZkClientAsyncTask got response from get_data_and_version");
                     if let Err(err) = tx.send(result) {
                         // RAFKA TODO: should the process die here?
                         error!("Unable to send back GetDataAndVersionResponse: {:?}", err);
@@ -379,7 +378,6 @@ impl KafkaZkClientCoordinator {
                         .register_feature_cache_change(majordomo_tx)
                         .await?
                 },
-                KafkaZkClientAsyncTask::FeaturePathChildrenCacheEvent(cache_event) => {},
                 _ => unimplemented!("Task not implemented"),
             }
         }
