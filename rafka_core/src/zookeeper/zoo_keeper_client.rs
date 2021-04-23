@@ -202,9 +202,9 @@ impl ZooKeeperClient {
         tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         if let Some(zk) = &self.zookeeper {
-            // A listener to the Zookeeper State change
+            // A listener to the Zookeeper State change, for example, disconnected, auth failure.
             let tx_0 = tx.clone();
-            zk.add_listener(move |_s| {
+            zk.add_listener(move |_state| {
                 let tx_clone = tx_0.clone();
                 tokio::spawn(async move {
                     tx_clone
@@ -219,12 +219,17 @@ impl ZooKeeperClient {
                 PathChildrenCache::new(zk.clone(), &FeatureZNode::default_path()).await.unwrap();
             pcc.start()?;
             let tx_1 = tx.clone();
-            pcc.add_listener(move |e| {
+            // A listener to the znode change, for example, znode deleted, created, changed.
+            // RAFKA TODO: When we use this for general use cases, we could send different triggers
+            // and even include the new data without reading from zookeeper again, but, for now,
+            // the finalized_feature_cache will just be triggered and it would go to zookeeper to
+            // read.
+            pcc.add_listener(move |event| {
                 let tx_clone = tx_1.clone();
                 tokio::spawn(async move {
                     tx_clone
-                        .send(AsyncTask::Zookeeper(
-                            KafkaZkClientAsyncTask::FeaturePathChildrenCacheEvent(e),
+                        .send(AsyncTask::FinalizedFeatureCache(
+                            FeatureCacheUpdaterAsyncTask::TriggerChange,
                         ))
                         .await
                         .unwrap();
