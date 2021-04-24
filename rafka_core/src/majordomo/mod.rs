@@ -21,7 +21,7 @@ use crate::server::finalize_feature_change_listener::{
 };
 use crate::server::kafka_config::KafkaConfig;
 use crate::server::supported_features::SupportedFeatures;
-use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask, KafkaZkClientCoordinator};
+use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
 use std::error::Error;
 use std::thread;
@@ -80,9 +80,9 @@ impl AsyncTaskError {
     }
 }
 
-/// A Coordinator that keeps the state to be shared across async tasks
+/// A MajordomoCoordinator that keeps the state to be shared across async tasks
 #[derive(Debug)]
-pub struct Coordinator {
+pub struct MajordomoCoordinator {
     kafka_config: KafkaConfig,
     feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
@@ -91,7 +91,7 @@ pub struct Coordinator {
     rx: mpsc::Receiver<AsyncTask>,
 }
 
-impl Coordinator {
+impl MajordomoCoordinator {
     pub async fn new(
         kafka_config: KafkaConfig,
         kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
@@ -100,7 +100,7 @@ impl Coordinator {
     ) -> Result<Self, AsyncTaskError> {
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
-        Ok(Coordinator {
+        Ok(MajordomoCoordinator {
             kafka_config,
             tx: main_tx,
             rx: main_rx,
@@ -123,7 +123,9 @@ impl Coordinator {
                 AsyncTask::Zookeeper(task) => {
                     // Forward the task to KafkaZkClient coordinator
                     let kfk_zk_tx_copy = self.kafka_zk_tx.clone();
-                    tokio::spawn(async move { kfk_zk_tx_copy.send(task).await });
+                    tokio::spawn(async move {
+                        kfk_zk_tx_copy.send(task).await.unwrap();
+                    });
                 },
                 AsyncTask::Coordinator(task) => {
                     info!("coordinator coord_task is {:?}", task);

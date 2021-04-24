@@ -1,5 +1,5 @@
 use clap::{App, Arg};
-use rafka_core::majordomo::Coordinator;
+use rafka_core::majordomo::MajordomoCoordinator;
 use rafka_core::server::kafka_config::KafkaConfig;
 use rafka_core::server::kafka_server::KafkaServer;
 use rafka_core::zk::kafka_zk_client::KafkaZkClientCoordinator;
@@ -64,7 +64,7 @@ async fn main() {
     let kafka_server_async_tx = kafka_zk.main_tx();
     let majordomo_tx_clone = majordomo_tx.clone();
     tokio::spawn(async move {
-        Coordinator::init_coordinator_thread(
+        MajordomoCoordinator::init_coordinator_thread(
             kafka_config.clone(),
             kafka_server_async_tx,
             majordomo_tx_clone,
@@ -77,7 +77,7 @@ async fn main() {
     tokio::spawn(async {
         signal::ctrl_c().await.unwrap();
         error!("ctrl-c received!");
-        rafka_core::majordomo::Coordinator::shutdown(majordomo_tx).await;
+        rafka_core::majordomo::MajordomoCoordinator::shutdown(majordomo_tx).await;
         rafka_core::server::kafka_server::KafkaServer::shutdown(kafka_server_tx).await;
     });
 }
