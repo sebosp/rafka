@@ -11,7 +11,7 @@
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::finalized_feature_cache::FinalizedFeatureCache;
 use crate::server::supported_features::SupportedFeatures;
-use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
+use crate::zk::kafka_zk_client::{GetDataAndVersionResponse, KafkaZkClientAsyncTask};
 use crate::zk::zk_data;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -55,28 +55,49 @@ impl FeatureCacheUpdater {
         self.finalized_feature_cache.clear();
     }
 
+    /// Spawns a tokio task to request GetDataAndVersion from Zookeeper for the /feature znode, this
+    /// request is done to the MajorDomoCoordinator.
+    /// When the data is received, it is also sent back to the MajordomoCoordinator.
+    /// This is done to prevent the data request from zookeeper to block the majordomo message
+    /// processing loop.
+    #[instrument]
+    pub async fn req_feature_latest_data_and_version(
+        feature_zk_node_path: String,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<(), AsyncTaskError> {
+        // TODO: Currently this unwraps errors, figure out how to return AsyncErrors from tasks
+        tokio::spawn(async move {
+            trace!("Requesting read on feature ZK node at path: {}", feature_zk_node_path);
+            let (tx, rx) = oneshot::channel();
+            majordomo_tx
+                .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetDataAndVersion(
+                    tx,
+                    feature_zk_node_path,
+                )))
+                .await
+                .unwrap();
+            trace!("Sent read request on feature ZK node to majordomo, awaiting response");
+            let response = rx.await.unwrap();
+            majordomo_tx
+                .send(AsyncTask::FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask::UpdateLatest(
+                    response,
+                )))
+                .await
+                .unwrap();
+        });
+        Ok(())
+    }
+
     /// Updates the feature cache in FinalizedFeatureCache with the latest features read from the
     /// ZK node in featureZkNodePath. If the cache update is not successful, then, a suitable
     /// Error is returned
     /// NOTE: if a notifier was provided in the constructor, then, this method can be invoked
     /// once
-    #[instrument]
-    pub async fn update_latest_or_throw(
+    pub fn update_latest_or_throw(
         &mut self,
         supported_features: &mut SupportedFeatures,
-        majordomo_tx: mpsc::Sender<AsyncTask>,
+        data_and_version: GetDataAndVersionResponse,
     ) -> Result<(), AsyncTaskError> {
-        trace!("Requesting read on feature ZK node at path: {}", self.feature_zk_node_path);
-        let (tx, rx) = oneshot::channel();
-        majordomo_tx
-            .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetDataAndVersion(
-                tx,
-                self.feature_zk_node_path.clone(),
-            )))
-            .await?;
-        trace!("Sent read request on feature ZK node to majordomo, awaiting response");
-        let response = rx.await?;
-        trace!("Received feature ZK node response");
         // From the original code:
         // There are 4 cases:
         //
@@ -95,12 +116,12 @@ impl FeatureCacheUpdater {
         // ZK node is absent. Therefore dataBytes should be empty in such
         // a case.
 
-        if response.version == zk_data::ZkVersion::UnknownVersion as i32 {
+        if data_and_version.version == zk_data::ZkVersion::UnknownVersion as i32 {
             info!("Feature ZK node at path: {} does not exist", self.feature_zk_node_path);
             self.finalized_feature_cache.clear();
             return Ok(());
         }
-        if let Some(data) = response.data {
+        if let Some(data) = data_and_version.data {
             match zk_data::FeatureZNode::decode(data) {
                 Ok(val) => match val.status {
                     zk_data::FeatureZNodeStatus::Disabled => {
@@ -117,7 +138,7 @@ impl FeatureCacheUpdater {
                         self.finalized_feature_cache.update_or_throw(
                             supported_features,
                             val.features,
-                            response.version,
+                            data_and_version.version,
                         )?;
                     },
                     /* RAFKA NOTE: The original code checks for other possible values on the
@@ -147,7 +168,11 @@ impl FeatureCacheUpdater {
     ) -> Result<(), AsyncTaskError> {
         // RAFKA TODO: Tie to zookeeper watcher
         info!("Feature ZK node created at path: {}", self.feature_zk_node_path);
-        self.update_latest_or_throw(supported_features, majordomo_tx).await
+        FeatureCacheUpdater::req_feature_latest_data_and_version(
+            self.feature_zk_node_path.clone(),
+            majordomo_tx,
+        )
+        .await
     }
 
     /// From the Trait ZNodeChangeHandler, should be made trait once the trait fns can be async
@@ -158,7 +183,11 @@ impl FeatureCacheUpdater {
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
         info!("Feature ZK node updated at path: {}", self.feature_zk_node_path);
-        self.update_latest_or_throw(supported_features, majordomo_tx).await
+        FeatureCacheUpdater::req_feature_latest_data_and_version(
+            self.feature_zk_node_path.clone(),
+            majordomo_tx,
+        )
+        .await
     }
 
     /// From the Trait ZNodeChangeHandler, should be made trait once the trait fns can be async
@@ -172,7 +201,11 @@ impl FeatureCacheUpdater {
         // This event may happen, rarely (ex: ZK corruption or operational error).
         // In such a case, we prefer to just log a warning and treat the case as if the node is
         // absent, and populate the FinalizedFeatureCache with empty finalized features.
-        self.update_latest_or_throw(supported_features, majordomo_tx).await
+        FeatureCacheUpdater::req_feature_latest_data_and_version(
+            self.feature_zk_node_path.clone(),
+            majordomo_tx,
+        )
+        .await
     }
 
     /// From the Trait StateChangeHandler, should be made trait once the trait fns can be async
@@ -182,7 +215,12 @@ impl FeatureCacheUpdater {
         supported_features: &mut SupportedFeatures,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<(), AsyncTaskError> {
-        self.update_latest_or_throw(supported_features, majordomo_tx).await
+        info!("Feature ZK node After Initializing Session: {}", self.feature_zk_node_path);
+        FeatureCacheUpdater::req_feature_latest_data_and_version(
+            self.feature_zk_node_path.clone(),
+            majordomo_tx,
+        )
+        .await
     }
 
     /// This method initializes the feature ZK node change listener. Optionally, it also ensures to
@@ -257,6 +295,7 @@ impl ChangeNotificationProcessor {
 pub enum FeatureCacheUpdaterAsyncTask {
     Clear,
     TriggerChange,
+    UpdateLatest(GetDataAndVersionResponse),
 }
 
 impl FeatureCacheUpdaterAsyncTask {
@@ -269,10 +308,19 @@ impl FeatureCacheUpdaterAsyncTask {
     ) -> Result<(), AsyncTaskError> {
         match task {
             Self::Clear => cache.clear_finalized_feature_cache(),
-            Self::TriggerChange => cache
-                .update_latest_or_throw(supported_features, majordomo_tx.clone())
+            Self::TriggerChange => {
+                let tx_cp = majordomo_tx.clone();
+                let feature_zk_node_path = cache.feature_zk_node_path.clone();
+                FeatureCacheUpdater::req_feature_latest_data_and_version(
+                    feature_zk_node_path,
+                    tx_cp,
+                )
                 .await
-                .unwrap(),
+                .unwrap();
+            },
+            Self::UpdateLatest(data_and_version) => {
+                cache.update_latest_or_throw(supported_features, data_and_version)?
+            },
         }
         Ok(())
     }
