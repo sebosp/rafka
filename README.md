@@ -60,4 +60,10 @@ $ cargo run -- -v info rafka-config
 
 ## TODO
 
-- The featureZNode starts as empty, and that is not serializable, check how the current kafka featureu znode looks like (and if it's created when kafka boot, what info does it have).
+- The PathChildrenCache seems to be creating the /feature ZNode:
+```
+zookeeper_async::zookeeper: ZooKeeper::add_listener
+zookeeper_async::zookeeper_ext: ensure_path /feature
+zookeeper_async::zookeeper: ZooKeeper::create
+zookeeper_async::zookeeper: request opcode=Create xid=14
+```

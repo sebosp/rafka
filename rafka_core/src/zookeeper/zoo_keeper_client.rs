@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{debug, info};
+use tracing::{debug, info, trace};
 use tracing_attributes::instrument;
 use zookeeper_async::recipes::cache::PathChildrenCache;
 use zookeeper_async::{Acl, CreateMode, Stat, WatchedEvent, Watcher, ZooKeeper};
@@ -49,7 +49,7 @@ pub enum ZookeeperRequest {
 struct LoggingWatcher;
 impl Watcher for LoggingWatcher {
     fn handle(&self, e: WatchedEvent) {
-        println!("{:?}", e)
+        debug!("{:?}", e)
     }
 }
 
@@ -204,7 +204,8 @@ impl ZooKeeperClient {
         if let Some(zk) = &self.zookeeper {
             // A listener to the Zookeeper State change, for example, disconnected, auth failure.
             let tx_0 = tx.clone();
-            zk.add_listener(move |_state| {
+            zk.add_listener(move |state| {
+                trace!("StateChangeHandler event: {:?}", state);
                 let tx_clone = tx_0.clone();
                 tokio::spawn(async move {
                     tx_clone
@@ -225,6 +226,7 @@ impl ZooKeeperClient {
             // the finalized_feature_cache will just be triggered and it would go to zookeeper to
             // read.
             pcc.add_listener(move |event| {
+                debug!("ZNodeChangeHandler event: {:?}", event);
                 let tx_clone = tx_1.clone();
                 tokio::spawn(async move {
                     tx_clone
