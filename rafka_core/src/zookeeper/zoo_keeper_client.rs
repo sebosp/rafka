@@ -216,8 +216,7 @@ impl ZooKeeperClient {
                         .unwrap();
                 });
             });
-            let mut pcc =
-                PathChildrenCache::new(zk.clone(), &FeatureZNode::default_path()).await.unwrap();
+            let mut pcc = PathChildrenCache::new(zk.clone(), &String::from("/")).await.unwrap();
             pcc.start()?;
             let tx_1 = tx.clone();
             // A listener to the znode change, for example, znode deleted, created, changed.
