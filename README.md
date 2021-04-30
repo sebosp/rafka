@@ -67,3 +67,7 @@ zookeeper_async::zookeeper_ext: ensure_path /feature
 zookeeper_async::zookeeper: ZooKeeper::create
 zookeeper_async::zookeeper: request opcode=Create xid=14
 ```
+
+Currently the PathChildrenCache is used to watch over the /feature, which has no children.
+Watching over / as a workaround doesn't work as Initialized event type doesn't include which path changed so we cannot know which ZNodeHandler to call.
+It seems a possible solution is to include an adaptation of code from src/recipes/cache.rs that doesn't create the path.
