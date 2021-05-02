@@ -21,7 +21,7 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 use tracing::{debug, info, trace};
 use tracing_attributes::instrument;
-use zookeeper_async::recipes::cache::PathChildrenCache;
+use zookeeper_async::recipes::cache::{PathChildrenCache, PathChildrenCacheEvent};
 use zookeeper_async::{Acl, CreateMode, Stat, WatchedEvent, Watcher, ZooKeeper};
 // TODO: Backtrace
 // use std::backtrace::Backtrace;
@@ -49,7 +49,7 @@ pub enum ZookeeperRequest {
 struct LoggingWatcher;
 impl Watcher for LoggingWatcher {
     fn handle(&self, e: WatchedEvent) {
-        debug!("{:?}", e)
+        debug!("zoo_keeper_client LoggingWatcher {:?}", e)
     }
 }
 
@@ -227,14 +227,33 @@ impl ZooKeeperClient {
             pcc.add_listener(move |event| {
                 debug!("ZNodeChangeHandler event: {:?}", event);
                 let tx_clone = tx_1.clone();
-                tokio::spawn(async move {
-                    tx_clone
-                        .send(AsyncTask::FinalizedFeatureCache(
-                            FeatureCacheUpdaterAsyncTask::TriggerChange,
-                        ))
-                        .await
-                        .unwrap();
-                });
+                let updated_path = match event {
+                    PathChildrenCacheEvent::ChildRemoved(path) => Some(path),
+                    PathChildrenCacheEvent::ChildAdded(path, _) => Some(path),
+                    PathChildrenCacheEvent::ChildUpdated(path, _) => Some(path),
+                    _ => None,
+                };
+                match updated_path {
+                    None => trace!("No path was updated"),
+                    Some(path) => {
+                        trace!("ZNodeChangeHandler path {:?} changed", path);
+                        if path == FeatureZNode::default_path() {
+                            trace!(
+                                "Sending FeatureCacheUpdaterAsyncTask::TriggerChange as path {:?} \
+                                 changed",
+                                path
+                            );
+                            tokio::spawn(async move {
+                                tx_clone
+                                    .send(AsyncTask::FinalizedFeatureCache(
+                                        FeatureCacheUpdaterAsyncTask::TriggerChange,
+                                    ))
+                                    .await
+                                    .unwrap();
+                            });
+                        }
+                    },
+                }
             });
             Ok(())
         } else {
