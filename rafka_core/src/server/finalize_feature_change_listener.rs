@@ -250,20 +250,11 @@ impl FeatureCacheUpdater {
                 majordomo_tx.clone(),
             )))
             .await?;
-        // thread.start()
-        // kafka_zk_client.registerStateChangeHandler(ZkStateChangeHandler)
-        // kafka_zk_client.registerZNodeChangeHandlerAndCheckExistence(FeatureZNodeChangeHandler)
-        // val ensureCacheUpdateOnce = new FeatureCacheUpdater(
-        // FeatureZNodeChangeHandler.path, Some(new CountDownLatch(1)))
-        // queue.add(ensureCacheUpdateOnce)
-        // try {
+        majordomo_tx
+            .send(AsyncTask::FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask::TriggerChange))
+            .await?;
+        // TODO: The original code waits certain millis for the cache to be updated
         // ensureCacheUpdateOnce.awaitUpdateOrThrow(waitOnceForCacheUpdateMs)
-        // } catch {
-        // case e: Exception => {
-        // close()
-        // throw e
-        // }
-        // }
         Ok(())
     }
 }
