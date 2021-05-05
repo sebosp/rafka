@@ -253,8 +253,11 @@ impl FeatureCacheUpdater {
         majordomo_tx
             .send(AsyncTask::FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask::TriggerChange))
             .await?;
-        // TODO: The original code waits certain millis for the cache to be updated
+        // RAFKA TODO: The original code waits certain millis for the cache to be updated
         // ensureCacheUpdateOnce.awaitUpdateOrThrow(waitOnceForCacheUpdateMs)
+        // In the current setup, the Trigger change would cause the same, but it won't wait until
+        // the Trigger is fulfilled. Maybe a Option<oneshot::channel> can be used for this if it
+        // turns out we need it.
         Ok(())
     }
 }
