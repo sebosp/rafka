@@ -4,21 +4,20 @@
 //! - All fields that were initially null have been coverted to Option<T>, This is probably a bad
 //!   idea, let's see how far we can go
 
+use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask};
 use crate::server::broker_metadata_checkpoint::BrokerMetadataCheckpoint;
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
 use crate::server::kafka_config::KafkaConfig;
-use crate::tokio::{AsyncTask, AsyncTaskError, CoordinatorTask, ZookeeperAsyncTask};
 use crate::utils::kafka_scheduler::KafkaScheduler;
-use crate::zk::kafka_zk_client::KafkaZkClient;
+use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc::{channel, Sender};
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info};
 use tracing_attributes::instrument;
 #[derive(Debug)]
@@ -55,6 +54,11 @@ pub struct KafkaController;
 pub struct MetadataCache;
 #[derive(Debug)]
 struct BrokerTopicStats;
+
+#[derive(Debug)]
+pub enum KafkaServerAsyncTask {
+    Shutdown,
+}
 
 #[derive(Debug)]
 pub struct KafkaServer {
@@ -115,7 +119,10 @@ pub struct KafkaServer {
                                                                       * Option<> */
     pub kafka_config: KafkaConfig,
 
-    pub async_task_tx: Sender<AsyncTask>,
+    /// `async_task_tx` contains a handle to send taskt to the majordomo async_coordinator
+    pub async_task_tx: mpsc::Sender<AsyncTask>,
+
+    pub rx: mpsc::Receiver<KafkaServerAsyncTask>,
 }
 
 // RAFKA Unimplemented:
@@ -129,8 +136,9 @@ pub struct KafkaServer {
 impl Default for KafkaServer {
     fn default() -> Self {
         // TODO: Consider removing this implementation in favor of new() as the channel is basically
-        // unusable
-        let (tx, _rx) = channel(4_096); // TODO: Magic number removal
+        // unusable, maybe this is usable for testing
+        let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -166,7 +174,8 @@ impl Default for KafkaServer {
             feature_change_listener: None,
             init_time: Instant::now(),
             kafka_config: KafkaConfig::default(),
-            async_task_tx: tx,
+            async_task_tx: majordomo_tx,
+            rx: main_rx,
         }
     }
 }
@@ -176,9 +185,10 @@ impl KafkaServer {
     pub fn new(
         config: KafkaConfig,
         time: std::time::Instant,
-        async_task_tx: Sender<AsyncTask>,
+        async_task_tx: mpsc::Sender<AsyncTask>,
+        rx: mpsc::Receiver<KafkaServerAsyncTask>,
     ) -> Self {
-        let mut kafka_server = KafkaServer { async_task_tx, ..KafkaServer::default() };
+        let mut kafka_server = KafkaServer { async_task_tx, rx, ..KafkaServer::default() };
         // TODO: In the future we can implement SSL/etc.
         // In the kotlin code, zkClientConfigFromKafkaConfig is used to build an
         // Option<ZkClientConfig>, it returns None if there's no SSL setup, we are not using SSL so
@@ -197,7 +207,8 @@ impl KafkaServer {
         kafka_server
     }
 
-    /// Main entry point for this class
+    /// `startup` initializes local and zookeeper resources
+    #[instrument]
     pub async fn startup(&mut self) -> Result<(), AsyncTaskError> {
         info!("Starting");
         // These series of if might be pointless and we might get away by using mpsc from a
@@ -211,8 +222,9 @@ impl KafkaServer {
         // }
         // let can_startup = self.is_starting_up.compare_and_swap(false, true, Ordering::Relaxed);
         // if can_startup {
+
+        // setup zookeeper
         self.broker_state = BrokerState::Starting;
-        self.async_task_tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await?;
         // TODO: Either move this to the async-coordinator or use the tx field to create the
         // listeners for FinalizedFeatureChangeListener
         // self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));
@@ -224,22 +236,31 @@ impl KafkaServer {
         Ok(())
     }
 
-    #[instrument]
-    pub async fn init_zk_client(&mut self) -> Result<(), AsyncTaskError> {
-        // NOTE: This has been moved to crate::tokio::async_coordinator as first step before
-        // starting to process messages
-        info!("Sending Connect to zookeeper on {:?}", self.kafka_config.zk_connect);
+    // pub async fn init_zk_client(&mut self)
+    // NOTE: This has been moved to crate::majordomo::async_coordinator as first step before
+    // starting to process messages
+
+    // Creates a new zk_client for the zk_connect parameter
+    // fn create_zk_client(&self, zk_connect: &str)
+    // This has been moved to rafka/src/main.rs where KafkaZkClient is created and its channel
+    // endpoints shared with majordomo
+    //
+
+    /// `process_message_queue` receives KafkaServerAsyncTask requests from clients
+    /// If a client wants a response it may use a oneshot::channel for it
+    pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
+        while let Some(task) = self.rx.recv().await {
+            info!("KafkaServer coordinator {:?}", task);
+            match task {
+                KafkaServerAsyncTask::Shutdown => break,
+                _ => unimplemented!("Task not implemented"),
+            }
+        }
         Ok(())
     }
 
-    /// Creates a new zk_client for the zk_connect parameter
-    fn create_zk_client(&self, zk_connect: &str) -> KafkaZkClient {
-        KafkaZkClient::build(
-            zk_connect,
-            &self.kafka_config,
-            Some(String::from("Kafka server")),
-            self.init_time,
-            Some(self.zk_client_config),
-        )
+    /// Sends the shutdown signal to the KafkaServer loop
+    pub async fn shutdown(tx: mpsc::Sender<KafkaServerAsyncTask>) {
+        tx.send(KafkaServerAsyncTask::Shutdown).await.unwrap();
     }
 }

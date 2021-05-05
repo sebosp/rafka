@@ -20,13 +20,18 @@ code they are available, that gives the java code way lower level access
 to zookeeper, maybe a similar approach can be done here by forking the
 original repo and moving some stuff here
 
+## Threads and message passing
+
+Several threads are created, they talk through tokio::sync::mpsc/oneshot channels.
+- ./rafka_core/src/majordomo/mod.rs Majordomo Coordinator. This is the main thread that coordinates services/messages/state
+- ./rafka_core/src/zk/kafka_zk_client.rs KafkaZKClient. zookeeper watches/data-requests should not block the coordinator.
+
 ## Running
 
 ### Create the config file
 
 ```bash
-$ cat rafka-config
-zookeeper.connect = 127.0.0.1:2181/my-chroot
+$ cat rafka-config zookeeper.connect = 127.0.0.1:2181/my-chroot
 ```
 
 ### Start zookeeper
@@ -51,3 +56,18 @@ $ cargo run -- -v info rafka-config
 
 ## Current issues
 -  If zookeeper is not available, the CPU usage goes crazy, using connection timeout/etc doesn't seem to help.
+
+
+## TODO
+
+- The PathChildrenCache seems to be creating the /feature ZNode:
+```
+zookeeper_async::zookeeper: ZooKeeper::add_listener
+zookeeper_async::zookeeper_ext: ensure_path /feature
+zookeeper_async::zookeeper: ZooKeeper::create
+zookeeper_async::zookeeper: request opcode=Create xid=14
+```
+
+Currently the PathChildrenCache is used to watch over the /feature, which has no children.
+Watching over / as a workaround doesn't work as Initialized event type doesn't include which path changed so we cannot know which ZNodeHandler to call.
+It seems a possible solution is to include an adaptation of code from src/recipes/cache.rs that doesn't create the path.

@@ -10,15 +10,18 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
-use crate::tokio::{AsyncTask, AsyncTaskError};
-use crate::zk::zk_data::ZkData;
+use crate::zk::zk_data;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
 use std::error::Error;
 use std::time::Instant;
-use tracing::{debug, error};
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tracing::{debug, error, info};
 use tracing_attributes::instrument;
+use zookeeper_async::recipes::cache::PathChildrenCacheEvent;
 use zookeeper_async::CreateMode;
 
 #[derive(thiserror::Error, Debug)]
@@ -39,7 +42,7 @@ pub struct KafkaZkClient {
     // id changes over the time for 'Session expired'. This code is part of the work around
     // done in the KAFKA-7165, once ZOOKEEPER-2985 is complete, this code must be deleted.
     current_zookeeper_session_id: i32,
-    zk_data: ZkData,
+    pub zk_data: zk_data::ZkData,
 }
 
 impl Default for KafkaZkClient {
@@ -48,7 +51,7 @@ impl Default for KafkaZkClient {
             zoo_keeper_client: ZooKeeperClient::default(),
             time: Instant::now(),
             current_zookeeper_session_id: -1i32,
-            zk_data: ZkData::default(),
+            zk_data: zk_data::ZkData::default(),
         }
     }
 }
@@ -59,7 +62,7 @@ impl KafkaZkClient {
             zoo_keeper_client,
             time,
             current_zookeeper_session_id: -1i32,
-            zk_data: ZkData::default(),
+            zk_data: zk_data::ZkData::default(),
         }
     }
 
@@ -134,7 +137,7 @@ impl KafkaZkClient {
                             zookeeper_async::ZkError::NodeExists => {
                                 break;
                             },
-                            _ => return Err(crate::tokio::AsyncTaskError::ZooKeeperError(*zk_err)),
+                            _ => return Err(AsyncTaskError::ZooKeeper(*zk_err)),
                         }
                     }
                 }
@@ -168,7 +171,7 @@ impl KafkaZkClient {
                     match zk_err {
                         zookeeper_async::ZkError::NodeExists => {
                             if fail_on_exists {
-                                return Err(AsyncTaskError::KafkaZkClientError(
+                                return Err(AsyncTaskError::KafkaZkClient(
                                     KafkaZkClientError::CreatePathExists,
                                 ));
                             }
@@ -176,13 +179,13 @@ impl KafkaZkClient {
                         zookeeper_async::ZkError::NoNode => {
                             if let Err(err) = self.create_looped_0(path).await {
                                 if fail_on_exists || !err.is_zookeeper_async_node_exists() {
-                                    return Err(crate::tokio::AsyncTaskError::KafkaZkClientError(
+                                    return Err(AsyncTaskError::KafkaZkClient(
                                         KafkaZkClientError::CreatePathExists,
                                     ));
                                 }
                             }
                         },
-                        _ => return Err(crate::tokio::AsyncTaskError::ZooKeeperError(*zk_err)),
+                        _ => return Err(AsyncTaskError::ZooKeeper(*zk_err)),
                     }
                 }
             }
@@ -260,5 +263,124 @@ impl KafkaZkClient {
         self.create_chroot_path_if_set(&kafka_config.zk_connect, &kafka_config).await?;
         self.connect().await?;
         self.create_top_level_paths().await
+    }
+
+    /// `get_data_and_version` for a given zk path, the version is equivalent to the Zookeeper Stat
+    /// if the Stat from get_data is None, then ZkVersion::UnknownVersion (-2) is returned
+    #[instrument]
+    pub async fn get_data_and_version(
+        &self,
+        path: &str,
+    ) -> Result<GetDataAndVersionResponse, AsyncTaskError> {
+        let (data, stat) = self.get_data_and_stat(path).await?;
+        match stat {
+            None => Ok(GetDataAndVersionResponse {
+                data,
+                version: zk_data::ZkVersion::UnknownVersion as i32,
+            }),
+            Some(zk_stat) => Ok(GetDataAndVersionResponse { data, version: zk_stat.version }),
+        }
+    }
+
+    /// Gets the data and Stat at the given zk path, both the Data and the Stat may be empty
+    #[instrument]
+    pub async fn get_data_and_stat(
+        &self,
+        path: &str,
+    ) -> Result<(Option<Vec<u8>>, Option<zookeeper_async::Stat>), AsyncTaskError> {
+        let get_data_request = self.zoo_keeper_client.get_data_request(path).await;
+        match get_data_request {
+            Err(err) => {
+                if let Some(err) = err.source() {
+                    if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
+                        match zk_err {
+                            zookeeper_async::ZkError::NoNode => return Ok((None, None)),
+
+                            _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeper(*zk_err)),
+                        }
+                    }
+                }
+                Err(err)
+            },
+            Ok((data, stat)) => Ok((Some(data), Some(stat))),
+        }
+    }
+}
+
+/// -----------------------
+/// Rafka Async tasks/messages related to this module
+/// -----------------------
+
+/// For sending GetDataAndVersionResponse across a channel
+#[derive(Debug)]
+pub struct GetDataAndVersionResponse {
+    pub data: Option<Vec<u8>>,
+    pub version: i32,
+}
+
+/// Rafka Async tasks/messages related to this module
+#[derive(Debug)]
+pub enum KafkaZkClientAsyncTask {
+    EnsurePersistentPathExists(String),
+    GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
+    RegisterFeatureChange(mpsc::Sender<AsyncTask>),
+    Shutdown,
+}
+
+#[derive(Debug)]
+pub struct KafkaZkClientCoordinator {
+    kafka_zk_client: KafkaZkClient,
+    pub tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    rx: mpsc::Receiver<KafkaZkClientAsyncTask>,
+}
+
+impl KafkaZkClientCoordinator {
+    /// `new` creates a newm instance of the KafkaZkClientCoordinator.
+    /// An mpsc channel is created to communicate with the internal coordinator for tasks.
+    pub async fn new(kafka_config: KafkaConfig) -> Result<Self, AsyncTaskError> {
+        let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let init_time = Instant::now();
+        let mut kafka_zk_client = KafkaZkClient::build(
+            &kafka_config.zk_connect,
+            &kafka_config,
+            Some(String::from("Async Coordinator")),
+            init_time,
+            None,
+        );
+        kafka_zk_client.init(&kafka_config).await?;
+        Ok(KafkaZkClientCoordinator { kafka_zk_client, tx, rx })
+    }
+
+    /// `main_tx` clones the current transmission endpoint in the coordinator channel.
+    pub fn main_tx(&self) -> mpsc::Sender<KafkaZkClientAsyncTask> {
+        self.tx.clone()
+    }
+
+    /// `process_message_queue` receives KafkaZkClientAsyncTask requests from clients
+    /// If a client wants a response it may use a oneshot::channel for it
+    pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
+        while let Some(task) = self.rx.recv().await {
+            info!("KafkaZkClient coordinator {:?}", task);
+            match task {
+                KafkaZkClientAsyncTask::GetDataAndVersion(tx, znode_path) => {
+                    debug!("KafkaZkClientAsyncTask calling get_data_and_version");
+                    let result = self.kafka_zk_client.get_data_and_version(&znode_path).await?;
+                    debug!("KafkaZkClientAsyncTask got response from get_data_and_version");
+                    if let Err(err) = tx.send(result) {
+                        // RAFKA TODO: should the process die here?
+                        error!("Unable to send back GetDataAndVersionResponse: {:?}", err);
+                    }
+                },
+                KafkaZkClientAsyncTask::Shutdown => self.kafka_zk_client.close().await.unwrap(),
+                KafkaZkClientAsyncTask::RegisterFeatureChange(majordomo_tx) => {
+                    self.kafka_zk_client
+                        .zoo_keeper_client
+                        .register_feature_cache_change(majordomo_tx)
+                        .await?
+                },
+                _ => unimplemented!("Task not implemented"),
+            }
+        }
+        Ok(())
     }
 }

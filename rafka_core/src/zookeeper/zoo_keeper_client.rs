@@ -1,24 +1,28 @@
 //! A ZooKeeper client that encourages pipelined requests.
 //! core/src/main/scala/kafka/zookeeper/ZooKeeperClient.scala
+//! RAFKA Specific:
+//! - While the library uses re-entrant locks and concurrent structures extensively, this crate will
+//!   rather use mpsc channels to communicate back and forth and have a main loop.
+//! - The Kafkascheduler is not used, it creates an executor and schedules tasks, rather, the tokio
+//!   scheduler will be used.
+//! - Need to figure out reconnection to zookeeper
+//! (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
 
 // RAFKA TODO: Check if we can do the "pipeline" with the rust libraries
 
-use crate::server::kafka_config::KafkaConfig;
-use crate::tokio::{AsyncTask, AsyncTaskError};
-use crate::utils::kafka_scheduler::KafkaScheduler;
+use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterAsyncTask;
+use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
+use crate::zk::zk_data::FeatureZNode;
 use std::fmt;
-/// RAFKA Specific:
-/// - While the library uses re-entrant locks and concurrent structures extensively, this crate
-///   will rather use mpsc channels to communicate back and forth and have a main loop.
-/// - The Kafkascheduler is not used, it creates an executor and schedules tasks, rather, the
-///   tokio scheduler will be used.
-/// - Need to figure out reconnection to zookeeper
-/// (https://docs.rs/tokio-zookeeper/0.1.3/tokio_zookeeper/struct.ZooKeeper.html)
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::info;
+use tokio::sync::mpsc;
+use tracing::{debug, info, trace};
 use tracing_attributes::instrument;
-use zookeeper_async::{Acl, CreateMode, WatchedEvent, Watcher, ZooKeeper};
+use zookeeper_async::recipes::cache::{PathChildrenCache, PathChildrenCacheEvent};
+use zookeeper_async::{Acl, CreateMode, Stat, WatchedEvent, Watcher, ZooKeeper};
 // TODO: Backtrace
 // use std::backtrace::Backtrace;
 
@@ -45,7 +49,7 @@ pub enum ZookeeperRequest {
 struct LoggingWatcher;
 impl Watcher for LoggingWatcher {
     fn handle(&self, e: WatchedEvent) {
-        println!("{:?}", e)
+        debug!("zoo_keeper_client LoggingWatcher {:?}", e)
     }
 }
 
@@ -72,7 +76,7 @@ pub struct ZooKeeperClient {
     /// `max_in_flight_requests` maximum number of unacknowledged requests the client will send
     /// before blocking
     max_in_flight_requests: u32,
-    /// name name of the client instance
+    /// name of the client instance
     name: Option<String>,
     time: Instant,
     // zk_client_config ZooKeeper client configuration, for TLS configs if desired
@@ -88,7 +92,7 @@ pub struct ZooKeeperClient {
     // zNodeChangeHandlers: HashMap<String, N>,
     // zNodeChildChangeHandlers: HashMap<String, C>,
     /// A connection to ZooKeeper.
-    zookeeper: Option<ZooKeeper>,
+    zookeeper: Option<Arc<ZooKeeper>>,
 }
 
 impl fmt::Debug for ZooKeeperClient {
@@ -131,7 +135,7 @@ impl ZooKeeperClient {
     /// `connect` peforms a connection to the zookeeper server.
     #[instrument]
     pub async fn connect(&mut self) -> Result<(), AsyncTaskError> {
-        // NOTE: If zookeeper is not up, then it will continue forever trying to connect
+        // RAFKA TODO: If zookeeper is not up, then it will continue forever trying to connect
         let zk = ZooKeeper::connect(
             &self.connect_string,
             Duration::from_millis(self.connection_timeout_ms.into()),
@@ -139,8 +143,19 @@ impl ZooKeeperClient {
         )
         .await?;
         info!("Connection to zookeeper successful");
-        self.zookeeper = Some(zk);
+        self.zookeeper = Some(Arc::new(zk));
         Ok(())
+    }
+
+    /// `get_data_request` Peforms a get data operation to zookeeper.
+    /// For now not enabling "watching" the node
+    #[instrument]
+    pub async fn get_data_request(&self, path: &str) -> Result<(Vec<u8>, Stat), AsyncTaskError> {
+        if let Some(zk) = &self.zookeeper {
+            Ok(zk.get_data(path, false).await?)
+        } else {
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
+        }
     }
 
     /// `create_request` Creates an operation request for zookeeper, we do not seem to get a
@@ -156,7 +171,7 @@ impl ZooKeeperClient {
         if let Some(zk) = &self.zookeeper {
             Ok(zk.create(path, data, acls, mode).await?)
         } else {
-            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
         }
     }
 
@@ -166,11 +181,83 @@ impl ZooKeeperClient {
     pub async fn close(&mut self) -> Result<(), AsyncTaskError> {
         if let Some(zk) = &self.zookeeper {
             match zk.close().await {
-                Err(err) => Err(AsyncTaskError::ZooKeeperError(err)),
+                Err(err) => Err(AsyncTaskError::ZooKeeper(err)),
                 Ok(()) => Ok(()),
             }
         } else {
-            Err(AsyncTaskError::ZooKeeperClientError(ZooKeeperClientError::NotInitialized))
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
+        }
+    }
+
+    /// `register_change_handler` Registers a state or znode watcher.
+    /// The state change is for connection/disconnection/auth failures to zookeeper in general
+    /// The ZNode change is for a specific path being created/deleted/updated.
+    /// # Arguments
+    /// * `tx` a channel to the coordinator to send watch events to
+    /// RAFKA TODO: For now only using feature cache znode, to be made generic later, maybe
+    /// FnOnce(WatchedEvent)
+    #[instrument]
+    pub async fn register_feature_cache_change(
+        &mut self,
+        tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<(), AsyncTaskError> {
+        if let Some(zk) = &self.zookeeper {
+            // A listener to the Zookeeper State change, for example, disconnected, auth failure.
+            let tx_0 = tx.clone();
+            zk.add_listener(move |state| {
+                trace!("StateChangeHandler event: {:?}", state);
+                let tx_clone = tx_0.clone();
+                tokio::spawn(async move {
+                    tx_clone
+                        .send(AsyncTask::FinalizedFeatureCache(
+                            FeatureCacheUpdaterAsyncTask::TriggerChange,
+                        ))
+                        .await
+                        .unwrap();
+                });
+            });
+            let mut pcc = PathChildrenCache::new(zk.clone(), &String::from("/")).await.unwrap();
+            pcc.start()?;
+            let tx_1 = tx.clone();
+            // A listener to the znode change, for example, znode deleted, created, changed.
+            // RAFKA TODO: When we use this for general use cases, we could send different triggers
+            // and even include the new data without reading from zookeeper again, but, for now,
+            // the finalized_feature_cache will just be triggered and it would go to zookeeper to
+            // read.
+            pcc.add_listener(move |event| {
+                debug!("ZNodeChangeHandler event: {:?}", event);
+                let tx_clone = tx_1.clone();
+                let updated_path = match event {
+                    PathChildrenCacheEvent::ChildRemoved(path) => Some(path),
+                    PathChildrenCacheEvent::ChildAdded(path, _) => Some(path),
+                    PathChildrenCacheEvent::ChildUpdated(path, _) => Some(path),
+                    _ => None,
+                };
+                match updated_path {
+                    None => trace!("No path was updated"),
+                    Some(path) => {
+                        trace!("ZNodeChangeHandler path {:?} changed", path);
+                        if path == FeatureZNode::default_path() {
+                            trace!(
+                                "Sending FeatureCacheUpdaterAsyncTask::TriggerChange as path {:?} \
+                                 changed",
+                                path
+                            );
+                            tokio::spawn(async move {
+                                tx_clone
+                                    .send(AsyncTask::FinalizedFeatureCache(
+                                        FeatureCacheUpdaterAsyncTask::TriggerChange,
+                                    ))
+                                    .await
+                                    .unwrap();
+                            });
+                        }
+                    },
+                }
+            });
+            Ok(())
+        } else {
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
         }
     }
 }
@@ -202,13 +289,17 @@ impl Default for ZooKeeperClient {
 }
 
 pub trait ZNodeChangeHandler {
-    type Path;
-    fn handle_creation();
-    fn handle_deletion();
-    fn handle_data_change();
+    fn handle_creation(&mut self);
+    fn handle_deletion(&mut self);
+    fn handle_data_change(&mut self);
 }
 
 pub trait ZNodeChildChangeHandler {
-    type Path;
     fn handle_child_change();
+}
+
+pub trait StateChangeHandler {
+    fn before_initializing_session();
+    fn after_initializing_session();
+    // fn on_auth_failure();
 }
