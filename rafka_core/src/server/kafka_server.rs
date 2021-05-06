@@ -225,25 +225,29 @@ impl KafkaServer {
 
         // setup zookeeper
         self.broker_state = BrokerState::Starting;
-        // TODO: Either move this to the async-coordinator or use the tx field to create the
-        // listeners for FinalizedFeatureChangeListener
-        // self.featureChangeListener = Some(FinalizedFeatureChangeListener::new(zkClient));
-        // if (config.isFeatureVersioningEnabled) {
-        //    _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
-        //}
+        // RAFKA NOTE: The majordomo thread now owns the shared state, it contains the
+        // FinalizedFeatureChangeListener struct.
+        // initOrThrow(config.zkConnectionTimeoutMs)
 
+        // Get or create cluster_id
+        let cluster_id = self.get_or_generate_cluster_id();
+        info!("Cluster ID = {}", cluster_id);
         //}
         Ok(())
     }
 
+    fn get_or_generate_cluster_id(&mut self) -> String {
+        unimplemented!("");
+    }
+
     // pub async fn init_zk_client(&mut self)
-    // NOTE: This has been moved to crate::majordomo::async_coordinator as first step before
+    // RAFKA NOTE: This has been moved to crate::majordomo::async_coordinator as first step before
     // starting to process messages
 
     // Creates a new zk_client for the zk_connect parameter
     // fn create_zk_client(&self, zk_connect: &str)
-    // This has been moved to rafka/src/main.rs where KafkaZkClient is created and its channel
-    // endpoints shared with majordomo
+    // RAFKA NOTE: This has been moved to rafka/src/main.rs where KafkaZkClient is created and its
+    // channel endpoints shared with majordomo
     //
 
     /// `process_message_queue` receives KafkaServerAsyncTask requests from clients
