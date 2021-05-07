@@ -230,14 +230,21 @@ impl KafkaServer {
         // initOrThrow(config.zkConnectionTimeoutMs)
 
         // Get or create cluster_id
-        let cluster_id = self.get_or_generate_cluster_id();
+        let cluster_id = self.get_or_generate_cluster_id().await?;
         info!("Cluster ID = {}", cluster_id);
         //}
         Ok(())
     }
 
-    fn get_or_generate_cluster_id(&mut self) -> String {
-        unimplemented!("");
+    /// Request the cluster ID from Zookeeper, if the cluster ID does not exist, it would be
+    /// created
+    #[instrument]
+    async fn get_or_generate_cluster_id(&mut self) -> Result<String, AsyncTaskError> {
+        let (tx, rx) = oneshot::channel();
+        self.async_task_tx
+            .send(AsyncTask::Zookeeper(KafkaServerAsyncTask::GetOrGenerateClusterId(rx)))
+            .await?;
+        rx.await?
     }
 
     // pub async fn init_zk_client(&mut self)
