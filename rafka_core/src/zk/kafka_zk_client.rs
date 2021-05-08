@@ -15,12 +15,14 @@ use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
+use base64::encode;
 use std::error::Error;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 use tracing_attributes::instrument;
+use uuid::Uuid;
 use zookeeper_async::recipes::cache::PathChildrenCacheEvent;
 use zookeeper_async::CreateMode;
 
@@ -30,6 +32,13 @@ pub enum KafkaZkClientError {
     InvalidPath,
     #[error("Create zookeeper path:  already exists")]
     CreatePathExists,
+    // RAFA NOTE: Originally, the ClusterId error is a KafkaException, maybe worth create a
+    // KafkaServerError enum
+    #[error(
+        "Failed to get cluster id from Zookeeper. This can happen if /cluster/id is deleted from \
+         Zookeeper."
+    )]
+    ClusterId,
 }
 
 #[derive(Debug)]
@@ -282,6 +291,43 @@ impl KafkaZkClient {
         }
     }
 
+    /// The server side component that creates the cluster Id, if it doesn't exist, one is created
+    #[instrument]
+    pub async fn get_or_generate_cluster_id(&mut self) -> String {
+        match self.get_cluster_id().await {
+            Some(val) => Ok(val),
+            None => Ok(self
+                .create_or_get_cluster_id(base64::encode(
+                    Uuid::new_v4().unwrap("Unavaible to create random UUID"),
+                ))
+                .await),
+        }
+    }
+
+    #[instrument]
+    pub async fn get_cluster_id(self) -> Option<String> {
+        unimplemented!("");
+    }
+
+    /// Create the cluster Id. If the cluster id already exists, return the current cluster id.
+    pub async fn create_or_get_cluster_id(
+        self,
+        proposed_cluster_id: String,
+    ) -> Result<String, AsyncTaskError> {
+        match self
+            .create_looped(ClusterID::default_path(), ClusterID::to_json(&proposed_cluster_id))
+        {
+            Ok(val) => proposed_cluster_id,
+            Err(err) => {
+                // If NodeExistsException, then get the data, if it doesn't exist, then return
+                // Error.
+                // case _: NodeExistsException => getClusterId.getOrElse(throw new
+                // KafkaException("Failed to get cluster id from Zookeeper. This can happen if
+                // /cluster/id is deleted from Zookeeper."))
+            },
+        }
+    }
+
     /// Gets the data and Stat at the given zk path, both the Data and the Stat may be empty
     #[instrument]
     pub async fn get_data_and_stat(
@@ -325,6 +371,7 @@ pub enum KafkaZkClientAsyncTask {
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
     RegisterFeatureChange(mpsc::Sender<AsyncTask>),
     Shutdown,
+    GetOrGenerateClusterId(oneshot::Sender<String>),
 }
 
 #[derive(Debug)]
@@ -366,6 +413,13 @@ impl KafkaZkClientCoordinator {
                     debug!("KafkaZkClientAsyncTask calling get_data_and_version");
                     let result = self.kafka_zk_client.get_data_and_version(&znode_path).await?;
                     debug!("KafkaZkClientAsyncTask got response from get_data_and_version");
+                    if let Err(err) = tx.send(result) {
+                        // RAFKA TODO: should the process die here?
+                        error!("Unable to send back GetDataAndVersionResponse: {:?}", err);
+                    }
+                },
+                KafkaZkClientAsyncTask::GetOrGenerateClusterId(tx) => {
+                    let result = self.kafka_zk_client.get_or_generate_cluster_id().await?;
                     if let Err(err) = tx.send(result) {
                         // RAFKA TODO: should the process die here?
                         error!("Unable to send back GetDataAndVersionResponse: {:?}", err);
