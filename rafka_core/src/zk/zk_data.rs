@@ -5,6 +5,7 @@ use crate::common::feature::features::FeaturesError;
 use crate::common::feature::features::{Features, VersionRangeType};
 use crate::server::dynamic_config_manager::ConfigType;
 use rafka_derive::{SubZNodeHandle, ZNodeHandle};
+use serde_json::json;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use tracing::{debug, error};
@@ -65,6 +66,7 @@ pub struct ZkData {
     producer_id_block: ProducerIdBlockZNode,
     log_dir_event_notification: LogDirEventNotificationZNode,
     admin: AdminZNode,
+    cluster_id: ClusterIdZNode,
     /* brokers: ZNode,
      * cluster: ZNode,
      * config: ZNode,
@@ -259,6 +261,36 @@ pub enum ZkVersion {
 //    NoStat, /* NOTE: Originally this is org.apache.zookeeper.data.Stat constructor:
 //             * val NoStat = new Stat() */
 //}
+
+// source line: 736
+#[derive(Debug, SubZNodeHandle)]
+pub struct ClusterZNode(ZNode);
+impl ClusterZNode {
+    pub fn build() -> Self {
+        Self(ZNode { path: String::from("/cluster") })
+    }
+}
+
+// source line: 740
+#[derive(Debug, SubZNodeHandle)]
+pub struct ClusterIdZNode(ZNode);
+impl ClusterIdZNode {
+    pub fn build(cluster_znode: &ClusterZNode) -> Self {
+        Self(ZNode { path: format!("{}/id", cluster_znode.path()) })
+    }
+
+    pub fn to_json(&self, id: String) -> Vec<u8> {
+        json!({
+            "version": "1",
+            "id":  id
+        })
+    }
+
+    pub fn from_json(cluster_id_json: &Vec<u8>) -> Result<String, serde_json::Error> {
+        let res: serde_json::Value = serde_json::from_slice(cluster_id_json)?;
+        Ok(res["id"].to_string())
+    }
+}
 
 // source line: 754
 #[derive(Debug, SubZNodeHandle)]
@@ -483,6 +515,8 @@ impl Default for ZkData {
         let isr_change_notification = IsrChangeNotificationZNode::build();
         let producer_id_block = ProducerIdBlockZNode::build();
         let log_dir_event_notification = LogDirEventNotificationZNode::build();
+        let cluster_znode = ClusterZNode::build();
+        let cluster_id = ClusterIdZNode::build(&cluster_znode);
         ZkData {
             delegation_token_auth,
             delegation_tokens,
@@ -498,6 +532,7 @@ impl Default for ZkData {
             log_dir_event_notification,
             config_types,
             config,
+            cluster_id,
         }
     }
 }
