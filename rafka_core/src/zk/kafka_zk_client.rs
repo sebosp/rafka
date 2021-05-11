@@ -23,7 +23,6 @@ use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 use tracing_attributes::instrument;
 use uuid::Uuid;
-use zookeeper_async::recipes::cache::PathChildrenCacheEvent;
 use zookeeper_async::CreateMode;
 
 #[derive(thiserror::Error, Debug)]
@@ -38,7 +37,9 @@ pub enum KafkaZkClientError {
         "Failed to get cluster id from Zookeeper. This can happen if /cluster/id is deleted from \
          Zookeeper."
     )]
-    ClusterId,
+    ClusterIdDeleted,
+    #[error("Failed to parse the cluster id json {0:?}")]
+    ClusterIdDeserialize(#[from] serde_json::Error),
 }
 
 #[derive(Debug)]
@@ -293,14 +294,10 @@ impl KafkaZkClient {
 
     /// The server side component that creates the cluster Id, if it doesn't exist, one is created
     #[instrument]
-    pub async fn get_or_generate_cluster_id(&mut self) -> String {
+    pub async fn get_or_generate_cluster_id(&mut self) -> Result<String, AsyncTaskError> {
         match self.get_cluster_id().await {
-            Some(val) => Ok(val),
-            None => Ok(self
-                .create_or_get_cluster_id(base64::encode(
-                    Uuid::new_v4().unwrap("Unavaible to create random UUID"),
-                ))
-                .await),
+            Some(val) => val,
+            None => Ok(self.create_or_get_cluster_id(encode(Uuid::new_v4().unwrap())).await?),
         }
     }
 
@@ -314,9 +311,11 @@ impl KafkaZkClient {
         self,
         proposed_cluster_id: String,
     ) -> Result<String, AsyncTaskError> {
-        match self
-            .create_looped(ClusterID::default_path(), ClusterID::to_json(&proposed_cluster_id))
-        {
+        match self.create_looped(
+            self.zk_data.cluster_id,
+            ClusterID::to_json(&proposed_cluster_id),
+            false, // Do not fail on exists
+        ) {
             Ok(val) => proposed_cluster_id,
             Err(err) => {
                 // If NodeExistsException, then get the data, if it doesn't exist, then return
