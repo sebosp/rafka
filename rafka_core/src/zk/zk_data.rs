@@ -280,10 +280,11 @@ impl ClusterIdZNode {
     }
 
     pub fn to_json(&self, id: String) -> Vec<u8> {
-        json!({
+        serde_json::to_vec(&json!({
             "version": "1",
             "id":  id
-        })
+        }))
+        .unwrap()
     }
 
     pub fn from_json(cluster_id_json: &Vec<u8>) -> Result<String, serde_json::Error> {
