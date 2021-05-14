@@ -66,7 +66,7 @@ pub struct ZkData {
     producer_id_block: ProducerIdBlockZNode,
     log_dir_event_notification: LogDirEventNotificationZNode,
     admin: AdminZNode,
-    cluster_id: ClusterIdZNode,
+    pub cluster_id: ClusterIdZNode,
     /* brokers: ZNode,
      * cluster: ZNode,
      * config: ZNode,
@@ -279,7 +279,7 @@ impl ClusterIdZNode {
         Self(ZNode { path: format!("{}/id", cluster_znode.path()) })
     }
 
-    pub fn to_json(&self, id: String) -> Vec<u8> {
+    pub fn to_json(&self, id: &str) -> Vec<u8> {
         serde_json::to_vec(&json!({
             "version": "1",
             "id":  id
