@@ -13,14 +13,14 @@
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
+use crate::zk::zk_data::ZNodeHandle;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
-use base64::encode;
 use std::error::Error;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, trace};
 use tracing_attributes::instrument;
 use uuid::Uuid;
 use zookeeper_async::CreateMode;
@@ -121,12 +121,19 @@ impl KafkaZkClient {
         unimplemented!()
     }
 
-    /// `create_looped_0` is a replacement for createRecursive0 from java code.
+    /// `create_looped_0` creates the top-most non-existent path in zookeeper. For example if only
+    /// path /a/ exist in zookeeper and a path request for /a/b/c/d is received, it will create
+    /// /a/b/.
     #[instrument]
     async fn create_looped_0(&mut self, path: &str) -> Result<(), AsyncTaskError> {
         // NOTE: This function used to be createRecursive0, but has been transfromed into a loop
-        let mut path = path.to_string();
+        let path_sections: Vec<&str> = path.split('/').collect();
+        if path_sections.len() < 2 {
+            return Err(AsyncTaskError::KafkaZkClient(KafkaZkClientError::InvalidPath));
+        }
+        let mut curr_path_section = 2usize;
         loop {
+            let path = path_sections[0..curr_path_section].join("/");
             let create_request = self
                 .zoo_keeper_client
                 .create_request(
@@ -140,12 +147,13 @@ impl KafkaZkClient {
                 if let Some(err) = err.source() {
                     if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
                         match zk_err {
-                            zookeeper_async::ZkError::NoNode => {
-                                path = KafkaZkClient::parent_path(&path)?;
-                                continue;
-                            },
                             zookeeper_async::ZkError::NodeExists => {
-                                break;
+                                if path_sections.len() == curr_path_section {
+                                    // If all paths exist, then we can stop creating dirs
+                                    break;
+                                }
+                                curr_path_section += 1;
+                                continue;
                             },
                             _ => return Err(AsyncTaskError::ZooKeeper(*zk_err)),
                         }
@@ -173,31 +181,61 @@ impl KafkaZkClient {
     ) -> Result<(), AsyncTaskError> {
         let create_request = self
             .zoo_keeper_client
-            .create_request(path, data, self.zk_data.default_acls(path), CreateMode::Persistent)
+            .create_request(
+                path,
+                data.clone(),
+                self.zk_data.default_acls(path),
+                CreateMode::Persistent,
+            )
             .await;
         if let Err(err) = create_request {
-            if let Some(err) = err.source() {
-                if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
-                    match zk_err {
-                        zookeeper_async::ZkError::NodeExists => {
-                            if fail_on_exists {
-                                return Err(AsyncTaskError::KafkaZkClient(
-                                    KafkaZkClientError::CreatePathExists,
-                                ));
-                            }
-                        },
-                        zookeeper_async::ZkError::NoNode => {
-                            if let Err(err) = self.create_looped_0(path).await {
-                                if fail_on_exists || !err.is_zookeeper_async_node_exists() {
-                                    return Err(AsyncTaskError::KafkaZkClient(
-                                        KafkaZkClientError::CreatePathExists,
-                                    ));
-                                }
-                            }
-                        },
-                        _ => return Err(AsyncTaskError::ZooKeeper(*zk_err)),
-                    }
+            if err.is_zookeeper_async_node_exists() {
+                if fail_on_exists {
+                    return Err(AsyncTaskError::KafkaZkClient(
+                        KafkaZkClientError::CreatePathExists,
+                    ));
                 }
+            } else if err.is_zookeeper_async_no_node() {
+                match self.create_looped_0(&Self::parent_path(&path)?).await {
+                    Err(err) => {
+                        return Err(err);
+                    },
+                    Ok(()) => {
+                        // We try to create the path at location `path` in zookeeper
+                        // `path may not exist and we may attempt to create the
+                        // hierarchy from here. It is possible that another server
+                        // started the same operation, thus creating the path for us.
+                        // For example, another server may have been successful
+                        // creating the ClusterID, in which case we should stop.
+                        match self
+                            .zoo_keeper_client
+                            .create_request(
+                                path,
+                                data,
+                                self.zk_data.default_acls(path),
+                                CreateMode::Persistent,
+                            )
+                            .await
+                        {
+                            Ok(res) => {
+                                trace!("zoo_keeper_client create_request got response: {:?}", res);
+                            },
+                            Err(err) => {
+                                if err.is_zookeeper_async_node_exists() {
+                                    if fail_on_exists {
+                                        return Err(AsyncTaskError::KafkaZkClient(
+                                            KafkaZkClientError::CreatePathExists,
+                                        ));
+                                    }
+                                } else {
+                                    return Err(err);
+                                }
+                            },
+                        }
+                    },
+                }
+            } else {
+                return Err(err);
             }
         }
         Ok(())
@@ -292,37 +330,73 @@ impl KafkaZkClient {
         }
     }
 
-    /// The server side component that creates the cluster Id, if it doesn't exist, one is created
+    /// The server side component that creates the cluster Id, if it doesn't exist, one cluster_id
+    /// is created and registered in Zookeeper
     #[instrument]
     pub async fn get_or_generate_cluster_id(&mut self) -> Result<String, AsyncTaskError> {
-        match self.get_cluster_id().await {
-            Some(val) => val,
-            None => Ok(self.create_or_get_cluster_id(encode(Uuid::new_v4().unwrap())).await?),
+        let cluster_id = self.get_cluster_id().await?;
+        match cluster_id {
+            Some(val) => Ok(val),
+            None => self.create_or_get_cluster_id(base64::encode(Uuid::new_v4().to_string())).await,
         }
     }
 
     #[instrument]
-    pub async fn get_cluster_id(self) -> Option<String> {
-        unimplemented!("");
+    pub async fn get_cluster_id(&self) -> Result<Option<String>, AsyncTaskError> {
+        let (data, _stat) = self.get_data_and_stat(&self.zk_data.cluster_id.path()).await?;
+        match data {
+            Some(data) => Ok(Some(String::from_utf8(data)?)),
+            None => Ok(None),
+        }
     }
 
     /// Create the cluster Id. If the cluster id already exists, return the current cluster id.
     pub async fn create_or_get_cluster_id(
-        self,
+        &mut self,
         proposed_cluster_id: String,
     ) -> Result<String, AsyncTaskError> {
-        match self.create_looped(
-            self.zk_data.cluster_id,
-            ClusterID::to_json(&proposed_cluster_id),
-            false, // Do not fail on exists
-        ) {
-            Ok(val) => proposed_cluster_id,
+        let cluster_id_path = self.zk_data.cluster_id.path().to_owned();
+        let cluster_id_content = self.zk_data.cluster_id.to_json(&proposed_cluster_id);
+        trace!(
+            "Creating Cluster ID path: {} if it does not exist, it will be initialized with \
+             propoposed cluster ID: {:?}",
+            cluster_id_path,
+            cluster_id_content
+        );
+        let create_looped_response = self
+            .create_looped(
+                &cluster_id_path,
+                cluster_id_content,
+                true, // Fail on exists, so we can capture the error and set the content
+            )
+            .await;
+        match create_looped_response {
+            Ok(()) => {
+                trace!("Cluster ID path has been created and initialized with proposed cluster ID");
+                Ok(proposed_cluster_id)
+            },
             Err(err) => {
-                // If NodeExistsException, then get the data, if it doesn't exist, then return
-                // Error.
-                // case _: NodeExistsException => getClusterId.getOrElse(throw new
-                // KafkaException("Failed to get cluster id from Zookeeper. This can happen if
-                // /cluster/id is deleted from Zookeeper."))
+                if let Some(err) = err.source() {
+                    if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
+                        match zk_err {
+                            zookeeper_async::ZkError::NodeExists => {
+                                return match self.get_cluster_id().await? {
+                                    Some(val) => Ok(val),
+                                    None => {
+                                        // To get to this point we must- have
+                                        // This can happen if /cluster/id is deleted from
+                                        // Zookeeper while in the process of reading it.
+                                        Err(AsyncTaskError::KafkaZkClient(
+                                            KafkaZkClientError::ClusterIdDeleted,
+                                        ))
+                                    },
+                                };
+                            },
+                            _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeper(*zk_err)),
+                        }
+                    }
+                }
+                Err(err)
             },
         }
     }
@@ -368,6 +442,7 @@ pub struct GetDataAndVersionResponse {
 pub enum KafkaZkClientAsyncTask {
     EnsurePersistentPathExists(String),
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
+    GetData(oneshot::Sender<Option<Vec<u8>>>, String),
     RegisterFeatureChange(mpsc::Sender<AsyncTask>),
     Shutdown,
     GetOrGenerateClusterId(oneshot::Sender<String>),
@@ -421,7 +496,7 @@ impl KafkaZkClientCoordinator {
                     let result = self.kafka_zk_client.get_or_generate_cluster_id().await?;
                     if let Err(err) = tx.send(result) {
                         // RAFKA TODO: should the process die here?
-                        error!("Unable to send back GetDataAndVersionResponse: {:?}", err);
+                        error!("Unable to send back ClusterId response: {:?}", err);
                     }
                 },
                 KafkaZkClientAsyncTask::Shutdown => self.kafka_zk_client.close().await.unwrap(),
