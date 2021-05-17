@@ -242,9 +242,9 @@ impl KafkaServer {
     async fn get_or_generate_cluster_id(&mut self) -> Result<String, AsyncTaskError> {
         let (tx, rx) = oneshot::channel();
         self.async_task_tx
-            .send(AsyncTask::Zookeeper(KafkaServerAsyncTask::GetOrGenerateClusterId(rx)))
+            .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetOrGenerateClusterId(tx)))
             .await?;
-        rx.await?
+        Ok(rx.await?)
     }
 
     // pub async fn init_zk_client(&mut self)
