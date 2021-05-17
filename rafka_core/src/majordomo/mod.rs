@@ -61,6 +61,8 @@ pub enum AsyncTaskError {
     KafkaZkClient(#[from] crate::zk::kafka_zk_client::KafkaZkClientError),
     #[error("FeatureCacheUpdater {0:?}")]
     FeatureCacheUpdater(#[from] FeatureCacheUpdaterError),
+    #[error("Invalid UTF-8 Sequence {0:?}")]
+    Utf8(#[from] std::string::FromUtf8Error),
 }
 
 impl AsyncTaskError {
@@ -72,6 +74,20 @@ impl AsyncTaskError {
             if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
                 match zk_err {
                     zookeeper_async::ZkError::NodeExists => return true,
+                    _ => return false,
+                }
+            }
+        }
+        false
+    }
+
+    /// `is_zookeeper_async_no_node` checks that the error belogs to a variant of the crate
+    /// zookeeper_async and that it is the NoNode variant.
+    pub fn is_zookeeper_async_no_node(&self) -> bool {
+        if let Some(err) = self.source() {
+            if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
+                match zk_err {
+                    zookeeper_async::ZkError::NoNode => return true,
                     _ => return false,
                 }
             }
