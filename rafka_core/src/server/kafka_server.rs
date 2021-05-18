@@ -54,6 +54,8 @@ pub struct KafkaController;
 pub struct MetadataCache;
 #[derive(Debug)]
 struct BrokerTopicStats;
+#[derive(Debug)]
+struct BrokerMetadata;
 
 #[derive(Debug)]
 pub enum KafkaServerAsyncTask {
@@ -232,8 +234,27 @@ impl KafkaServer {
         // Get or create cluster_id
         let cluster_id = self.get_or_generate_cluster_id().await?;
         info!("Cluster ID = {}", cluster_id);
+        // load metadata
+        let (preloaded_broker_metadata_checkpoint, initial_offline_dirs) =
+            self.get_broker_metadata_and_offline_dirs();
         //}
         Ok(())
+    }
+
+    /// Reads the BrokerMetadata. If the BrokerMetadata doesn't match in all the log.dirs,
+    /// InconsistentBrokerMetadataException is thrown.
+    ///
+    /// The log directories whose meta.properties can not be accessed due to IOException will be
+    /// returned to the caller
+    ///
+    /// @return A 2-tuple containing the brokerMetadata and a sequence of offline log directories.
+    pub fn get_broker_metadata_and_offline_dirs(&self) -> (BrokerMetadata, Vec<String>) {
+        let broker_metadata_map: HashMap<String, BrokerMetadata> = HashMap::new();
+        // This used to be HashSet
+        let broker_metadata_set: Vec<BrokerMetadata> = vec![];
+        let offline_dirs: Vec<String> = vec![];
+
+        (BrokerMetadata(-1, None), offlineDirs)
     }
 
     /// Request the cluster ID from Zookeeper, if the cluster ID does not exist, it would be
