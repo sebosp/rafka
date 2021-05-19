@@ -7,10 +7,17 @@ use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, warn};
 
-#[derive(Default, Debug, Eq, PartialEq)]
+#[derive(Default, Debug, Eq, PartialEq, Clone)]
 pub struct BrokerMetadata {
-    broker_id: u32,
+    broker_id: i32,
     cluster_id: Option<String>,
+}
+
+impl BrokerMetadata {
+    /// Creates a new instance of the BrokerMetadata
+    pub fn new(broker_id: i32, cluster_id: Option<String>) -> Self {
+        BrokerMetadata { broker_id, cluster_id }
+    }
 }
 
 /// `BrokerMetadataCheckpoint` works as a helper for BrokerMetadata, it handles the I/O operations,
@@ -38,7 +45,7 @@ impl BrokerMetadata {
     /// Since this file is usually 3 or 4 lines, we can pass it here and parse it in memory
     /// The filename is passed along for debug printinf information only
     pub fn from_multiline_string(content: String, filename: &str) -> Option<BrokerMetadata> {
-        let mut broker_id: Option<u32> = None;
+        let mut broker_id: Option<i32> = None;
         let mut cluster_id: Option<String> = None;
         let mut version: Option<u32> = None;
         debug!("from_multiline_string: Starting to work on {}", content);
@@ -121,7 +128,7 @@ impl BrokerMetadataCheckpoint {
     }
 
     /// `write` performs the I/O operation of writing the file
-    pub fn write(self, broker_metadata: BrokerMetadata) -> std::io::Result<()> {
+    pub fn write(&self, broker_metadata: BrokerMetadata) -> std::io::Result<()> {
         let content = broker_metadata.to_multiline_string();
         let old_path = PathBuf::from(&self.filename);
         let temp_file_name = format!("{}.tmp", self.filename.display());
@@ -144,16 +151,16 @@ impl BrokerMetadataCheckpoint {
     }
 
     /// `read` performs the I/O operation of reading the file
-    pub fn read(self) -> Option<BrokerMetadata> {
+    pub fn read(&self) -> Result<Option<BrokerMetadata>, io::Error> {
         // try to delete any existing temp files for cleanliness
         let temp_file_name = format!("{}.tmp", self.filename.display());
         let temp_path = PathBuf::from(&temp_file_name);
         if temp_path.is_file() {
             match remove_file(temp_path) {
-                Err(why) => {
-                    error!("Unable to delete .tmp leftover BrokerMetadataCheckpoint file: {}", why);
+                Err(err) => {
+                    error!("Unable to delete .tmp leftover BrokerMetadataCheckpoint file: {}", err);
                     // TODO: PANIC? Maybe one of the filesystems/disks is read-only.
-                    return None;
+                    return Err(err);
                 },
                 Ok(()) => {
                     debug!("Successfully deleted leftover .tmp BrokerMetadataCheckpoint file")
@@ -165,7 +172,7 @@ impl BrokerMetadataCheckpoint {
                 "No meta.properties file under dir: {}",
                 self.filename.parent().unwrap_or(&Path::new("/")).display()
             );
-            return None;
+            return Ok(None);
         }
 
         if let Ok(lines) = read_lines(&self.filename) {
@@ -175,16 +182,16 @@ impl BrokerMetadataCheckpoint {
                     Ok(config_line) => config_content.push_str(&config_line),
                     Err(err) => {
                         error!("Unable to read line from file: {:?}", err);
-                        return None;
+                        return Err(err);
                     },
                 }
             }
-            BrokerMetadata::from_multiline_string(
+            Ok(BrokerMetadata::from_multiline_string(
                 config_content,
                 &self.filename.display().to_string(),
-            )
+            ))
         } else {
-            None
+            Ok(None)
         }
     }
 }
@@ -208,19 +215,19 @@ mod tests {
     #[test]
     fn parse_config_string() {
         let filename = String::from("somepath");
-        let without_cluster_bm = BrokerMetadata { cluster_id: None, broker_id: 1u32 };
+        let without_cluster_bm = BrokerMetadata { cluster_id: None, broker_id: 1i32 };
         let without_cluster_expected = String::from("version=0\nbroker.id=1\n");
         assert_eq!(without_cluster_bm.to_multiline_string(), without_cluster_expected);
         assert_eq!(
-            Some(BrokerMetadata { cluster_id: None, broker_id: 1u32 }),
+            Some(BrokerMetadata { cluster_id: None, broker_id: 1i32 }),
             BrokerMetadata::from_multiline_string(without_cluster_expected, &filename)
         );
         let with_cluster_bmc =
-            BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2u32 };
+            BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2i32 };
         let with_cluster_expected = String::from("version=0\nbroker.id=2\ncluster.id=rafka1\n");
         assert_eq!(with_cluster_bmc.to_multiline_string(), with_cluster_expected);
         assert_eq!(
-            Some(BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2u32 }),
+            Some(BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2i32 }),
             BrokerMetadata::from_multiline_string(with_cluster_expected, &filename,)
         );
         // Test a line that is not a config
