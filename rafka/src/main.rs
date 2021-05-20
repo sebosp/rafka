@@ -51,14 +51,19 @@ async fn main() {
         let mut kafka_server = KafkaServer::new(
             kafka_config_clone,
             Instant::now(),
-            majordomo_tx_clone,
+            majordomo_tx_clone.clone(),
             kafka_server_rx,
         );
         match kafka_server.startup().await {
-            Ok(()) => info!("Kafka startup Complete"),
-            Err(err) => error!("Kafka startup failed: {:?}", err),
+            Ok(()) => {
+                info!("Kafka startup Complete");
+                kafka_server.process_message_queue().await.unwrap();
+            },
+            Err(err) => {
+                error!("Exiting. Kafka startup failed: {:?}", err);
+                rafka_core::majordomo::MajordomoCoordinator::shutdown(majordomo_tx_clone).await;
+            },
         };
-        kafka_server.process_message_queue().await.unwrap();
     });
     // Start the main messaging bus
     let kafka_server_async_tx = kafka_zk.main_tx();
