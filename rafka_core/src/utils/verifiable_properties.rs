@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::num;
 /// From core/src/main/scala/kafka/utils/VerifiableProperties.scala
 use thiserror::Error;
+
+// RAFKA TODO: This is very similar to KafkaConfigError, maybe join them
 #[derive(Error, Debug)]
 pub enum VerifiablePropertiesError {
     #[error(
@@ -19,6 +21,30 @@ pub enum VerifiablePropertiesError {
     ValueNotInRange(String, i32, String),
     #[error("Unrecognized {0:} of the server meta.properties file: {1:}")]
     UnexpectedValue(String, i32),
+    #[error("IO Error {0:?}")]
+    Io(#[from] std::io::Error),
+}
+
+impl PartialEq for VerifiablePropertiesError {
+    fn eq(&self, rhs: &Self) -> bool {
+        match self {
+            Self::InvalidConfigLine(lhs_line, lhs_line_num, lhs_num_items) => {
+                matches!(rhs, Self::InvalidConfigLine(rhs_line, rhs_line_num, rhs_num_items) if lhs_line == rhs_line && lhs_line_num == rhs_line_num && lhs_num_items == rhs_num_items)
+            },
+            Self::ParseInt(lhs) => matches!(rhs, Self::ParseInt(rhs) if rhs == lhs),
+            Self::UnknownProperty(lhs) => matches!(rhs, Self::UnknownProperty(rhs) if rhs == lhs),
+            Self::MissingRequiredKey(lhs) => {
+                matches!(rhs, Self::MissingRequiredKey(rhs) if rhs == lhs)
+            },
+            Self::ValueNotInRange(lhs_key, lhs_value, lhs_type) => {
+                matches!(rhs, Self::ValueNotInRange(rhs_key, rhs_value, rhs_type) if lhs_key == rhs_key  && lhs_value == rhs_value && lhs_type == rhs_type)
+            },
+            Self::UnexpectedValue(lhs_key, lhs_value) => {
+                matches!(rhs, Self::UnexpectedValue(rhs_key, rhs_value) if lhs_key == rhs_key && lhs_value == rhs_value)
+            },
+            Self::Io(_) => matches!(rhs, Self::Io(_)),
+        }
+    }
 }
 
 pub struct VerifiableProperties {
@@ -30,6 +56,11 @@ impl VerifiableProperties {
     pub fn new(content: String, source_filename: &str) -> Result<Self, VerifiablePropertiesError> {
         let mut props = HashMap::new();
         for (line_number, config_line) in content.split('\n').enumerate() {
+            if config_line.is_empty() {
+                // Allow empty strings.
+                // TODO: allow comments
+                continue;
+            }
             let config_line_parts: Vec<&str> = config_line.splitn(2, '=').collect();
             if config_line_parts.len() != 2 {
                 return Err(VerifiablePropertiesError::InvalidConfigLine(
@@ -55,7 +86,10 @@ impl VerifiableProperties {
     }
 
     pub fn get_optional_string(&self, name: &str, default: Option<String>) -> Option<String> {
-        self.props.get(name).map(|val| val.clone())
+        match self.props.get(name) {
+            Some(val) => Some(val.clone()),
+            None => default,
+        }
     }
 
     pub fn validate_key_has_i32_value(
