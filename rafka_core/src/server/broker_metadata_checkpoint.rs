@@ -49,7 +49,7 @@ impl BrokerMetadata {
         content: String,
         filename: &str,
     ) -> Result<BrokerMetadata, VerifiablePropertiesError> {
-        debug!("from_multiline_string: Starting to work on {}", content);
+        trace!("from_multiline_string: Parsing {}", content);
         let broker_meta_props = VerifiableProperties::new(content, filename)?;
         let _version = broker_meta_props.validate_key_has_i32_value("version", 0)?;
         let broker_id = broker_meta_props.get_required_i32("broker.id")?;
