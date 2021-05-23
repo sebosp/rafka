@@ -1,11 +1,12 @@
 //! Broker Metadata  Checkpoint saves brokre metada to a file.
 //! core/src/main/scala/kafka/server/BrokerMetadataCheckpoint.scala
+use crate::utils::verifiable_properties::{VerifiableProperties, VerifiablePropertiesError};
 use std::fmt;
 use std::fs::{remove_file, rename, File};
 use std::io::prelude::*;
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 #[derive(Default, Debug, Eq, PartialEq, Clone)]
 pub struct BrokerMetadata {
@@ -44,70 +45,16 @@ impl fmt::Display for BrokerMetadata {
 impl BrokerMetadata {
     /// Since this file is usually 3 or 4 lines, we can pass it here and parse it in memory
     /// The filename is passed along for debug printinf information only
-    pub fn from_multiline_string(content: String, filename: &str) -> Option<BrokerMetadata> {
-        let mut broker_id: Option<i32> = None;
-        let mut cluster_id: Option<String> = None;
-        let mut version: Option<u32> = None;
+    pub fn from_multiline_string(
+        content: String,
+        filename: &str,
+    ) -> Result<BrokerMetadata, VerifiablePropertiesError> {
         debug!("from_multiline_string: Starting to work on {}", content);
-        for (line_number, config_line) in content.split('\n').enumerate() {
-            let config_line_parts: Vec<&str> = config_line.splitn(2, '=').collect();
-            if config_line_parts.len() != 2 {
-                error!(
-                    "BrokerMetadataCheckpoint: {}:{}, Invalid config line, expected 2 items \
-                     separated by =, found {} items",
-                    filename,
-                    line_number,
-                    config_line_parts.len()
-                );
-            } else {
-                match config_line_parts[0] {
-                    "broker.id" => {
-                        broker_id = match config_line_parts[1].to_string().parse() {
-                            Ok(num) => Some(num),
-                            Err(why) => {
-                                error!(
-                                    "BrokerMetadataCheckpoint: Unable to parse number for \
-                                     broker_id: Found '{}' {}",
-                                    config_line_parts[1], why
-                                );
-                                None
-                            },
-                        };
-                    },
-                    "cluster.id" => cluster_id = Some(config_line_parts[1].to_string()),
-                    "version" => {
-                        version = match config_line_parts[1].parse::<u32>() {
-                            Ok(num) => Some(num),
-                            Err(why) => {
-                                error!(
-                                    "BrokerMetadataCheckpoint: Unable to parse number for \
-                                     version. Found: '{}' {}",
-                                    config_line_parts[1], why
-                                );
-                                None
-                            },
-                        }
-                    },
-                    _ => {
-                        error!(
-                            "BrokerMetadataCheckpoint: Unknown property {}",
-                            config_line_parts[0]
-                        );
-                    },
-                }
-            }
-        }
-        match version {
-            Some(0) => match broker_id {
-                Some(broker_id) => Some(BrokerMetadata { broker_id, cluster_id }),
-                None => None,
-            },
-            Some(version) => {
-                error!("Unrecognized version of the server meta.properties file: {}", version);
-                None
-            },
-            None => None,
-        }
+        let broker_meta_props = VerifiableProperties::new(content, filename)?;
+        let _version = broker_meta_props.validate_key_has_i32_value("version", 0)?;
+        let broker_id = broker_meta_props.get_required_i32("broker.id")?;
+        let cluster_id = broker_meta_props.get_optional_string("cluster.id", None);
+        Ok(BrokerMetadata { broker_id, cluster_id })
     }
 
     /// `to_multiline_string` transforms the struct into a writable line
@@ -151,7 +98,8 @@ impl BrokerMetadataCheckpoint {
     }
 
     /// `read` performs the I/O operation of reading the file
-    pub fn read(&self) -> Result<Option<BrokerMetadata>, io::Error> {
+    pub fn read(&self) -> Result<BrokerMetadata, VerifiablePropertiesError> {
+        trace!("Reading {}", self.filename.display());
         // try to delete any existing temp files for cleanliness
         let temp_file_name = format!("{}.tmp", self.filename.display());
         let temp_path = PathBuf::from(&temp_file_name);
@@ -160,7 +108,7 @@ impl BrokerMetadataCheckpoint {
                 Err(err) => {
                     error!("Unable to delete .tmp leftover BrokerMetadataCheckpoint file: {}", err);
                     // TODO: PANIC? Maybe one of the filesystems/disks is read-only.
-                    return Err(err);
+                    return Err(VerifiablePropertiesError::Io(err));
                 },
                 Ok(()) => {
                     debug!("Successfully deleted leftover .tmp BrokerMetadataCheckpoint file")
@@ -172,27 +120,20 @@ impl BrokerMetadataCheckpoint {
                 "No meta.properties file under dir: {}",
                 self.filename.parent().unwrap_or(&Path::new("/")).display()
             );
-            return Ok(None);
         }
 
-        if let Ok(lines) = read_lines(&self.filename) {
-            let mut config_content = String::from("");
-            for line_data in lines {
-                match line_data {
-                    Ok(config_line) => config_content.push_str(&config_line),
-                    Err(err) => {
-                        error!("Unable to read line from file: {:?}", err);
-                        return Err(err);
-                    },
-                }
+        let lines = read_lines(&self.filename)?;
+        let mut config_content = String::from("");
+        for line_data in lines {
+            match line_data {
+                Ok(config_line) => config_content.push_str(&config_line),
+                Err(err) => {
+                    error!("Unable to read line from file: {:?}", err);
+                    return Err(VerifiablePropertiesError::Io(err));
+                },
             }
-            Ok(BrokerMetadata::from_multiline_string(
-                config_content,
-                &self.filename.display().to_string(),
-            ))
-        } else {
-            Ok(None)
         }
+        BrokerMetadata::from_multiline_string(config_content, &self.filename.display().to_string())
     }
 }
 
@@ -219,7 +160,7 @@ mod tests {
         let without_cluster_expected = String::from("version=0\nbroker.id=1\n");
         assert_eq!(without_cluster_bm.to_multiline_string(), without_cluster_expected);
         assert_eq!(
-            Some(BrokerMetadata { cluster_id: None, broker_id: 1i32 }),
+            Ok(BrokerMetadata { cluster_id: None, broker_id: 1i32 }),
             BrokerMetadata::from_multiline_string(without_cluster_expected, &filename)
         );
         let with_cluster_bmc =
@@ -227,33 +168,29 @@ mod tests {
         let with_cluster_expected = String::from("version=0\nbroker.id=2\ncluster.id=rafka1\n");
         assert_eq!(with_cluster_bmc.to_multiline_string(), with_cluster_expected);
         assert_eq!(
-            Some(BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2i32 }),
+            Ok(BrokerMetadata { cluster_id: Some(String::from("rafka1")), broker_id: 2i32 }),
             BrokerMetadata::from_multiline_string(with_cluster_expected, &filename,)
         );
         // Test a line that is not a config
-        assert_eq!(
-            BrokerMetadata::from_multiline_string(String::from("not.a.config.line"), &filename,),
-            None
-        );
+        assert!(BrokerMetadata::from_multiline_string(
+            String::from("not.a.config.line"),
+            &filename,
+        )
+        .is_err());
         // Test a version that is not zero
-        assert_eq!(
-            BrokerMetadata::from_multiline_string(String::from("version=1"), &filename,),
-            None
+        assert!(
+            BrokerMetadata::from_multiline_string(String::from("version=1"), &filename,).is_err()
         );
         // Test a config without version
-        assert_eq!(
-            BrokerMetadata::from_multiline_string(String::from("broker.id=1"), &filename,),
-            None
+        assert!(
+            BrokerMetadata::from_multiline_string(String::from("broker.id=1"), &filename,).is_err(),
         );
         assert_eq!(
             BrokerMetadata::from_multiline_string(
                 String::from("broker.id=1\nversion=0\ncluster.id=something.with="),
                 &filename,
             ),
-            Some(BrokerMetadata {
-                broker_id: 1,
-                cluster_id: Some(String::from("something.with="))
-            })
+            Ok(BrokerMetadata { broker_id: 1, cluster_id: Some(String::from("something.with=")) })
         );
     }
 }
