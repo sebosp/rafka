@@ -241,6 +241,17 @@ impl KafkaServer {
             "Preloaded Broker Metadata Checkpoint: {:?}, Initial Offline Dirs: {:?}",
             preloaded_broker_metadata_checkpoint, initial_offline_dirs
         );
+        // check cluster id
+        if let Some(metadata_cluster_id) = preloaded_broker_metadata_checkpoint.cluster_id {
+            if metadata_cluster_id != cluster_id {
+                return Err(AsyncTaskError::KafkaServer(
+                    KafkaServerError::InconsistentClusterIdException(
+                        cluster_id,
+                        metadata_cluster_id,
+                    ),
+                ));
+            }
+        }
         //}
         Ok(())
     }
@@ -346,6 +357,11 @@ pub enum KafkaServerError {
          broker. Found: {0:?}"
     )]
     InconsistentBrokerMetadata(String),
+    #[error(
+        "The Cluster ID {0} doesn't match stored clusterId {1} in meta.properties. The broker is \
+         trying to join the wrong cluster. Configured zookeeper.connect may be wrong."
+    )]
+    InconsistentClusterIdException(String, String),
 }
 
 #[cfg(test)]
