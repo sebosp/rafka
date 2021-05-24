@@ -8,10 +8,10 @@ use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, trace, warn};
 
-#[derive(Default, Debug, Eq, PartialEq, Clone)]
+#[derive(Default, Debug, Eq, PartialEq, Clone, Hash)]
 pub struct BrokerMetadata {
     broker_id: i32,
-    cluster_id: Option<String>,
+    pub cluster_id: Option<String>,
 }
 
 impl BrokerMetadata {
