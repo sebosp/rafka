@@ -20,6 +20,7 @@ use crate::server::finalize_feature_change_listener::{
     FeatureCacheUpdater, FeatureCacheUpdaterAsyncTask, FeatureCacheUpdaterError,
 };
 use crate::server::kafka_config::KafkaConfig;
+use crate::server::kafka_server::KafkaServerError;
 use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
@@ -63,6 +64,8 @@ pub enum AsyncTaskError {
     FeatureCacheUpdater(#[from] FeatureCacheUpdaterError),
     #[error("Invalid UTF-8 Sequence {0:?}")]
     Utf8(#[from] std::string::FromUtf8Error),
+    #[error("KafkaServer {0:?}")]
+    KafkaServer(#[from] KafkaServerError),
 }
 
 impl AsyncTaskError {
