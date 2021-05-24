@@ -50,26 +50,16 @@ pub enum KafkaConfigError {
 impl PartialEq for KafkaConfigError {
     fn eq(&self, rhs: &Self) -> bool {
         match self {
-            KafkaConfigError::Io(_) => matches!(rhs, KafkaConfigError::Io(_)),
-            KafkaConfigError::Property(lhs) => {
+            Self::Io(_) => matches!(rhs, Self::Io(_)),
+            Self::Property(lhs) => {
                 // TODO: create a method that expects a string and returns the java_properties
-                matches!(rhs, KafkaConfigError::Property(rhs) if rhs.line_number() == lhs.line_number())
+                matches!(rhs, Self::Property(rhs) if lhs.line_number() == rhs.line_number())
             },
-            KafkaConfigError::MissingKeys(lhs) => {
-                matches!(rhs, KafkaConfigError::MissingKeys(rhs) if rhs == lhs)
-            },
-            KafkaConfigError::InvalidValue(lhs) => {
-                matches!(rhs, KafkaConfigError::InvalidValue(rhs) if rhs == lhs)
-            },
-            KafkaConfigError::UnknownKey(lhs) => {
-                matches!(rhs, KafkaConfigError::UnknownKey(rhs) if rhs == lhs)
-            },
-            KafkaConfigError::DuplicateKey(lhs) => {
-                matches!(rhs, KafkaConfigError::DuplicateKey(rhs) if rhs == lhs)
-            },
-            KafkaConfigError::ParseInt(lhs) => {
-                matches!(rhs, KafkaConfigError::ParseInt(rhs) if rhs == lhs)
-            },
+            Self::MissingKeys(lhs) => matches!(rhs, Self::MissingKeys(rhs) if lhs == rhs),
+            Self::InvalidValue(lhs) => matches!(rhs, Self::InvalidValue(rhs) if lhs == rhs),
+            Self::UnknownKey(lhs) => matches!(rhs, Self::UnknownKey(rhs) if lhs == rhs),
+            Self::DuplicateKey(lhs) => matches!(rhs, Self::DuplicateKey(rhs) if lhs == rhs),
+            Self::ParseInt(lhs) => matches!(rhs, Self::ParseInt(rhs) if lhs == rhs),
         }
     }
 }
@@ -249,9 +239,7 @@ impl KafkaConfigBuilder {
                 self.zk_connection_timeout_ms =
                     Some(self.try_from_property_to_u32(property, value)?);
             },
-            "log.dirs" => {
-                self.log_dirs = Some(value.to_string().split(',').map(|x| x.to_string()).collect())
-            },
+            "log.dirs" => self.log_dirs = Some(value.to_string()),
             "log.dir" => self.log_dir = Some(value.to_string()),
             _ => return Err(KafkaConfigError::UnknownKey(property.to_string())),
         }
@@ -319,7 +307,8 @@ impl KafkaConfigBuilder {
     fn resolve_log_dirs(&mut self, kafka_config: &mut KafkaConfig) -> Result<(), KafkaConfigError> {
         // TODO: Consider checking for valid Paths and return KafkaConfigError for them
         if let Some(log_dirs) = &self.log_dirs {
-            kafka_config.log_dirs = log_dirs.clone().split(',').map(|x| x.to_string()).collect();
+            kafka_config.log_dirs =
+                log_dirs.clone().split(',').map(|x| x.trim_start().to_string()).collect();
         } else if let Some(log_dir) = &self.log_dir {
             kafka_config.log_dirs = vec![log_dir.clone()];
         }
