@@ -10,7 +10,7 @@ use tracing::{debug, error, info, trace, warn};
 
 #[derive(Default, Debug, Eq, PartialEq, Clone, Hash)]
 pub struct BrokerMetadata {
-    broker_id: i32,
+    pub broker_id: i32,
     pub cluster_id: Option<String>,
 }
 

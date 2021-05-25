@@ -244,12 +244,10 @@ impl KafkaServer {
         // check cluster id
         if let Some(metadata_cluster_id) = preloaded_broker_metadata_checkpoint.cluster_id {
             if metadata_cluster_id != cluster_id {
-                return Err(AsyncTaskError::KafkaServer(
-                    KafkaServerError::InconsistentClusterIdException(
-                        cluster_id,
-                        metadata_cluster_id,
-                    ),
-                ));
+                return Err(AsyncTaskError::KafkaServer(KafkaServerError::InconsistentClusterId(
+                    cluster_id,
+                    metadata_cluster_id,
+                )));
             }
         }
         //}
@@ -343,6 +341,47 @@ impl KafkaServer {
         Ok(())
     }
 
+    fn generate_broker_id(&self) -> Result<i32, AsyncTaskError> {
+        todo!()
+    }
+
+    /// Generates new broker_id if enabled or reads from meta.properties based on following
+    /// conditions:
+    ///
+    /// - config has no broker.id provided and broker.id.generation.enabled is true, generates a
+    ///   broker.id based on Zookeeper's sequence
+    /// - config has broker.id and meta.properties contains broker.id if they don't match return
+    ///   Error InconsistentBrokerId
+    /// - config has broker.id and there is no meta.properties file, creates new meta.properties and
+    ///   stores broker.id
+    fn get_or_generate_broker_id(
+        &self,
+        broker_metadata: BrokerMetadata,
+    ) -> Result<i32, AsyncTaskError> {
+        let broker_id = self.kafka_config.broker_id;
+
+        if broker_id >= 0
+            && broker_metadata.broker_id >= 0
+            && broker_metadata.broker_id != broker_id
+        {
+            Err(AsyncTaskError::KafkaServer(KafkaServerError::InconsistentBrokerId(
+                broker_id,
+                broker_metadata.broker_id,
+            )))
+        } else if broker_metadata.broker_id < 0
+            && broker_id < 0
+            && self.kafka_config.broker_id_generation_enable
+        {
+            // generate a new brokerId from Zookeeper
+            self.generate_broker_id()
+        } else if broker_metadata.broker_id >= 0 {
+            // pick broker.id from meta.properties
+            Ok(broker_metadata.broker_id)
+        } else {
+            Ok(broker_id)
+        }
+    }
+
     /// Sends the shutdown signal to the KafkaServer loop
     pub async fn shutdown(tx: mpsc::Sender<KafkaServerAsyncTask>) {
         tx.send(KafkaServerAsyncTask::Shutdown).await.unwrap();
@@ -361,7 +400,13 @@ pub enum KafkaServerError {
         "The Cluster ID {0} doesn't match stored clusterId {1} in meta.properties. The broker is \
          trying to join the wrong cluster. Configured zookeeper.connect may be wrong."
     )]
-    InconsistentClusterIdException(String, String),
+    InconsistentClusterId(String, String),
+    #[error(
+        "Configured broker.id {0} doesn't match stored broker.id {1} in meta.properties. If you \
+         moved your data, make sure your configured broker.id matches. If you intend to create a \
+         new broker, you should remove all data in your data directories (log.dirs)."
+    )]
+    InconsistentBrokerId(i32, i32),
 }
 
 #[cfg(test)]
