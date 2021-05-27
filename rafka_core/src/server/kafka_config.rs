@@ -10,6 +10,14 @@ use std::str::FromStr;
 use thiserror::Error;
 use tracing::{debug, error, info};
 
+pub const ZOOKEEPER_CONNECT_PROP: &str = "zookeeper.connect";
+pub const ZOOKEEPER_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
+pub const ZOOKEEPER_CONNECTION_TIMEOUT_PROP: &str = "zookeeper.connection.timeout.ms";
+pub const LOG_DIR_PROP: &str = "log.dir";
+pub const LOG_DIRS_PROP: &str = "log.dirs";
+pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
+pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
+pub const BROKER_ID_PROP: &str = "broker.id";
 // Unimplemented:
 // ZkEnableSecureAcls = false
 // ZkSslClientEnable = false
@@ -37,6 +45,8 @@ pub enum KafkaConfigError {
     Property(#[from] java_properties::PropertiesError),
     #[error("ParseInt error: {0}")]
     ParseInt(#[from] num::ParseIntError),
+    #[error("ParseBool error: {0}")]
+    ParseBool(#[from] std::str::ParseBoolError),
     #[error("Missing Key error: {0:?}")]
     MissingKeys(Vec<String>),
     #[error("Invalid Value: {0}")]
@@ -70,9 +80,8 @@ impl PartialEq for KafkaConfigError {
 /// DocOpt.
 #[derive(Debug)]
 pub struct KafkaConfigDef {
-    key: String,
     importance: KafkaConfigDefImportance,
-    doc: String,
+    doc: &'static str,
     /// `default` of the value, this would be parsed and transformed into each field type from
     /// KafkaConfig
     default: Option<String>,
@@ -81,11 +90,10 @@ pub struct KafkaConfigDef {
 }
 
 impl KafkaConfigDef {
-    pub fn new(key: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            key,
             importance: KafkaConfigDefImportance::Low,
-            doc: String::from("TODO: Missing Docs"),
+            doc: "TODO: Missing Docs",
             default: None,
             provided: false,
         }
@@ -96,7 +104,7 @@ impl KafkaConfigDef {
         self
     }
 
-    pub fn with_doc(mut self, doc: String) -> Self {
+    pub fn with_doc(mut self, doc: &'static str) -> Self {
         self.doc = doc;
         self
     }
@@ -106,131 +114,177 @@ impl KafkaConfigDef {
         self
     }
 }
-/// `gen_kafka_config_definition` returns the configuration properties HashMap.
-fn gen_kafka_config_definition() -> HashMap<String, KafkaConfigDef> {
-    let mut res = HashMap::new();
-    res.insert(
-        String::from("zookeeper.connect"),
-        KafkaConfigDef::new(String::from("zk_connect"))
+
+#[derive(Debug)]
+pub struct KafkaConfigProperties {
+    zk_connect: KafkaConfigDef,
+    zk_session_timeout_ms: KafkaConfigDef,
+    zk_connection_timeout_ms: KafkaConfigDef,
+    // Singular log.dir
+    log_dir: KafkaConfigDef,
+    // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
+    log_dirs: KafkaConfigDef,
+    broker_id_generation_enable: KafkaConfigDef,
+    reserved_broker_max_id: KafkaConfigDef,
+    broker_id: KafkaConfigDef,
+}
+
+impl Default for KafkaConfigProperties {
+    fn default() -> Self {
+        Self {
+        zk_connect: KafkaConfigDef::new()
         .with_importance(KafkaConfigDefImportance::High)
-        .with_doc(String::from(r#"
+        .with_doc(r#"
             Specifies the ZooKeeper connection string in the form <code>hostname:port</code> where host and port are the
             host and port of a ZooKeeper server. To allow connecting through other ZooKeeper nodes when that ZooKeeper machine is
-            down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.\n
+            down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.
             The server can also have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data under some path in the global ZooKeeper namespace.
             For example to give a chroot path of <code>/chroot/path</code> you would give the connection string as <code>hostname1:port1,hostname2:port2,hostname3:port3/chroot/path</code>.
-            "#)
-        )
-    );
-    res.insert(
-        String::from("zookeeper.session.timeout.ms"),
-        KafkaConfigDef::new(String::from("zk_session_timeout_ms"))
+            "#
+        ),
+        zk_session_timeout_ms: KafkaConfigDef::new()
             .with_importance(KafkaConfigDefImportance::High)
-            .with_doc(String::from("Zookeeper session timeout"))
+            .with_doc("Zookeeper session timeout")
             .with_default(String::from("18000")),
-    );
-    res.insert(
-        String::from("zookeeper.connection.timeout.ms"),
-        KafkaConfigDef::new(String::from("zk_connection_timeout_ms"))
+        zk_connection_timeout_ms: KafkaConfigDef::new()
             .with_importance(KafkaConfigDefImportance::High)
-            .with_doc(String::from(
+            .with_doc(
                 "The max time that the client waits to establish a connection to zookeeper. If \
                  not set, the value in zookeeper.session.timeout.ms is used", // REQ-01
-            )),
-    );
-    // res.insert(String::from("zookeeper.sync.time.ms"), KafkaConfigDef {
-    // key: String::from("zk_sync_time_ms"),
-    // importance: KafkaConfigDefImportance::Low,
-    // doc: String::from("How far a ZK follower can be behind a ZK leader"),
-    // val ZkSyncTimeMs = 2000
-    // default: Some(String::from("2000")),
-    // provided: false,
-    // });
-
-    // Singular log.dir
-    res.insert(
-        String::from("log.dir"),
-        KafkaConfigDef::new(String::from("log_dirs"))
+            ),
+        log_dir: KafkaConfigDef::new()
             .with_importance(KafkaConfigDefImportance::High)
-            .with_doc(String::from(
+            .with_doc(
                 "The directory in which the log data is kept (supplemental for log.dirs property)",
-            ))
+            )
             .with_default(String::from("/tmp/kafka-logs")),
-    );
-    // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
-    res.insert(
-        String::from("log.dirs"),
-        KafkaConfigDef::new(String::from("log_dirs"))
+        log_dirs: KafkaConfigDef::new()
             .with_importance(KafkaConfigDefImportance::High)
-            .with_doc(String::from(
+            .with_doc(
                 "The directories in which the log data is kept. If not set, the value in log.dir \
                  is used",
-            )),
-    );
-    res.insert(
-        String::from("broker.id"),
-        KafkaConfigDef::new(String::from("broker_id"))
+            ),
+            broker_id_generation_enable: KafkaConfigDef::new()
+            .with_importance(KafkaConfigDefImportance::Medium)
+            .with_doc(
+                "Enable automatic broker id generation on the server. When enabled the value \
+                 configured for reserved.broker.max.id should be reviewed.",
+            )
+            .with_default(String::from("true")),
+        reserved_broker_max_id: KafkaConfigDef::new()
+            .with_importance(KafkaConfigDefImportance::Medium)
+            .with_doc("Max number that can be used for a broker.id")
+            .with_default(String::from("1000")),
+        broker_id: KafkaConfigDef::new()
             .with_importance(KafkaConfigDefImportance::High)
-            .with_doc(String::from(
+            .with_doc(
                 "The broker id for this server. If unset, a unique broker id will be generated. \
                  To avoid conflicts between zookeeper generated broker id's and user configured \
                  broker id's, generated broker ids start from  + 1.",
-            ))
+            )
             .with_default(String::from("-1")),
-    );
-    res.insert(
-        String::from("reserved.broker.max.id"),
-        KafkaConfigDef::new(String::from("reserved_broker_max_id"))
-            .with_importance(KafkaConfigDefImportance::Medium)
-            .with_doc(String::from("Max number that can be used for a broker.id"))
-            .with_default(String::from("1000")),
-    );
-    res.insert(
-        String::from("broker.id.generation.enable"),
-        KafkaConfigDef::new(String::from("broker_id_generation_enable"))
-            .with_importance(KafkaConfigDefImportance::Medium)
-            .with_doc(String::from(
-                "Enable automatic broker id generation on the server. When enabled the value \
-                 configured for reserved.broker.max.id should be reviewed.",
-            ))
-            .with_default(String::from("true")),
-    );
-    res
+    }
+    }
+}
+impl KafkaConfigProperties {
+    /// `get_mut` returns a mutable reference to a kafka config
+    pub fn get_mut(&self, prop_name: &str) -> &mut KafkaConfigDef {
+        match prop_name {
+            ZOOKEEPER_CONNECT_PROP => &mut self.zk_connect,
+            ZOOKEEPER_SESSION_TIMEOUT_PROP => &mut self.zk_session_timeout_ms,
+            ZOOKEEPER_CONNECTION_TIMEOUT_PROP => &mut self.zk_connection_timeout_ms,
+            LOG_DIR_PROP => &mut self.log_dir,
+            LOG_DIRS_PROP => &mut self.log_dirs,
+            BROKER_ID_GENERATION_ENABLED_PROP => &mut self.broker_id_generation_enable,
+            RESERVED_BROKER_MAX_ID_PROP => &mut self.reserved_broker_max_id,
+            BROKER_ID_PROP => &mut self.broker_id,
+            _ => {
+                error!("Unknown/Unhandled Configuration Key: {}", prop_name);
+                panic!();
+            },
+        }
+    }
+
+    /// `get_definition` returns a reference to a kafka config definition for a given key
+    pub fn get_definition(&self, prop_name: &str) -> &KafkaConfigDef {
+        match prop_name {
+            ZOOKEEPER_CONNECT_PROP => &self.zk_connect,
+            ZOOKEEPER_SESSION_TIMEOUT_PROP => &self.zk_session_timeout_ms,
+            ZOOKEEPER_CONNECTION_TIMEOUT_PROP => &self.zk_connection_timeout_ms,
+            LOG_DIR_PROP => &self.log_dir,
+            LOG_DIRS_PROP => &self.log_dirs,
+            BROKER_ID_GENERATION_ENABLED_PROP => &self.broker_id_generation_enable,
+            RESERVED_BROKER_MAX_ID_PROP => &self.reserved_broker_max_id,
+            BROKER_ID_PROP => &self.broker_id,
+            _ => {
+                error!("Unknown/Unhandled Configuration Key: {}", prop_name);
+                panic!();
+            },
+        }
+    }
+
+    /// `get_default` returns a parsed version of the default field for a given type.
+    pub fn get_default<T>(&self, prop_name: &str) -> T
+    where
+        T: FromStr,
+        KafkaConfigError: From<<T as FromStr>::Err>,
+        <T as FromStr>::Err: std::fmt::Display,
+    {
+        let prop_definition = self.get_definition(prop_name);
+        match prop_definition.default.unwrap().parse::<T>() {
+            Ok(val) => val,
+            Err(err) => {
+                error!("Error parsing default value in KafkaConfigDef: {}", err);
+                panic!();
+            },
+        }
+    }
+
+    /// `try_from_property` transform a string value from the config into our actual types
+    pub fn try_from_property<T>(
+        &mut self,
+        property_name: &str,
+        property_value: Option<String>,
+    ) -> Result<Option<T>, KafkaConfigError>
+    where
+        T: FromStr,
+        KafkaConfigError: From<<T as FromStr>::Err>,
+        <T as FromStr>::Err: std::fmt::Display,
+    {
+        let property_definition = self.get_mut(property_name);
+        let property_value = property_value.or(property_definition.default);
+        match property_value {
+            Some(val) => match val.parse::<T>() {
+                Ok(val) => {
+                    property_definition.provided = true;
+                    Ok(Some(val))
+                },
+                Err(err) => {
+                    error!(
+                        "Unable to parse property {:?} : {}. Doc: {}",
+                        property_value, err, property_definition.doc
+                    );
+                    Err(KafkaConfigError::from(err))
+                },
+            },
+            None => Ok(None),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct KafkaConfigBuilder {
     pub zk_connect: Option<String>,
-    pub zk_session_timeout_ms: Option<u32>,
+    pub zk_session_timeout_ms: u32,
     pub zk_sync_time_ms: Option<u32>,
     pub zk_connection_timeout_ms: Option<u32>,
     pub zk_max_in_flight_requests: Option<u32>,
     pub log_dirs: Option<String>,
     pub log_dir: Option<String>,
-    pub broker_id: Option<String>,
+    pub broker_id: Option<i32>,
     pub max_reserved_broker_id: Option<String>,
     pub broker_id_generation_enable: Option<bool>,
-    config_definition: HashMap<String, KafkaConfigDef>,
-}
-
-impl Default for KafkaConfigBuilder {
-    fn default() -> Self {
-        let mut config_builder = KafkaConfigBuilder {
-            zk_connect: None,
-            zk_session_timeout_ms: None,
-            zk_sync_time_ms: None,
-            zk_connection_timeout_ms: None,
-            zk_max_in_flight_requests: None,
-            log_dirs: None,
-            log_dir: None,
-            broker_id: None,
-            max_reserved_broker_id: None,
-            broker_id_generation_enable: None,
-            config_definition: gen_kafka_config_definition(),
-        };
-        config_builder.set_defaults_from_config_definition().unwrap();
-        config_builder
-    }
+    config_definition: KafkaConfigProperties,
 }
 
 impl PartialEq for KafkaConfigBuilder {
@@ -246,6 +300,27 @@ impl PartialEq for KafkaConfigBuilder {
 }
 
 impl KafkaConfigBuilder {
+    pub fn init() -> Self {
+        let config_definition = KafkaConfigProperties::default();
+        let zk_session_timeout_ms =
+            config_definition.try_from_property::<u32>(ZOOKEEPER_SESSION_TIMEOUT_PROP).unwrap();
+        let mut config_builder = KafkaConfigBuilder {
+            zk_connect: None,
+            zk_session_timeout_ms,
+            zk_sync_time_ms: None,
+            zk_connection_timeout_ms: None,
+            zk_max_in_flight_requests: None,
+            log_dirs: None,
+            log_dir: None,
+            broker_id: None,
+            max_reserved_broker_id: None,
+            broker_id_generation_enable: None,
+            config_definition: KafkaConfigProperties::default(),
+        };
+        config_builder.set_defaults_from_config_definition().unwrap();
+        config_builder
+    }
+
     /// `set_config_key_as_provided` sets one of the java properties as provided, this happens when
     /// the variable is resolved by using the value of another variable.
     pub fn set_config_key_as_provided(&mut self, key: &str) {
@@ -254,39 +329,6 @@ impl KafkaConfigBuilder {
         } else {
             // Help with typos
             panic!("KafkaConfigBuilder::set_config_key_as_provided No such key {}", key);
-        }
-    }
-
-    /// `try_from_property` transform a string property into a destination field from
-    /// KafkaConfig fileds
-    pub fn try_from_property<T>(
-        &mut self,
-        property_name: &str,
-        property_value: &str,
-    ) -> Result<T, KafkaConfigError>
-    where
-        T: FromStr,
-        KafkaConfigError: From<<T as FromStr>::Err>,
-        <T as FromStr>::Err: std::fmt::Display,
-    {
-        match self.config_definition.get_mut(property_name) {
-            Some(property_definition) => match property_value.parse::<T>() {
-                Ok(val) => {
-                    property_definition.provided = true;
-                    Ok(val)
-                },
-                Err(err) => {
-                    error!(
-                        "Unable to parse property {} to u32 number: {}. Doc: {}",
-                        property_value, err, property_definition.doc
-                    );
-                    Err(KafkaConfigError::from(err))
-                },
-            },
-            None => {
-                error!("Unknown/Unhandled Configuration Key: {}", property_name);
-                Err(KafkaConfigError::UnknownKey(property_name.to_string()))
-            },
         }
     }
 
@@ -305,10 +347,11 @@ impl KafkaConfigBuilder {
             "log.dirs" => self.log_dirs = Some(value.to_string()),
             "log.dir" => self.log_dir = Some(value.to_string()),
             "broker.id.generation.enable" => {
-                self.broker_id_generation_enable = Some(value.to_string())
+                self.broker_id_generation_enable =
+                    Some(self.try_from_property::<bool>(property, value)?);
             },
-            "reserved.broker.max.id" => self.reserved_broker_max_id = Some(value.to_string()),
-            "broker.id" => self.broker_id = Some(value.to_string()),
+            "reserved.broker.max.id" => self.max_reserved_broker_id = Some(value.to_string()),
+            "broker.id" => self.broker_id = Some(self.try_from_property::<i32>(property, value)?),
             _ => return Err(KafkaConfigError::UnknownKey(property.to_string())),
         }
         self.set_config_key_as_provided(property);
@@ -352,18 +395,14 @@ impl KafkaConfigBuilder {
     // pub broker_id_generation_enable: bool,
     fn resolve_zk_session_timeout_ms(&mut self) -> Result<u32, KafkaConfigError> {
         // NOTE: zk_session_timeout_ms has a default, so it is never None
-        if let Some(zk_session_timeout_ms) = self.zk_session_timeout_ms {
-            Ok(zk_session_timeout_ms)
-        } else {
-            Err(KafkaConfigError::MissingKeys(vec![String::from("zookeeper.session.timeout.ms")]))
-        }
+        Ok(val)
     }
 
     /// `resolve_zk_connection_timeout_ms` Satisties REQ-01, if zk_connection_timeout_ms is unset
     /// the value of zk_connection_timeout_ms will be used.
     fn resolve_zk_connection_timeout_ms(&mut self) -> Result<u32, KafkaConfigError> {
-        if let Some(zk_connection_timeout_ms) = self.zk_connection_timeout_ms {
-            Ok(zk_connection_timeout_ms)
+        if let Some(val) = self.zk_connection_timeout_ms {
+            Ok(val)
         } else {
             debug!(
                 "Unspecified property zk_connection_timeout_ms will use {:?} from \
@@ -392,9 +431,9 @@ impl KafkaConfigBuilder {
 
     fn resolve_zk_connect(&mut self) -> Result<String, KafkaConfigError> {
         if let Some(zk_connect) = &self.zk_connect {
-            Ok(zk_connect)
+            Ok(zk_connect.to_string())
         } else {
-            Err(KafkaConfigError::MissingKeys("zookeeper.connect"))
+            Err(KafkaConfigError::MissingKeys(vec![String::from("zookeeper.connect")]))
         }
     }
 
@@ -407,15 +446,11 @@ impl KafkaConfigBuilder {
         todo!()
     }
 
-    fn resolve_broker_id_generation_enabled(&mut self) -> Result<(), KafkaConfigError> {
-        if self.broker_id_generation_enable {
-            require(
-                broker_id >= -1 && broker_id <= max_reserved_broker_id,
-                "broker.id must be equal or greater than -1 and not greater than \
-                 reserved.broker.max.id",
-            )
+    fn resolve_broker_id_generation_enable(&mut self) -> Result<bool, KafkaConfigError> {
+        if let Some(val) = self.broker_id_generation_enable {
+            Ok(val)
         } else {
-            require(broker_id >= 0, "broker.id must be equal or greater than 0")
+            Err(KafkaConfigError::MissingKeys(vec![String::from("broker.id.generation.enable")]))
         }
     }
 
@@ -436,12 +471,12 @@ impl KafkaConfigBuilder {
         let log_dirs = self.resolve_log_dirs()?;
         let max_reserved_broker_id = self.resolve_max_reserved_broker_id()?;
         let broker_id = self.resolve_broker_id()?;
-        let broker_id_generation_enabled = self.resolve_broker_id_generation_enabled()?;
+        let broker_id_generation_enable = self.resolve_broker_id_generation_enable()?;
         let zk_connect = self.resolve_zk_connect()?;
         if let Some(zk_connect) = &self.zk_connect {
             kafka_config.zk_connect = zk_connect.to_string();
         }
-        Ok(kafka_config)
+        kafka_config.validate_values()
     }
 }
 #[derive(Debug, PartialEq, Default, Clone)]
@@ -457,31 +492,6 @@ pub struct KafkaConfig {
     pub broker_id_generation_enable: bool,
 }
 
-#[macro_export]
-macro_rules! from_property_u32 {
-    ( $input_config:expr, $config_definition:expr, $property:expr, $value:expr) => {{
-        match $config_definition.get_mut($property) {
-            Some(property_definition) => match $value.parse::<u32>() {
-                Ok(val) => {
-                    property_definition.provided = true;
-                    Ok(val)
-                },
-                Err(err) => {
-                    error!(
-                        "Unable to parse property {} to u32 number: {}. Doc: {}",
-                        $value, err, property_definition.doc
-                    );
-                    Err(KafkaConfigError::ParseInt(err))
-                },
-            },
-            None => {
-                error!("Unknown/Unhandled Configuration Key: {}", $property);
-                Err(KafkaConfigError::UnknownKey($property.to_string()))
-            },
-        }
-    }};
-}
-
 impl KafkaConfig {
     /// `get_kafka_config` Reads the kafka config.
     pub fn get_kafka_config(filename: &str) -> Result<Self, KafkaConfigError> {
@@ -490,6 +500,18 @@ impl KafkaConfig {
         let input_config = java_properties::read(BufReader::new(&mut config_file_content))?;
         debug!("read_config_from: Converting to HashMap");
         KafkaConfigBuilder::from_properties_hashmap(input_config)?.build()
+    }
+
+    pub fn validate_values(self) -> Result<Self, KafkaConfigError> {
+        if require(
+            broker_id >= -1 && broker_id <= max_reserved_broker_id,
+            "broker.id must be equal or greater than -1 and not greater than \
+             reserved.broker.max.id",
+        ) {
+        } else {
+            require(broker_id >= 0, "broker.id must be equal or greater than 0")
+        }
+        Ok(self)
     }
 }
 
