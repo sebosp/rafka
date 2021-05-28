@@ -206,7 +206,7 @@ impl KafkaConfigProperties {
     }
 
     /// `get_definition` returns a reference to a kafka config definition for a given key
-    pub fn get_definition(&self, prop_name: &str) -> &KafkaConfigDef {
+    pub fn get(&self, prop_name: &str) -> &KafkaConfigDef {
         match prop_name {
             ZOOKEEPER_CONNECT_PROP => &self.zk_connect,
             ZOOKEEPER_SESSION_TIMEOUT_PROP => &self.zk_session_timeout_ms,
@@ -230,7 +230,7 @@ impl KafkaConfigProperties {
         KafkaConfigError: From<<T as FromStr>::Err>,
         <T as FromStr>::Err: std::fmt::Display,
     {
-        let prop_definition = self.get_definition(prop_name);
+        let prop_definition = self.get(prop_name);
         match prop_definition.default.unwrap().parse::<T>() {
             Ok(val) => val,
             Err(err) => {
@@ -270,8 +270,20 @@ impl KafkaConfigProperties {
             None => Ok(None),
         }
     }
+
+    pub fn default_val<T>(&self, property_name: &str) -> T
+    where
+        T: FromStr,
+        <T as FromStr>::Err: std::fmt::Debug,
+    {
+        let property_definition = self.get(property_name).default.unwrap();
+        property_definition.parse::<T>().unwrap()
+    }
 }
 
+/// The KafkaConfigBuilder will have default values pre-set and change the values only once
+/// provided by the parsed config file. If the values h ave a pre-defined default, they will not be
+/// an Option
 #[derive(Debug)]
 pub struct KafkaConfigBuilder {
     pub zk_connect: Option<String>,
@@ -300,10 +312,12 @@ impl PartialEq for KafkaConfigBuilder {
 }
 
 impl KafkaConfigBuilder {
+    /// `init` pre-fills the KafkaConfigBuilder with the defaults, if a value does not have a
+    /// defaul, it will set as None
     pub fn init() -> Self {
         let config_definition = KafkaConfigProperties::default();
         let zk_session_timeout_ms =
-            config_definition.try_from_property::<u32>(ZOOKEEPER_SESSION_TIMEOUT_PROP).unwrap();
+            config_definition.default_val::<u32>(ZOOKEEPER_SESSION_TIMEOUT_PROP);
         let mut config_builder = KafkaConfigBuilder {
             zk_connect: None,
             zk_session_timeout_ms,
