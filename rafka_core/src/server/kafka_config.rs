@@ -31,7 +31,7 @@ pub const ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS: &str = "zookeeper.max.in.flight.requ
 
 /// `KafkaConfigDefImportance` provides the levels of importance that different java_properties
 /// have.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum KafkaConfigDefImportance {
     High,
     Medium,
@@ -90,7 +90,7 @@ impl PartialEq for KafkaConfigError {
 #[derive(Debug, PartialEq)]
 pub struct KafkaConfigDef<T> {
     importance: KafkaConfigDefImportance,
-    doc: &'static str,
+    doc: String,
     /// `default` of the value, this would be parsed and transformed into each field type from
     /// KafkaConfig
     default: Option<String>,
@@ -110,7 +110,7 @@ where
     pub fn new() -> Self {
         Self {
             importance: KafkaConfigDefImportance::Low,
-            doc: "TODO: Missing Docs",
+            doc: String::from("TODO: Missing Docs"),
             default: None,
             provided: false,
             value: None,
@@ -122,7 +122,7 @@ where
         self
     }
 
-    pub fn with_doc(mut self, doc: &'static str) -> Self {
+    pub fn with_doc(mut self, doc: String) -> Self {
         self.doc = doc;
         self
     }
@@ -162,8 +162,8 @@ where
         self.value.as_ref()
     }
 
-    pub fn get_importance(&self) -> KafkaConfigDefImportance {
-        self.importance
+    pub fn get_importance(&self) -> &KafkaConfigDefImportance {
+        &self.importance
     }
 
     pub fn is_provided(&self) -> bool {
@@ -191,59 +191,59 @@ impl Default for KafkaConfigProperties {
         Self {
             zk_connect: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::High)
-                .with_doc(r#"
+                .with_doc(String::from(r#"
                     Specifies the ZooKeeper connection string in the form <code>hostname:port</code> where host and port are the
                     host and port of a ZooKeeper server. To allow connecting through other ZooKeeper nodes when that ZooKeeper machine is
                     down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.
                     The server can also have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data under some path in the global ZooKeeper namespace.
                     For example to give a chroot path of <code>/chroot/path</code> you would give the connection string as <code>hostname1:port1,hostname2:port2,hostname3:port3/chroot/path</code>.
                     "#
-                ),
+                )),
             zk_session_timeout_ms: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::High)
-                .with_doc("Zookeeper session timeout")
+                .with_doc(String::from("Zookeeper session timeout"))
                 .with_default(String::from("18000")),
             zk_connection_timeout_ms: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::High)
                 .with_doc(
-                    "The max time that the client waits to establish a connection to zookeeper. If \
-                     not set, the value in zookeeper.session.timeout.ms is used", // REQ-01
+                    format!("The max time that the client waits to establish a connection to zookeeper. If \
+                     not set, the value in {} is used", ZOOKEEPER_SESSION_TIMEOUT_PROP) // REQ-01
                 ),
             zk_max_in_flight_requests: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::High)
-                .with_doc(
+                .with_doc(String::from(
                     "The maximum number of unacknowledged requests the client will send to Zookeeper before blocking."
-                )
+                ))
                 .with_default(String::from("10")),
             log_dir: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::High)
                 .with_doc(
-                    "The directory in which the log data is kept (supplemental for log.dirs property)",
+                    format!("The directory in which the log data is kept (supplemental for {} property)", LOG_DIRS_PROP),
                 )
                 .with_default(String::from("/tmp/kafka-logs")),
             log_dirs: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::High)
                 .with_doc(
-                    "The directories in which the log data is kept. If not set, the value in log.dir \
-                     is used",
+                    format!("The directories in which the log data is kept. If not set, the value in {} \
+                     is used", LOG_DIR_PROP),
                 ),
             broker_id_generation_enable: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::Medium)
                 .with_doc(
-                    "Enable automatic broker id generation on the server. When enabled the value \
-                     configured for reserved.broker.max.id should be reviewed.",
+                    format!("Enable automatic broker id generation on the server. When enabled the value \
+                     configured for {} should be reviewed.", RESERVED_BROKER_MAX_ID_PROP)
                 )
                 .with_default(String::from("true")),
             reserved_broker_max_id: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::Medium)
-                .with_doc("Max number that can be used for a broker.id")
+                .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
                 .with_default(String::from("1000")),
             broker_id: KafkaConfigDef::new()
                 .with_importance(KafkaConfigDefImportance::High)
                 .with_doc(
-                    "The broker id for this server. If unset, a unique broker id will be generated. \
+                    String::from("The broker id for this server. If unset, a unique broker id will be generated. \
                      To avoid conflicts between zookeeper generated broker id's and user configured \
-                     broker id's, generated broker ids start from  + 1.",
+                     broker id's, generated broker ids start from  + 1."),
                 )
                 .with_default(String::from("-1")),
         }
@@ -304,7 +304,7 @@ impl KafkaConfigProperties {
     fn resolve_zk_session_timeout_ms(&mut self) -> Result<u32, KafkaConfigError> {
         // NOTE: zk_session_timeout_ms has a default, so it is never None
         match self.zk_session_timeout_ms.get_value() {
-            Some(val) => Ok(val),
+            Some(val) => Ok(*val),
             None => {
                 // TODO: Find a way to make it not-compile of the value is None and the default is
                 // not None
@@ -320,7 +320,7 @@ impl KafkaConfigProperties {
     /// the value of zk_connection_timeout_ms will be used.
     fn resolve_zk_connection_timeout_ms(&mut self) -> Result<u32, KafkaConfigError> {
         if let Some(val) = self.zk_connection_timeout_ms.get_value() {
-            Ok(val)
+            Ok(*val)
         } else {
             debug!(
                 "Unspecified property {} will use {:?} from {}",
@@ -329,8 +329,9 @@ impl KafkaConfigProperties {
                 ZOOKEEPER_SESSION_TIMEOUT_PROP
             );
             // Fallback to the zookeeper.connection.timeout.ms value
-            self.zk_connection_timeout_ms.set_value(self.resolve_zk_session_timeout_ms()?);
-            Ok(self.zk_session_timeout_ms.get_value().unwrap())
+            let zk_session_timeout_ms = self.resolve_zk_session_timeout_ms()?;
+            self.zk_connection_timeout_ms.set_value(zk_session_timeout_ms);
+            Ok(*self.zk_session_timeout_ms.get_value().unwrap())
         }
     }
 
@@ -338,10 +339,11 @@ impl KafkaConfigProperties {
     /// in KafkaConfig has a default, so even if they are un-set, they will be marked as provided
     fn resolve_log_dirs(&mut self) -> Result<Vec<String>, KafkaConfigError> {
         // TODO: Consider checking for valid Paths and return KafkaConfigError for them
+        // NOTE: When the directories do not exist, KafkaServer simply gets a list of offline_dirs
         if let Some(log_dirs) = &self.log_dirs.get_value() {
-            Ok(log_dirs.clone().split(',').map(|x| x.trim_start().to_string()).collect())
+            Ok((*log_dirs).clone().split(',').map(|x| x.trim_start().to_string()).collect())
         } else if let Some(log_dir) = &self.log_dir.get_value() {
-            Ok(vec![log_dir.clone()])
+            Ok(vec![log_dir.to_string()])
         } else {
             Ok(vec![])
         }
@@ -356,31 +358,36 @@ impl KafkaConfigProperties {
     }
 
     fn resolve_reserved_broker_max_id(&mut self) -> Result<i32, KafkaConfigError> {
-        // at least 0
         if let Some(reserved_broker_max_id) = self.reserved_broker_max_id.get_value() {
-            if reserved_broker_max_id < 0 {
+            if *reserved_broker_max_id < 0 {
                 Err(KafkaConfigError::InvalidValue(format!(
                     "{}: '{}' should be at least 0",
-                    RESERVED_BROKER_MAX_ID_PROP, reserved_broker_max_id
+                    RESERVED_BROKER_MAX_ID_PROP, *reserved_broker_max_id
                 )))
             } else {
-                Ok(reserved_broker_max_id)
+                Ok(*reserved_broker_max_id)
             }
         } else {
             panic!(
-                "zk_session_timeout_ms has a default but found its value to be None, bug in \
+                "reserved_broker_max_id has a default but found its value to be None, bug in \
                  parsing defaults"
             );
         }
     }
 
     fn resolve_broker_id(&mut self) -> Result<i32, KafkaConfigError> {
-        todo!()
+        if let Some(broker_id) = self.broker_id.get_value() {
+            Ok(*broker_id)
+        } else {
+            panic!(
+                "broker_id has a default but found its value to be None, bug in parsing defaults"
+            );
+        }
     }
 
     fn resolve_broker_id_generation_enable(&mut self) -> Result<bool, KafkaConfigError> {
         if let Some(val) = self.broker_id_generation_enable.get_value() {
-            Ok(val)
+            Ok(*val)
         } else {
             Err(KafkaConfigError::MissingKey(BROKER_ID_GENERATION_ENABLED_PROP.to_string()))
         }
@@ -389,13 +396,13 @@ impl KafkaConfigProperties {
     fn resolve_zk_max_in_flight_requests(&mut self) -> Result<u32, KafkaConfigError> {
         // at least 0
         if let Some(zk_max_in_flight_requests) = self.zk_max_in_flight_requests.get_value() {
-            if zk_max_in_flight_requests < 1 {
+            if *zk_max_in_flight_requests < 1 {
                 Err(KafkaConfigError::InvalidValue(format!(
                     "{}: '{}' should be at least 0",
-                    ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS, zk_max_in_flight_requests
+                    ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS, *zk_max_in_flight_requests
                 )))
             } else {
-                Ok(zk_max_in_flight_requests)
+                Ok(*zk_max_in_flight_requests)
             }
         } else {
             panic!(
@@ -416,14 +423,14 @@ impl KafkaConfigProperties {
         let broker_id_generation_enable = self.resolve_broker_id_generation_enable()?;
         let zk_connect = self.resolve_zk_connect()?;
         let zk_max_in_flight_requests = self.resolve_zk_max_in_flight_requests()?;
-        let mut kafka_config = KafkaConfig {
+        let kafka_config = KafkaConfig {
             zk_connect,
             zk_session_timeout_ms,
             zk_connection_timeout_ms,
             zk_max_in_flight_requests,
             log_dirs,
-            broker_id_generation_enable,
             reserved_broker_max_id,
+            broker_id_generation_enable,
             broker_id,
         };
         kafka_config.validate_values()
@@ -452,7 +459,7 @@ impl KafkaConfig {
     }
 
     pub fn validate_values(self) -> Result<Self, KafkaConfigError> {
-        if self.broker_id < -1 || self.broker_id > self.reserved_broker_max_id.try_into().unwrap() {
+        if self.broker_id < -1 || self.broker_id > self.reserved_broker_max_id {
             Err(KafkaConfigError::InvalidValue(format!(
                 "{}: '{}' must be equal or greater than -1 and not greater than {}",
                 self.broker_id, BROKER_ID_PROP, RESERVED_BROKER_MAX_ID_PROP
@@ -510,5 +517,21 @@ mod tests {
         full_config.insert(String::from(ZOOKEEPER_CONNECTION_TIMEOUT_PROP), String::from("1000"));
         full_config.insert(String::from(LOG_DIRS_PROP), String::from("/some-dir/logs"));
         assert!(KafkaConfigProperties::from_properties_hashmap(full_config).is_ok());
+        let mut multiple_log_dir_properties: HashMap<String, String> = HashMap::new();
+        multiple_log_dir_properties
+            .insert(String::from(ZOOKEEPER_CONNECT_PROP), String::from("127.0.0.1:2181"));
+        multiple_log_dir_properties
+            .insert(String::from(LOG_DIR_PROP), String::from("/single/log/dir"));
+        multiple_log_dir_properties
+            .insert(String::from(LOG_DIRS_PROP), String::from("/some-1/logs, /some-2-logs"));
+        let config_builder =
+            KafkaConfigProperties::from_properties_hashmap(multiple_log_dir_properties);
+        assert!(config_builder.is_ok());
+        let mut config_builder = config_builder.unwrap();
+        let config = config_builder.build().unwrap();
+        assert_eq!(config.log_dirs, vec![
+            String::from("/some-1/logs"),
+            String::from("/some-2-logs")
+        ]);
     }
 }
