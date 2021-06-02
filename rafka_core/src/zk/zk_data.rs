@@ -61,7 +61,7 @@ pub struct ZkData {
     delegation_tokens: DelegationTokensZNode,
     config_entity_change_notification: ConfigEntityChangeNotificationZNode,
     delete_topics: DeleteTopicsZNode,
-    broker_sequence_id: BrokerSequenceIdZNode,
+    pub broker_sequence_id: BrokerSequenceIdZNode,
     isr_change_notification: IsrChangeNotificationZNode,
     producer_id_block: ProducerIdBlockZNode,
     log_dir_event_notification: LogDirEventNotificationZNode,
