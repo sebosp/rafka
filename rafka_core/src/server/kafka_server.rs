@@ -251,7 +251,8 @@ impl KafkaServer {
             }
         }
         self.kafka_config.broker_id =
-            self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint)?;
+            self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint).await?;
+        debug!("KafkaServer id = {}", self.kafka_config.broker_id);
         //}
         Ok(())
     }

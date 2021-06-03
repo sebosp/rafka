@@ -260,6 +260,20 @@ impl ZooKeeperClient {
             Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
         }
     }
+
+    #[instrument]
+    pub async fn set_data(
+        &self,
+        path: &str,
+        data: Vec<u8>,
+        version: Option<i32>,
+    ) -> Result<Stat, AsyncTaskError> {
+        if let Some(zk) = &self.zookeeper {
+            Ok(zk.set_data(path, data, version).await?)
+        } else {
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
+        }
+    }
 }
 
 /// Defaults come from: core/src/main/scala/kafka/server/KafkaConfig.scala
