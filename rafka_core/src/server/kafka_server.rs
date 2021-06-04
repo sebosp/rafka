@@ -5,7 +5,7 @@
 //!   idea, let's see how far we can go
 
 use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask};
-use crate::server::broker_metadata_checkpoint::BrokerMetadataCheckpoint;
+use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
@@ -14,11 +14,12 @@ use crate::server::kafka_config::KafkaConfig;
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Instant;
+use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, info};
+use tracing::{debug, error, info, trace};
 use tracing_attributes::instrument;
 #[derive(Debug)]
 pub struct CountDownLatch(u8);
@@ -108,10 +109,8 @@ pub struct KafkaServer {
 
     pub correlation_id: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
                                     * capacity? */
-    pub broker_meta_props_file: String, // = "meta.properties"
+    pub broker_meta_props_file: String,
     pub broker_metadata_checkpoints: HashMap<String, BrokerMetadataCheckpoint>,
-    // = config.logDirs.map(logDir => (logDir, new BrokerMetadataCheckpoint(new File(logDir +
-    // File.separator + brokerMetaPropsFile)))).toMap
     _cluster_id: Option<String>, // was null, changed to Option<>
     _broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>$
 
@@ -195,12 +194,12 @@ impl KafkaServer {
         // we can bypass that and return just the default() value
         kafka_server.zk_client_config = ZKClientConfig::default();
         let broker_meta_props_file = String::from("meta.properties");
-        // Using File.separator as "." since this is going to just work on Linux.
+        // Using File.separator as "/" since this is going to just work on Linux.
         for bmc_log_dir in &config.log_dirs {
-            let filename = format!("{}.{}", bmc_log_dir, broker_meta_props_file);
+            let filename = format!("{}/{}", bmc_log_dir, broker_meta_props_file);
             kafka_server
                 .broker_metadata_checkpoints
-                .insert(filename.clone(), BrokerMetadataCheckpoint::new(&filename));
+                .insert(bmc_log_dir.clone(), BrokerMetadataCheckpoint::new(&filename));
         }
         kafka_server.init_time = time;
         kafka_server.kafka_config = config;
@@ -232,8 +231,83 @@ impl KafkaServer {
         // Get or create cluster_id
         let cluster_id = self.get_or_generate_cluster_id().await?;
         info!("Cluster ID = {}", cluster_id);
+        // read medatada
+        let (broker_metadata_set, broker_metadata_found, initial_offline_dirs) =
+            self.read_broker_metadata_and_offline_dirs();
+        // load metadata
+        let preloaded_broker_metadata_checkpoint =
+            self.load_broker_metadata(broker_metadata_set, broker_metadata_found)?;
+        debug!(
+            "Preloaded Broker Metadata Checkpoint: {:?}, Initial Offline Dirs: {:?}",
+            preloaded_broker_metadata_checkpoint, initial_offline_dirs
+        );
+        // check cluster id
+        if let Some(metadata_cluster_id) = &preloaded_broker_metadata_checkpoint.cluster_id {
+            if *metadata_cluster_id != cluster_id {
+                return Err(AsyncTaskError::KafkaServer(KafkaServerError::InconsistentClusterId(
+                    cluster_id,
+                    metadata_cluster_id.to_string(),
+                )));
+            }
+        }
+        self.kafka_config.broker_id =
+            self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint).await?;
+        debug!("KafkaServer id = {}", self.kafka_config.broker_id);
         //}
         Ok(())
+    }
+
+    /// Reads the BrokerMetadata from the directories.
+    /// Returns a tuple containing:
+    /// - A HashSet of unique BrokerMetadata loaded from the files
+    /// - A String containing the log.dir -> BrokerMetadata to help debug InconsistentBrokerMetadata
+    /// and see which log.dir contains which BrokerMetadata
+    /// - The log directories whose meta.properties can not be accessed due to IO Errors will be
+    ///   returned to the caller
+    pub fn read_broker_metadata_and_offline_dirs(
+        &self,
+    ) -> (HashSet<BrokerMetadata>, String, Vec<String>) {
+        let mut broker_metadata_set: HashSet<BrokerMetadata> = HashSet::new();
+        let mut broker_metadata_found = String::from("");
+        let mut offline_dirs: Vec<String> = vec![];
+
+        for log_dir in &self.kafka_config.log_dirs {
+            if let Some(checkpoint_dir) = self.broker_metadata_checkpoints.get(log_dir) {
+                match checkpoint_dir.read() {
+                    Ok(res) => {
+                        broker_metadata_found
+                            .push_str(format!("- {} -> {}\n", log_dir, res).as_str());
+                        broker_metadata_set.insert(res.clone());
+                    },
+                    Err(err) => {
+                        offline_dirs.push(log_dir.to_string());
+                        error!(
+                            "Fail to read {} under log directory {}: {:?}",
+                            self.broker_meta_props_file, log_dir, err
+                        );
+                    },
+                }
+            }
+        }
+        (broker_metadata_set, broker_metadata_found, offline_dirs)
+    }
+
+    /// Loads the BrokerMetadata. If the BrokerMetadata doesn't match in all the log.dirs,
+    /// InconsistentBrokerMetadataerror is returned
+    /// Returns the BrokerMetadata if consistent, otherwise retuns Error
+    pub fn load_broker_metadata(
+        &self,
+        broker_metadata_set: HashSet<BrokerMetadata>,
+        broker_metadata_found: String,
+    ) -> Result<BrokerMetadata, KafkaServerError> {
+        if broker_metadata_set.len() > 1 {
+            Err(KafkaServerError::InconsistentBrokerMetadata(broker_metadata_found))
+        } else if let Some(some_entry) = broker_metadata_set.iter().next() {
+            // If here there's only one item in the Vec
+            Ok(some_entry.clone())
+        } else {
+            Ok(BrokerMetadata::new(-1, None))
+        }
     }
 
     /// Request the cluster ID from Zookeeper, if the cluster ID does not exist, it would be
@@ -259,6 +333,7 @@ impl KafkaServer {
 
     /// `process_message_queue` receives KafkaServerAsyncTask requests from clients
     /// If a client wants a response it may use a oneshot::channel for it
+    #[instrument]
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
         while let Some(task) = self.rx.recv().await {
             info!("KafkaServer coordinator {:?}", task);
@@ -270,8 +345,159 @@ impl KafkaServer {
         Ok(())
     }
 
+    /// Return a sequence id generated by updating the broker sequence id path in ZK.
+    /// Users can provide brokerId in the config. To avoid conflicts between ZK generated
+    /// sequence id and configured brokerId, we increment the generated sequence id by
+    /// KafkaConfig.MaxReservedBrokerId.
+    #[instrument]
+    async fn generate_broker_id(&mut self) -> Result<i32, AsyncTaskError> {
+        let (tx, rx) = oneshot::channel();
+        self.async_task_tx
+            .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GenerateBrokerId(tx)))
+            .await?;
+        Ok(rx.await? + self.kafka_config.reserved_broker_max_id)
+    }
+
+    /// Generates new broker_id if enabled or reads from meta.properties based on following
+    /// conditions:
+    ///
+    /// - config has no broker.id provided and broker.id.generation.enabled is true, generates a
+    ///   broker.id based on Zookeeper's sequence
+    /// - config has broker.id and meta.properties contains broker.id if they don't match return
+    ///   Error InconsistentBrokerId
+    /// - config has broker.id and there is no meta.properties file, creates new meta.properties and
+    ///   stores broker.id
+    #[instrument]
+    async fn get_or_generate_broker_id(
+        &mut self,
+        broker_metadata: BrokerMetadata,
+    ) -> Result<i32, AsyncTaskError> {
+        let broker_id = self.kafka_config.broker_id;
+
+        if broker_id >= 0
+            && broker_metadata.broker_id >= 0
+            && broker_metadata.broker_id != broker_id
+        {
+            Err(AsyncTaskError::KafkaServer(KafkaServerError::InconsistentBrokerId(
+                broker_id,
+                broker_metadata.broker_id,
+            )))
+        } else if broker_metadata.broker_id < 0
+            && broker_id < 0
+            && self.kafka_config.broker_id_generation_enable
+        {
+            // generate a new brokerId from Zookeeper
+            self.generate_broker_id().await
+        } else if broker_metadata.broker_id >= 0 {
+            // pick broker.id from meta.properties
+            Ok(broker_metadata.broker_id)
+        } else {
+            Ok(broker_id)
+        }
+    }
+
     /// Sends the shutdown signal to the KafkaServer loop
     pub async fn shutdown(tx: mpsc::Sender<KafkaServerAsyncTask>) {
         tx.send(KafkaServerAsyncTask::Shutdown).await.unwrap();
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum KafkaServerError {
+    #[error(
+        "BrokerMetadata is not consistent across log.dirs. This could happen if multiple brokers \
+         shared a log directory (log.dirs) or partial data was manually copied from another \
+         broker. Found: {0:?}"
+    )]
+    InconsistentBrokerMetadata(String),
+    #[error(
+        "The Cluster ID {0} doesn't match stored clusterId {1} in meta.properties. The broker is \
+         trying to join the wrong cluster. Configured zookeeper.connect may be wrong."
+    )]
+    InconsistentClusterId(String, String),
+    #[error(
+        "Configured broker.id {0} doesn't match stored broker.id {1} in meta.properties. If you \
+         moved your data, make sure your configured broker.id matches. If you intend to create a \
+         new broker, you should remove all data in your data directories (log.dirs)."
+    )]
+    InconsistentBrokerId(i32, i32),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // #[test_env_log::test]
+    #[test]
+    fn it_loads_brokermetadata() {
+        let mut good_broker_metadata_set: HashSet<BrokerMetadata> = HashSet::new();
+        good_broker_metadata_set.insert(BrokerMetadata::new(1, None));
+        good_broker_metadata_set.insert(BrokerMetadata::new(1, None));
+        let broker_metadata_found = String::from("test");
+        let kafka_server = KafkaServer::default();
+        assert!(kafka_server
+            .load_broker_metadata(good_broker_metadata_set, broker_metadata_found.clone())
+            .is_ok());
+        let empty_broker_metadata_set: HashSet<BrokerMetadata> = HashSet::new();
+        assert!(kafka_server
+            .load_broker_metadata(empty_broker_metadata_set, broker_metadata_found.clone())
+            .is_ok());
+        let mut different_cluster_ids_broker_metadata_set: HashSet<BrokerMetadata> = HashSet::new();
+        different_cluster_ids_broker_metadata_set
+            .insert(BrokerMetadata::new(1, Some(String::from("cluster1"))));
+        different_cluster_ids_broker_metadata_set
+            .insert(BrokerMetadata::new(1, Some(String::from("cluster2"))));
+        assert!(kafka_server
+            .load_broker_metadata(
+                different_cluster_ids_broker_metadata_set,
+                broker_metadata_found.clone()
+            )
+            .is_err());
+        let mut different_cluster_data_broker_metadata_set: HashSet<BrokerMetadata> =
+            HashSet::new();
+        different_cluster_data_broker_metadata_set
+            .insert(BrokerMetadata::new(1, Some(String::from("cluster1"))));
+        different_cluster_data_broker_metadata_set.insert(BrokerMetadata::new(1, None));
+        assert!(kafka_server
+            .load_broker_metadata(
+                different_cluster_data_broker_metadata_set,
+                broker_metadata_found.clone()
+            )
+            .is_err());
+        let mut different_broker_ids_broker_metadata_set: HashSet<BrokerMetadata> = HashSet::new();
+        different_broker_ids_broker_metadata_set
+            .insert(BrokerMetadata::new(1, Some(String::from("cluster1"))));
+        different_broker_ids_broker_metadata_set
+            .insert(BrokerMetadata::new(2, Some(String::from("cluster1"))));
+        assert!(kafka_server
+            .load_broker_metadata(
+                different_broker_ids_broker_metadata_set,
+                broker_metadata_found.clone()
+            )
+            .is_err());
+    }
+    #[test]
+    fn it_gets_or_generates_broker_id() {
+        let bm_b1 = BrokerMetadata::new(1, None);
+        let bm_b2 = BrokerMetadata::new(2, None);
+        let bm_b_unset = BrokerMetadata::new(-1, None);
+        let ks_b1 = KafkaServer {
+            kafka_config: KafkaConfig { broker_id: 1, ..KafkaConfig::default() },
+            ..KafkaServer::default()
+        };
+        let same_broker_id = ks_b1.get_or_generate_broker_id(bm_b1.clone());
+        assert!(same_broker_id.is_ok());
+        let same_broker_id = same_broker_id.unwrap();
+        assert_eq!(same_broker_id, 1);
+        let diff_broker_id = ks_b1.get_or_generate_broker_id(bm_b2);
+        assert!(diff_broker_id.is_err());
+        let with_bm_b_unset = ks_b1.get_or_generate_broker_id(bm_b_unset.clone());
+        assert!(with_bm_b_unset.is_ok());
+        let with_bm_b_unset = with_bm_b_unset.unwrap();
+        assert_eq!(with_bm_b_unset, 1);
+        let ks_b_unset = KafkaServer::default();
+        let broker_1 = ks_b_unset.get_or_generate_broker_id(bm_b1).unwrap();
+        assert_eq!(broker_1, 1);
+        // NOTE: We cannot test with both KafaServer.config.broker_id being -1 and
+        // BrokerMetadata.broker_id being -1 because that actually requires calling zookeeper
     }
 }

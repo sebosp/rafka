@@ -40,6 +40,8 @@ pub enum KafkaZkClientError {
     ClusterIdDeleted,
     #[error("Failed to parse the cluster id json {0:?}")]
     ClusterIdDeserialize(#[from] serde_json::Error),
+    #[error("Failed to generate broker.id due to {0:?}")]
+    BrokerIdGenerate(String),
 }
 
 #[derive(Debug)]
@@ -424,6 +426,50 @@ impl KafkaZkClient {
             Ok((data, stat)) => Ok((Some(data), Some(stat))),
         }
     }
+
+    /// Generate a broker id by updating the broker sequence id path in ZK and return the version of
+    /// the path. The version is incremented by one on every update starting from 1.
+    /// @return sequence number as the broker id
+    #[instrument]
+    pub async fn generate_broker_sequence_id(&mut self) -> Result<i32, AsyncTaskError> {
+        let broker_sequence_id_path = self.zk_data.broker_sequence_id.path().to_owned();
+        trace!("Setting Broker Sequence ID  in path: {}", broker_sequence_id_path);
+        match self.zoo_keeper_client.set_data(&broker_sequence_id_path, vec![], None).await {
+            Ok(stat) => {
+                trace!("Successfully set Broker Sequence ID, stat: {:?}", stat);
+                Ok(stat.version)
+            },
+            Err(err) => {
+                if let Some(err) = err.source() {
+                    if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
+                        match zk_err {
+                            zookeeper_async::ZkError::NoNode => {
+                                trace!("Broker Sequence ID does not exist, creating");
+                                self.create_looped(
+                                    &broker_sequence_id_path,
+                                    vec![],
+                                    true, /* Fail on exists, so we can capture the error and
+                                           * set the content */
+                                )
+                                .await?;
+                                trace!(
+                                    "Create finished, setting Broker Sequence ID data: {}",
+                                    broker_sequence_id_path
+                                );
+                                let stat = self
+                                    .zoo_keeper_client
+                                    .set_data(&broker_sequence_id_path, vec![], None)
+                                    .await?;
+                                return Ok(stat.version);
+                            },
+                            _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeper(*zk_err)),
+                        }
+                    }
+                }
+                Err(err)
+            },
+        }
+    }
 }
 
 /// -----------------------
@@ -446,6 +492,7 @@ pub enum KafkaZkClientAsyncTask {
     RegisterFeatureChange(mpsc::Sender<AsyncTask>),
     Shutdown,
     GetOrGenerateClusterId(oneshot::Sender<String>),
+    GenerateBrokerId(oneshot::Sender<i32>),
 }
 
 #[derive(Debug)]
@@ -505,6 +552,13 @@ impl KafkaZkClientCoordinator {
                         .zoo_keeper_client
                         .register_feature_cache_change(majordomo_tx)
                         .await?
+                },
+                KafkaZkClientAsyncTask::GenerateBrokerId(tx) => {
+                    let result = self.kafka_zk_client.generate_broker_sequence_id().await.unwrap();
+                    if let Err(err) = tx.send(result) {
+                        // RAFKA TODO: should the process die here?
+                        error!("Unable to send back GenerateBrokerId response: {:?}", err);
+                    }
                 },
                 _ => unimplemented!("Task not implemented"),
             }
