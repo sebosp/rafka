@@ -54,7 +54,7 @@ pub struct ZkData {
     /// old consumer path znode
     consumer_path: ConsumerPathZNode,
     config: ConfigZNode,
-    config_types: ConfigType,
+    pub config_types: ConfigType,
     topics: TopicsZNode,
     broker_ids: BrokerIdsZNode,
     delegation_token_auth: DelegationTokenAuthZNode,
