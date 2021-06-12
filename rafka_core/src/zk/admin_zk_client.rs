@@ -18,7 +18,8 @@ pub struct AdminZkClient {
 }
 
 impl AdminZkClient {
-    pub fn new(tx: mpsc::Sender<AsyncTask>, zk_data: ZkData) -> Self {
+    pub fn new(tx: mpsc::Sender<AsyncTask>) -> Self {
+        let zk_data = ZkData::default();
         Self { tx, zk_data }
     }
 
@@ -28,6 +29,6 @@ impl AdminZkClient {
         sanitized_entity_name: String,
     ) -> String {
         // XXX: This returns Properties
-        KafkaZkClient::getEntityConfigs(tx, root_entity_type, sanitized_entity_name).await?
+        KafkaZkClient::get_entity_configs(tx, root_entity_type, sanitized_entity_name).await?
     }
 }
