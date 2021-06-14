@@ -41,24 +41,37 @@ pub struct DynamicBrokerConfig {
 }
 
 impl DynamicBrokerConfig {
-    fn initialize(kafka_config: KafkaConfig, tx: mpsc::Sender<AsyncTask>) -> Self {
+    pub async fn initialize(
+        kafka_config: KafkaConfig,
+        tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<Self, AsyncTaskError> {
         let admin_zk_client = AdminZkClient::new(tx.clone());
         let zk_data = ZkData::default();
         let mut res = DynamicBrokerConfig { kafka_config };
-        let entity_conf_kv = admin_zk_client
-            .fetch_entity_config(zk_data.config_types.broker, ConfigEntityName::default().default);
-        res.update_default_config(entity_conf_kv.0, entity_conf_kv.1);
-        let prop_kv = admin_zk_client
-            .fetch_entity_config(zk_data.config_types.broker, kafka_config.broker_id.to_string());
-        res.update_broker_config(kafka_config.broker_id, prop_kv.0, prop_kv.1);
-        res
+        let (entity_conf_key, entity_conf_value) = admin_zk_client
+            .fetch_entity_config(
+                zk_data.config_types.broker,
+                ConfigEntityName::default().default.to_string(),
+            )
+            .await?;
+        res.update_default_config(entity_conf_key, entity_conf_value);
+        let (prop_key, prop_value) = admin_zk_client
+            .fetch_entity_config(zk_data.config_types.broker, kafka_config.broker_id.to_string())
+            .await?;
+        res.update_broker_config(kafka_config.broker_id, prop_key, prop_value)?;
+        Ok(res)
     }
 
-    fn update_default_config(&mut self, key: String, value: String) {
+    fn update_default_config(&mut self, key: String, value: String) -> Result<(), AsyncTaskError> {
         unimplemented!()
     }
 
-    fn update_broker_config(&mut self, broker_id: i32, key: String, value: String) {
+    fn update_broker_config(
+        &mut self,
+        broker_id: i32,
+        key: String,
+        value: String,
+    ) -> Result<(), AsyncTaskError> {
         unimplemented!()
     }
 }
