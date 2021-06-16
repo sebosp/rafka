@@ -191,6 +191,38 @@ impl ConfigEntityTypeZNode {
     }
 }
 
+#[derive(Debug, SubZNodeHandle)]
+pub struct ConfigEntityZNode(ZNode);
+impl ConfigEntityZNode {
+    pub fn build(config_znode: &ConfigZNode, entity_type: &str, entity_name: &str) -> Self {
+        let config_entity_path =
+            ConfigEntityTypeZNode::build(config_znode, entity_type).path().to_string();
+        Self(ZNode { path: format!("{}/{}", config_entity_path, entity_name) })
+    }
+
+    pub fn encode(config: HashMap<String, String>) -> Vec<u8> {
+        // RAFKA NOTE: This is asJava, how much could this change?
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "config": config
+        }))
+        .unwrap()
+    }
+
+    pub fn decode(bytes: Vec<u8>) -> Result<HashMap<String, String>, serde_json::Error> {
+        let res = HashMap::new();
+        if bytes.len() > 0 {
+            let res: serde_json::Value = serde_json::from_slice(&bytes)?;
+            // Json.parseBytes(bytes).foreach { js =>
+            // val configOpt =
+            // js.asJsonObjectOption.flatMap(_.get("config").flatMap(_.asJsonObjectOption))
+            // configOpt.foreach(config => config.iterator.foreach { case (k, v) =>
+            // props.setProperty(k, v.to[String]) }) }
+        }
+        Ok(res)
+    }
+}
+
 // source line: 382
 #[derive(Debug, SubZNodeHandle)]
 pub struct ConfigEntityChangeNotificationZNode(ZNode);
