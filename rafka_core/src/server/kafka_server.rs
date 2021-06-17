@@ -7,6 +7,7 @@
 use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
+use crate::server::dynamic_broker_config::DynamicBrokerConfig;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
 use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
@@ -102,9 +103,7 @@ pub struct KafkaServer {
 
     pub metadata_cache: Option<MetadataCache>, // was null, changed to Option<>
     pub init_time: Instant,
-    pub zk_client_config: ZKClientConfig, /* = KafkaServer.
-                                           * zkClientConfigFromKafkaConfig(config).
-                                           * getOrElse(new ZKClientConfig()) */
+    pub zk_client_config: ZKClientConfig,
     _zk_client: KafkaZkClient,
 
     pub correlation_id: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
@@ -116,8 +115,7 @@ pub struct KafkaServer {
 
     feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
                                                                       * Option<> */
-    pub kafka_config: KafkaConfig,
-
+    dynamic_broker_config: DynamicBrokerConfig,
     /// `async_task_tx` contains a handle to send taskt to the majordomo async_coordinator
     pub async_task_tx: mpsc::Sender<AsyncTask>,
 
@@ -137,7 +135,7 @@ impl Default for KafkaServer {
         // TODO: Consider removing this implementation in favor of new() as the channel is basically
         // unusable, maybe this is usable for testing
         let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let (main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -157,7 +155,7 @@ impl Default for KafkaServer {
             admin_manager: None,
             token_manager: None,
             dynamic_config_handlers: HashMap::new(),
-            dynamic_config_manager: DynamicConfigManager::default(),
+            dynamic_config_manager: DynamicConfigManager::new(main_tx),
             group_coordinator: None,
             transaction_coordinator: None,
             kafka_controller: None,
@@ -172,7 +170,7 @@ impl Default for KafkaServer {
             _broker_topic_stats: None,
             feature_change_listener: None,
             init_time: Instant::now(),
-            kafka_config: KafkaConfig::default(),
+            dynamic_broker_config: DynamicBrokerConfig::default(),
             async_task_tx: majordomo_tx,
             rx: main_rx,
         }
@@ -202,7 +200,7 @@ impl KafkaServer {
                 .insert(bmc_log_dir.clone(), BrokerMetadataCheckpoint::new(&filename));
         }
         kafka_server.init_time = time;
-        kafka_server.kafka_config = config;
+        kafka_server.dynamic_broker_config = DynamicBrokerConfig::new(config);
         kafka_server
     }
 
@@ -250,9 +248,13 @@ impl KafkaServer {
                 )));
             }
         }
-        self.kafka_config.broker_id =
+        self.dynamic_broker_config.kafka_config.broker_id =
             self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint).await?;
-        debug!("KafkaServer id = {}", self.kafka_config.broker_id);
+        debug!("KafkaServer id = {}", self.dynamic_broker_config.kafka_config.broker_id);
+
+        // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
+        // applied after DynamicConfigManager starts.
+        self.dynamic_broker_config.initialize(self.async_task_tx.clone());
         //}
         Ok(())
     }
@@ -271,7 +273,7 @@ impl KafkaServer {
         let mut broker_metadata_found = String::from("");
         let mut offline_dirs: Vec<String> = vec![];
 
-        for log_dir in &self.kafka_config.log_dirs {
+        for log_dir in &self.dynamic_broker_config.kafka_config.log_dirs {
             if let Some(checkpoint_dir) = self.broker_metadata_checkpoints.get(log_dir) {
                 match checkpoint_dir.read() {
                     Ok(res) => {
