@@ -8,7 +8,7 @@ use rafka_derive::{SubZNodeHandle, ZNodeHandle};
 use serde_json::json;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use tracing::{debug, error};
+use tracing::{debug, error, trace, warn};
 use zookeeper_async::Acl;
 // NOTE: Maybe all of this could be moved into a hashmap or something?
 
@@ -212,12 +212,46 @@ impl ConfigEntityZNode {
     pub fn decode(bytes: Vec<u8>) -> Result<HashMap<String, String>, serde_json::Error> {
         let res = HashMap::new();
         if bytes.len() > 0 {
-            let res: serde_json::Value = serde_json::from_slice(&bytes)?;
-            // Json.parseBytes(bytes).foreach { js =>
-            // val configOpt =
-            // js.asJsonObjectOption.flatMap(_.get("config").flatMap(_.asJsonObjectOption))
-            // configOpt.foreach(config => config.iterator.foreach { case (k, v) =>
-            // props.setProperty(k, v.to[String]) }) }
+            let parsed_json: serde_json::Value = serde_json::from_slice(&bytes)?;
+            match parsed_json {
+                serde_json::Value::Object(map) => match map.get(&String::from("config")) {
+                    Some(val) => {
+                        match val {
+                            serde_json::Value::Object(val) => {
+                                for (key, value) in val {
+                                    match value {
+                                        serde_json::Value::String(value) => {
+                                            trace!("Inserting key: {} -> value {}", key, value);
+                                            res.insert(key.to_string(), value.to_string());
+                                        },
+                                        _ => warn!(
+                                            "value type is not of type String(String), input: {:?}",
+                                            bytes
+                                        ),
+                                    };
+                                }
+                            },
+                            _ => warn!(
+                                "config key does not contain an Object(Map<String, Value). input: \
+                                 {:?}",
+                                bytes
+                            ),
+                        };
+                    },
+                    None => {
+                        warn!(
+                            "Unable to find .config key on the ConfigEntityZNode json, input: {:?}",
+                            bytes
+                        );
+                    },
+                },
+                _ => {
+                    error!(
+                        "ConfigEntityZNode does not contain Object(Map<String, Value). input: {:?}",
+                        bytes
+                    );
+                },
+            }
         }
         Ok(res)
     }
