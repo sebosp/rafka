@@ -79,7 +79,7 @@ impl ConfigType {
 
 #[derive(Debug)]
 pub struct ConfigEntityName {
-    default: &'static str,
+    pub default: &'static str,
 }
 impl Default for ConfigEntityName {
     fn default() -> Self {
