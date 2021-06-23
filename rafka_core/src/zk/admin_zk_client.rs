@@ -6,9 +6,10 @@
 //! This is an internal class and no compatibility guarantees are provided,
 //! see org.apache.kafka.clients.admin.AdminClient for publicly supported APIs.
 
-use crate::majordomo::AsyncTask;
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::zk::kafka_zk_client::KafkaZkClient;
-use crate::zk::zk_data::ZkData;
+use crate::zk::zk_data::{ConfigEntityZNode, ZkData};
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 #[derive(Debug)]
@@ -24,11 +25,16 @@ impl AdminZkClient {
     }
 
     pub async fn fetch_entity_config(
-        &mut self,
-        root_entity_type: String,
-        sanitized_entity_name: String,
-    ) -> String {
-        // XXX: This returns Properties
-        KafkaZkClient::get_entity_configs(tx, root_entity_type, sanitized_entity_name).await?
+        &self,
+        root_entity_type: &str,
+        sanitized_entity_name: &str,
+    ) -> Result<HashMap<String, String>, AsyncTaskError> {
+        let entity_data = KafkaZkClient::get_entity_configs(
+            self.tx.clone(),
+            root_entity_type,
+            sanitized_entity_name,
+        )
+        .await?;
+        Ok(ConfigEntityZNode::decode(entity_data)?)
     }
 }
