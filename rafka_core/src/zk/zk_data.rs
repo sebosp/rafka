@@ -209,8 +209,12 @@ impl ConfigEntityZNode {
         .unwrap()
     }
 
-    pub fn decode(bytes: Vec<u8>) -> Result<HashMap<String, String>, serde_json::Error> {
-        let res = HashMap::new();
+    pub fn decode(bytes: Option<Vec<u8>>) -> Result<HashMap<String, String>, ZNodeDecodeError> {
+        let mut res = HashMap::new();
+        if bytes.is_none() {
+            return Ok(res);
+        }
+        let bytes = bytes.unwrap();
         if bytes.len() > 0 {
             let parsed_json: serde_json::Value = serde_json::from_slice(&bytes)?;
             match parsed_json {
