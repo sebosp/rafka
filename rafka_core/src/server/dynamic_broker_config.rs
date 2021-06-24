@@ -33,6 +33,7 @@ use crate::server::dynamic_config_manager::ConfigEntityName;
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::admin_zk_client::AdminZkClient;
 use crate::zk::zk_data::ZkData;
+use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -54,32 +55,34 @@ impl DynamicBrokerConfig {
     pub async fn initialize(&mut self, tx: mpsc::Sender<AsyncTask>) -> Result<(), AsyncTaskError> {
         let admin_zk_client = AdminZkClient::new(tx.clone());
         let zk_data = ZkData::default();
-        let (entity_conf_key, entity_conf_value) = admin_zk_client
+        let entity_props = admin_zk_client
             .fetch_entity_config(
-                zk_data.config_types.broker,
-                ConfigEntityName::default().default.to_string(),
+                &zk_data.config_types.broker,
+                &ConfigEntityName::default().default.to_string(),
             )
             .await?;
-        self.update_default_config(entity_conf_key, entity_conf_value);
-        let (prop_key, prop_value) = admin_zk_client
+        self.update_default_config(entity_props)?;
+        let props = admin_zk_client
             .fetch_entity_config(
-                zk_data.config_types.broker,
-                self.kafka_config.broker_id.to_string(),
+                &zk_data.config_types.broker,
+                &self.kafka_config.broker_id.to_string(),
             )
             .await?;
-        self.update_broker_config(self.kafka_config.broker_id, prop_key, prop_value)?;
+        self.update_broker_config(self.kafka_config.broker_id, props)?;
         Ok(())
     }
 
-    fn update_default_config(&mut self, key: String, value: String) -> Result<(), AsyncTaskError> {
+    fn update_default_config(
+        &mut self,
+        props: HashMap<String, String>,
+    ) -> Result<(), AsyncTaskError> {
         unimplemented!()
     }
 
     fn update_broker_config(
         &mut self,
         broker_id: i32,
-        key: String,
-        value: String,
+        props: HashMap<String, String>,
     ) -> Result<(), AsyncTaskError> {
         unimplemented!()
     }
