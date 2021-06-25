@@ -35,6 +35,6 @@ impl AdminZkClient {
             sanitized_entity_name,
         )
         .await?;
-        Ok(ConfigEntityZNode::decode(entity_data)?)
+        Ok(ConfigEntityZNode::decode(entity_data).unwrap())
     }
 }
