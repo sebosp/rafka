@@ -7,7 +7,6 @@ use fs_err::File;
 use std::collections::HashMap;
 use std::io::{self, BufReader};
 use std::num;
-use std::str::FromStr;
 use thiserror::Error;
 use tracing::debug;
 
