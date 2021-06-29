@@ -173,15 +173,6 @@ impl KafkaConfigProperties {
         Ok(())
     }
 
-    //   ZOOKEEPER_CONNECT_PROP => Ok(self.zk_connect.get_value()),
-    //   ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(self.zk_session_timeout_ms.get_value()),
-    //   ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(self.zk_connection_timeout_ms.get_value()),
-    //   LOG_DIR_PROP => Ok(self.log_dir.get_value()),
-    //   LOG_DIRS_PROP => Ok(self.log_dirs.get_value()),
-    //   BROKER_ID_GENERATION_ENABLED_PROP => Ok(self.broker_id_generation_enable.get_value()),
-    //   RESERVED_BROKER_MAX_ID_PROP => Ok(self.reserved_broker_max_id.get_value()),
-    //   BROKER_ID_PROP => Ok(self.broker_id.get_value()),
-    //
     /// Transforms from a HashMap of configs into a KafkaConfigProperties object
     /// This may return KafkaConfigError::UnknownKey errors
     pub fn from_properties_hashmap(
