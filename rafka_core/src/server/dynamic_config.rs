@@ -3,6 +3,7 @@
 /// RAFKA NOTES:
 /// - The properties are LONG and must be at least 0. They have been set as u64 here.
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use crate::server::kafka_config::KafkaConfigError;
 use crate::server::replication_quota_manager::ReplicationQuotaManagerConfig;
 
 pub const LEADER_REPLICATION_THROTTLED_RATE_PROP: &str = "leader.replication.throttled.rate";
@@ -63,5 +64,28 @@ impl Default for NonDynamicBrokerConfigs {
                      accurate behaviour.",
                 )),
         }
+    }
+}
+
+impl NonDynamicBrokerConfigs {
+    /// `try_from_config_property` transforms a string value from the config into our actual types
+    pub fn try_set_property(
+        &mut self,
+        property_name: &str,
+        property_value: &str,
+    ) -> Result<(), KafkaConfigError> {
+        match property_name {
+            LEADER_REPLICATION_THROTTLED_RATE_PROP => {
+                self.leader_replication_throttled_rate_prop.try_set_parsed_value(property_value)?
+            },
+            FOLLOWER_REPLICATION_THROTTLED_RATE_PROP => self
+                .follower_replication_throttled_rate_prop
+                .try_set_parsed_value(property_value)?,
+            REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP => self
+                .replica_alter_log_dirs_io_max_bytes_per_second_prop
+                .try_set_parsed_value(property_value)?,
+            _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
+        }
+        Ok(())
     }
 }
