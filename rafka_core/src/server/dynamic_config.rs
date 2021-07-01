@@ -3,7 +3,7 @@
 /// RAFKA NOTES:
 /// - The properties are LONG and must be at least 0. They have been set as u64 here.
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
-use crate::server::kafka_config::KafkaConfigError;
+use crate::server::kafka_config::{KafkaConfigError, KafkaConfigProperties};
 use crate::server::replication_quota_manager::ReplicationQuotaManagerConfig;
 
 pub const LEADER_REPLICATION_THROTTLED_RATE_PROP: &str = "leader.replication.throttled.rate";
@@ -16,19 +16,32 @@ pub struct DynamicConfig {
     broker: BrokerConfigs,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BrokerConfigs {
-    non_dynamic_props: NonDynamicBrokerConfigs,
+    dynamic_props: DynamicBrokerConfigs,
+    non_dynamic_configs: Vec<String>,
+}
+
+impl Default for BrokerConfigs {
+    fn default() -> Self {
+        // Get the KafkaConfigProperties and remove the DynamicBrokerConfigs (in case they are by
+        // mistake maybe added?)
+        let mut configs = KafkaConfigProperties::config_names();
+        for dynamic_conf in DynamicBrokerConfigs::config_names() {
+            static_configs.drain_filter(|x| *x == dynamic_conf).collect::<Vec<_>>();
+        }
+        Self { dynamic_props: DynamicBrokerConfigs::default(), non_dynamic_configs }
+    }
 }
 
 #[derive(Debug)]
-pub struct NonDynamicBrokerConfigs {
+pub struct DynamicBrokerConfigs {
     leader_replication_throttled_rate_prop: ConfigDef<u64>,
     follower_replication_throttled_rate_prop: ConfigDef<u64>,
     replica_alter_log_dirs_io_max_bytes_per_second_prop: ConfigDef<u64>,
 }
 
-impl Default for NonDynamicBrokerConfigs {
+impl Default for DynamicBrokerConfigs {
     fn default() -> Self {
         Self {
             leader_replication_throttled_rate_prop: ConfigDef::default()
@@ -67,7 +80,7 @@ impl Default for NonDynamicBrokerConfigs {
     }
 }
 
-impl NonDynamicBrokerConfigs {
+impl DynamicBrokerConfigs {
     /// `try_from_config_property` transforms a string value from the config into our actual types
     pub fn try_set_property(
         &mut self,
@@ -87,5 +100,15 @@ impl NonDynamicBrokerConfigs {
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         }
         Ok(())
+    }
+
+    /// `config_names` returns a list of config keys used by KafkaConfigProperties
+    pub fn config_names() -> Vec<String> {
+        // TODO: This should be derivable somehow too.
+        vec![
+            LEADER_REPLICATION_THROTTLED_RATE_PROP,
+            FOLLOWER_REPLICATION_THROTTLED_RATE_PROP,
+            REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP,
+        ]
     }
 }
