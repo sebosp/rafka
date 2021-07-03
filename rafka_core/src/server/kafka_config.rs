@@ -20,6 +20,9 @@ pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
 pub const BROKER_ID_PROP: &str = "broker.id";
 pub const ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS: &str = "zookeeper.max.in.flight.requests";
 
+// RAFKA TODO: Since ConfigDef was moved, maybe this ConfigError should be moved there and be
+// generalized?
+
 /// `KafkaConfigError` is a custom error that is returned when properties are invalid, unknown,
 /// missing or the config file is not readable.
 #[derive(Error, Debug)]
@@ -171,6 +174,21 @@ impl KafkaConfigProperties {
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         };
         Ok(())
+    }
+
+    /// `config_names` returns a list of config keys used by KafkaConfigProperties
+    pub fn config_names() -> Vec<String> {
+        // TODO: This should be derivable somehow too.
+        vec![
+            ZOOKEEPER_CONNECT_PROP,
+            ZOOKEEPER_SESSION_TIMEOUT_PROP,
+            ZOOKEEPER_CONNECTION_TIMEOUT_PROP,
+            LOG_DIR_PROP,
+            LOG_DIRS_PROP,
+            BROKER_ID_GENERATION_ENABLED_PROP,
+            RESERVED_BROKER_MAX_ID_PROP,
+            BROKER_ID_PROP,
+        ]
     }
 
     /// Transforms from a HashMap of configs into a KafkaConfigProperties object
