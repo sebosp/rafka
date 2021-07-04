@@ -1,7 +1,7 @@
 /// Core Kafka Config
 /// core/src/main/scala/kafka/server/KafkaConfig.scala
 /// Changes:
-/// - No SSL for now.
+/// - No SSL, no SASL
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use fs_err::File;
 use std::collections::HashMap;
@@ -10,14 +10,21 @@ use std::num;
 use thiserror::Error;
 use tracing::debug;
 
-pub const ZOOKEEPER_CONNECT_PROP: &str = "zookeeper.connect";
-pub const ZOOKEEPER_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
-pub const ZOOKEEPER_CONNECTION_TIMEOUT_PROP: &str = "zookeeper.connection.timeout.ms";
+// Log section
 pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_DIRS_PROP: &str = "log.dirs";
+// General section
 pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
 pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
 pub const BROKER_ID_PROP: &str = "broker.id";
+// Socket server section
+pub const LISTENERS_PROP: &str = "listeners";
+pub const ADVERTISED_LISTENERS_PROP: &str = "advertised.listeners";
+pub const MAX_CONNECTIONS_PROP: &str = "max.connections";
+// Zookeeper section
+pub const ZOOKEEPER_CONNECT_PROP: &str = "zookeeper.connect";
+pub const ZOOKEEPER_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
+pub const ZOOKEEPER_CONNECTION_TIMEOUT_PROP: &str = "zookeeper.connection.timeout.ms";
 pub const ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS: &str = "zookeeper.max.in.flight.requests";
 
 // RAFKA TODO: Since ConfigDef was moved, maybe this ConfigError should be moved there and be
@@ -82,6 +89,7 @@ pub struct KafkaConfigProperties {
     reserved_broker_max_id: ConfigDef<i32>,
     broker_id: ConfigDef<i32>,
     zk_max_in_flight_requests: ConfigDef<u32>,
+    advertised_listeners: ConfigDef<String>,
 }
 
 impl Default for KafkaConfigProperties {
@@ -137,6 +145,14 @@ impl Default for KafkaConfigProperties {
                 .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
                 .with_default(String::from("1000")),
             broker_id: ConfigDef::default()
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(
+                    format!("The broker id for this server. If unset, a unique broker id will be generated. \
+                     To avoid conflicts between zookeeper generated broker id's and user configured \
+                     broker id's, generated broker ids start from {} + 1.", RESERVED_BROKER_MAX_ID_PROP),
+                )
+                .with_default(String::from("-1")),
+            advertised_listeners: ConfigDef::default()
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(
                     format!("The broker id for this server. If unset, a unique broker id will be generated. \
