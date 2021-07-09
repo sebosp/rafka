@@ -55,8 +55,10 @@ fn listener_config_regex_captures(text: &str) -> Option<String> {
 pub struct DynamicBrokerConfig {
     pub kafka_config: KafkaConfig,
     dynamic_default_configs: HashMap<String, String>,
+    dynamic_broker_configs: HashMap<String, String>,
     per_broker_configs: Vec<String>,
     cluster_level_listener_configs: Vec<String>,
+    static_broker_configs: HashMap<String, String>,
 }
 
 impl DynamicBrokerConfig {
@@ -69,8 +71,12 @@ impl DynamicBrokerConfig {
         Self {
             kafka_config,
             dynamic_default_configs: HashMap::new(),
+            dynamic_broker_configs: HashMap::new(),
             per_broker_configs,
             cluster_level_listener_configs,
+            // In the original code, originalsFromThisConfig is located in KafkaConfig and is used
+            // only in DynamicBrokerConfig
+            static_broker_configs: HashMap::new(),
         }
     }
 
@@ -249,4 +255,12 @@ impl DynamicListenerConfig {
             kafka_config::MAX_CONNECTIONS_PROP.to_string(),
         ]
     }
+}
+
+pub trait BrokerReconfigurable {
+    fn reconfigurable_configs() -> Vec<String>;
+
+    fn validate_reconfiguration(new_config: KafkaConfig);
+
+    fn reconfigure(old_config: KafkaConfig, new_config: KafkaConfig);
 }
