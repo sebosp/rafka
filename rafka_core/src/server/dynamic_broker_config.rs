@@ -30,7 +30,6 @@
 ///   [[kafka.server.KafkaConfig]].
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::dynamic_config::{DynamicBrokerConfigDefs, DynamicConfig};
-use crate::server::dynamic_config_manager::ConfigEntityName;
 use crate::server::kafka_config::{self, KafkaConfig};
 use crate::zk::admin_zk_client::AdminZkClient;
 use crate::zk::zk_data::ZkData;
@@ -83,23 +82,16 @@ impl DynamicBrokerConfig {
     pub async fn initialize(&mut self, tx: mpsc::Sender<AsyncTask>) -> Result<(), AsyncTaskError> {
         let admin_zk_client = AdminZkClient::new(tx.clone());
         let zk_data = ZkData::default();
-        let entity_props = admin_zk_client
-            .fetch_entity_config(
-                &zk_data.config_types.broker,
-                &ConfigEntityName::default().default.to_string(),
-            )
-            .await?;
+        let entity_props = admin_zk_client.fetch_default_broker_config().await?;
         self.update_default_config(entity_props)?;
-        let props = admin_zk_client
-            .fetch_entity_config(
-                &zk_data.config_types.broker,
-                &self.kafka_config.broker_id.to_string(),
-            )
-            .await?;
+        let props =
+            admin_zk_client.fetch_specific_broker_config(self.kafka_config.broker_id).await?;
         self.update_broker_config(self.kafka_config.broker_id, props)?;
         Ok(())
     }
 
+    // Creates a copy of `props` with the basename loaded from the listener.name.<name>.BASE_NAME
+    // and validates its values
     fn validate_config_types(props: &HashMap<String, String>) -> Result<(), String> {
         let base_props: HashMap<String, String> = HashMap::new();
         for (prop_key, prop_value) in props {

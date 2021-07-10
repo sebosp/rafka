@@ -7,6 +7,7 @@
 //! see org.apache.kafka.clients.admin.AdminClient for publicly supported APIs.
 
 use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::server::dynamic_config_manager::ConfigEntityName;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use crate::zk::zk_data::{ConfigEntityZNode, ZkData};
 use std::collections::HashMap;
@@ -24,6 +25,26 @@ impl AdminZkClient {
         Self { tx, zk_data }
     }
 
+    /// Loads the zookeeper path /config/brokers/<default> if exists
+    pub async fn fetch_default_broker_config(
+        &self,
+    ) -> Result<HashMap<String, String>, AsyncTaskError> {
+        self.fetch_entity_config(
+            &self.zk_data.config_types.broker,
+            &ConfigEntityName::default().default.to_string(),
+        )
+        .await
+    }
+
+    /// Loads the zookeeper path /config/brokers/$broker_id if exists
+    pub async fn fetch_specific_broker_config(
+        &self,
+        broker_id: i32,
+    ) -> Result<HashMap<String, String>, AsyncTaskError> {
+        self.fetch_entity_config(&self.zk_data.config_types.broker, &broker_id.to_string()).await
+    }
+
+    /// Loads config hashmaps that are stored in zookeeper
     pub async fn fetch_entity_config(
         &self,
         root_entity_type: &str,
