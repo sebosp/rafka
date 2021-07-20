@@ -1,4 +1,5 @@
-//! Provides higher level Kafka-specific operations on top of the pipelined
+//! Coordinates majordomo requests of type KafkaZkClientAsyncTask, it holds the connection to
+//! zookeeper in its own thread and communicates via channels to callers
 //! [[kafka::zookeeper::ZooKeeperClient]]. ( TODO RAFKA version may not be pipelined?)
 //! core/src/main/scala/kafka/zk/KafkaZkClient.scala
 //!
