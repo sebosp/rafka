@@ -6,6 +6,7 @@ use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::server::kafka_config::{KafkaConfigError, KafkaConfigProperties};
 use crate::server::replication_quota_manager::ReplicationQuotaManagerConfig;
 use std::collections::HashMap;
+use tracing::error;
 
 pub const LEADER_REPLICATION_THROTTLED_RATE_PROP: &str = "leader.replication.throttled.rate";
 pub const FOLLOWER_REPLICATION_THROTTLED_RATE_PROP: &str = "follower.replication.throttled.rate";
@@ -114,7 +115,33 @@ impl DynamicBrokerConfigDefs {
         ]
     }
 
-    pub fn validate(props: HashMap<String, String>) -> Result<(), String> {
-        unimplemented!()
+    pub fn validate(props: HashMap<String, String>) -> Result<(), KafkaConfigError> {
+        //Validate Names
+        let names = Self::config_names();
+        let custom_props_allowed = true;
+        if !custom_props_allowed {
+            let unknown_keys: Vec<String> = props.keys().filter(|x| names.contains(x)).map(|x| x.to_string()).collect();
+            if ! unknown_keys.is_empty() {
+                error!("Unknown Dynamic Configuration: {:?}.", unknown_keys);
+                // Fail early with the latest failed key. the error line above would show all the
+                // keys so operator needs to check the logs
+                return Err(KafkaConfigError::UnknownKey(unknown_keys.first().unwrap().to_string()));
+            }
+        }
+        let prop_resolved = DynamicBrokerConfig::resolve_variable_configs(props)
+        //ValidateValues
+        let mut test = Self::default();
+        let mut last_invalid_settings: Option<KafkaConfigError> = None;
+        for (prop_key, prop_value) in prop_resolved{
+            if let Err(err) = test.try_set_property(prop_key, prop_value) {
+                error!("Invalid key: '{}' with value '{}': {:?}", prop_key, prop_value, err);
+                last_invalid_settings = Some(err);
+            }
+        }
+        // DynamicConfig::validate(Self???, props, custom_props_allowed = true)
+        match last_invalid_settings {
+            Some(val) => Err(val),
+            None => Ok(())
+        }
     }
 }
