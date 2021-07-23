@@ -30,9 +30,8 @@
 ///   [[kafka.server.KafkaConfig]].
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::dynamic_config::{DynamicBrokerConfigDefs, DynamicConfig};
-use crate::server::kafka_config::{self, KafkaConfig};
+use crate::server::kafka_config::{self, KafkaConfig, KafkaConfigError};
 use crate::zk::admin_zk_client::AdminZkClient;
-use crate::zk::zk_data::ZkData;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashMap;
@@ -81,18 +80,17 @@ impl DynamicBrokerConfig {
 
     pub async fn initialize(&mut self, tx: mpsc::Sender<AsyncTask>) -> Result<(), AsyncTaskError> {
         let admin_zk_client = AdminZkClient::new(tx.clone());
-        let zk_data = ZkData::default();
-        let entity_props = admin_zk_client.fetch_default_broker_config().await?;
-        self.update_default_config(entity_props)?;
+        let default_broker_config = admin_zk_client.fetch_default_broker_config().await?;
+        self.update_default_config(default_broker_config)?;
         let props =
             admin_zk_client.fetch_specific_broker_config(self.kafka_config.broker_id).await?;
         self.update_broker_config(self.kafka_config.broker_id, props)?;
         Ok(())
     }
 
-    // Creates a copy of `props` with the basename loaded from the listener.name.<name>.BASE_NAME
-    // and validates its values
-    fn validate_config_types(props: &HashMap<String, String>) -> Result<(), String> {
+    /// `validate_config_types` Creates a copy of `props` with the basename loaded from the
+    /// listener.name.<name>.BASE_NAME and validates its values
+    fn validate_config_types(props: &HashMap<String, String>) -> Result<(), KafkaConfigError> {
         let base_props: HashMap<String, String> = HashMap::new();
         for (prop_key, prop_value) in props {
             if let Some(base_name) = listener_config_regex_captures(prop_key) {
@@ -101,7 +99,8 @@ impl DynamicBrokerConfig {
                 base_props.insert(prop_key.to_string(), prop_value.to_string());
             }
         }
-        DynamicBrokerConfigDefs::validate(base_props)
+        DynamicBrokerConfigDefs::validate(base_props)?;
+        Ok(())
     }
 
     /// `remove_invalid_configs` ignores config keys that are invalid and returns a HashMap of
@@ -111,7 +110,7 @@ impl DynamicBrokerConfig {
         per_broker_config: bool,
     ) -> HashMap<String, String> {
         match Self::validate_config_types(&props) {
-            Ok(()) => props,
+            Ok(_) => props,
             Err(err) => {
                 let valid_props = props.clone();
                 let invalid_props = HashMap::new();
@@ -225,6 +224,84 @@ impl DynamicBrokerConfig {
         props
     }
 
+    fn broker_config_synonyms(key: &str, match_listener_override: bool) -> Vec<String> {
+        unimplemented!();
+    }
+
+    /// Updates the values in `props` with the new values from `props_override`.
+    /// The Synonyms of updated configs are removed from `props` so that config with higher
+    /// precedence is applied. For instance, generally `log.roll.ms` takes precedence over
+    /// `log.roll.hours` if configured in the same context, but, if:
+    /// 1 - server.properties contains `log.roll.ms`
+    /// 2 - dynamic config sets `log.roll.hours`
+    /// Then:
+    /// 1 - `log.roll.hours` from the dynamic configuration will be used
+    /// 2 - `log.roll.ms` will be removed from `props`
+    fn override_props(
+        self,
+        props: &mut HashMap<String, String>,
+        props_override: HashMap<String, String>,
+    ) {
+        for (override_key, override_value) in props_override {
+            // TODO: disable `matchListenerOverride` so that base configs corresponding to listener
+            // configs are not removed. TODO: Base configs should not be removed since
+            // they may be used by other listeners. It is ok to retain them in `props`
+            // since base configs cannot be dynamically updated and listener-specific configs have
+            // the higher precedence.
+            for synonym in Self::broker_config_synonyms(&override_key, false) {
+                props.remove(&synonym);
+            }
+            props.insert(override_key, override_value);
+        }
+    }
+
+    fn process_reconfiguration(
+        self,
+        new_props: HashMap<String, String>,
+        validate_only: bool,
+    ) -> (KafkaConfig, ()) {
+        unimplemented!();
+    }
+
+    fn update_current_config(&mut self) -> Result<(), String> {
+        let mut new_props = self.static_broker_configs.clone();
+        self.override_props(&mut new_props, self.dynamic_default_configs);
+        self.override_props(&mut new_props, self.dynamic_broker_configs);
+        let old_config = self.kafka_config.clone();
+        let (new_config, broker_reconfigurables_to_update) =
+            self.process_reconfiguration(new_props, false);
+        if new_config != self.kafka_config {
+            current_config = new_config;
+
+            for reconfigurable in broker_reconfigurables_to_update {
+                reconfigurable.reconfigure(old_config, new_config)
+            }
+        }
+        Ok(())
+    }
+
+    fn update_default_config(
+        &mut self,
+        persistent_props: HashMap<String, String>,
+    ) -> Result<(), AsyncTaskError> {
+        let props = self.from_persistent_props(persistent_props, false);
+        self.dynamic_default_configs.clear();
+        for (prop_key, prop_value) in props {
+            self.dynamic_default_configs.insert(prop_key, prop_value);
+        }
+        match self.update_current_config() {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                // RAFKA TODO: Is this an AsyncTaskError ? Who should act on it?
+                error!(
+                    "Cluster default configs could not be applied: {:?}: {:?}",
+                    persistent_props, err
+                );
+                Ok(())
+            },
+        }
+    }
+
     fn update_broker_config(
         &mut self,
         broker_id: i32,
@@ -250,9 +327,9 @@ impl DynamicListenerConfig {
 }
 
 pub trait BrokerReconfigurable {
-    fn reconfigurable_configs() -> Vec<String>;
+    fn reconfigurable_configs(&self) -> Vec<String>;
 
-    fn validate_reconfiguration(new_config: KafkaConfig);
+    fn validate_reconfiguration(&self, new_config: KafkaConfig);
 
-    fn reconfigure(old_config: KafkaConfig, new_config: KafkaConfig);
+    fn reconfigure(&self, old_config: KafkaConfig, new_config: KafkaConfig);
 }
