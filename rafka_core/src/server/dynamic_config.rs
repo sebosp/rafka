@@ -31,7 +31,7 @@ impl Default for BrokerConfigs {
         let configs = KafkaConfigProperties::config_names();
         let dynamic_conf = DynamicBrokerConfigDefs::config_names();
         let (_, non_dynamic_props): (Vec<_>, Vec<_>) =
-            configs.into_iter().partition(|&e| dynamic_conf.contains(&e));
+            configs.into_iter().partition(|e| dynamic_conf.contains(&e));
 
         Self { dynamic_props: DynamicBrokerConfigDefs::default(), non_dynamic_props }
     }
@@ -116,24 +116,26 @@ impl DynamicBrokerConfigDefs {
     }
 
     pub fn validate(props: HashMap<String, String>) -> Result<(), KafkaConfigError> {
-        //Validate Names
+        // Validate Names
         let names = Self::config_names();
         let custom_props_allowed = true;
         if !custom_props_allowed {
-            let unknown_keys: Vec<String> = props.keys().filter(|x| names.contains(x)).map(|x| x.to_string()).collect();
-            if ! unknown_keys.is_empty() {
+            let unknown_keys: Vec<String> =
+                props.keys().filter(|x| names.contains(x)).map(|x| x.to_string()).collect();
+            if !unknown_keys.is_empty() {
                 error!("Unknown Dynamic Configuration: {:?}.", unknown_keys);
                 // Fail early with the latest failed key. the error line above would show all the
                 // keys so operator needs to check the logs
-                return Err(KafkaConfigError::UnknownKey(unknown_keys.first().unwrap().to_string()));
+                return Err(KafkaConfigError::UnknownKey(
+                    unknown_keys.first().unwrap().to_string(),
+                ));
             }
         }
-        let prop_resolved = DynamicBrokerConfig::resolve_variable_configs(props)
-        //ValidateValues
+        // ValidateValues
         let mut test = Self::default();
         let mut last_invalid_settings: Option<KafkaConfigError> = None;
-        for (prop_key, prop_value) in prop_resolved{
-            if let Err(err) = test.try_set_property(prop_key, prop_value) {
+        for (prop_key, prop_value) in props {
+            if let Err(err) = test.try_set_property(&prop_key, &prop_value) {
                 error!("Invalid key: '{}' with value '{}': {:?}", prop_key, prop_value, err);
                 last_invalid_settings = Some(err);
             }
@@ -141,7 +143,7 @@ impl DynamicBrokerConfigDefs {
         // DynamicConfig::validate(Self???, props, custom_props_allowed = true)
         match last_invalid_settings {
             Some(val) => Err(val),
-            None => Ok(())
+            None => Ok(()),
         }
     }
 }

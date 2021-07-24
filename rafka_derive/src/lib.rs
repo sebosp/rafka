@@ -6,12 +6,6 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 // use proc_macro2::Span;
 use quote::quote;
-use syn::{
-    parse_macro_input, Attribute, Data, DataStruct, DeriveInput, Error, Ident, LitStr, Result,
-};
-
-struct ConfigProperty(&'static str);
-const PROPERTY: ConfigProperty = ConfigProperty("Property");
 
 /// A ZNode handle gets the `path` from a ZNode
 fn impl_znode_data_macro(ast: &syn::DeriveInput) -> TokenStream {

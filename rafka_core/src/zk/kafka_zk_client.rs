@@ -84,7 +84,7 @@ impl KafkaZkClient {
     pub fn build(
         zk_connect: &str,
         kafka_config: &KafkaConfig,
-        name: Option<String>,
+        _name: Option<String>,
         time: std::time::Instant,
         zk_client_config: Option<ZKClientConfig>,
     ) -> Self {
@@ -93,8 +93,8 @@ impl KafkaZkClient {
             kafka_config.zk_session_timeout_ms,
             kafka_config.zk_connection_timeout_ms,
             kafka_config.zk_max_in_flight_requests,
-            time,
-            name,
+            // time,
+            // name,
             zk_client_config,
         );
         KafkaZkClient::new(zoo_keeper_client, time)

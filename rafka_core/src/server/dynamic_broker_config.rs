@@ -65,7 +65,7 @@ impl DynamicBrokerConfig {
         let (_, per_broker_configs): (Vec<_>, Vec<_>) =
             DynamicListenerConfig::reconfigurable_configs()
                 .into_iter()
-                .partition(|&e| (cluster_level_listener_configs.contains(&e)));
+                .partition(|e| (cluster_level_listener_configs.contains(&e)));
         Self {
             kafka_config,
             dynamic_default_configs: HashMap::new(),
@@ -91,7 +91,7 @@ impl DynamicBrokerConfig {
     /// `validate_config_types` Creates a copy of `props` with the basename loaded from the
     /// listener.name.<name>.BASE_NAME and validates its values
     fn validate_config_types(props: &HashMap<String, String>) -> Result<(), KafkaConfigError> {
-        let base_props: HashMap<String, String> = HashMap::new();
+        let mut base_props: HashMap<String, String> = HashMap::new();
         for (prop_key, prop_value) in props {
             if let Some(base_name) = listener_config_regex_captures(prop_key) {
                 base_props.insert(base_name, prop_value.to_string());
@@ -106,16 +106,16 @@ impl DynamicBrokerConfig {
     /// `remove_invalid_configs` ignores config keys that are invalid and returns a HashMap of
     /// valid keys
     fn remove_invalid_configs(
-        props: HashMap<String, String>,
+        props: &HashMap<String, String>,
         per_broker_config: bool,
     ) -> HashMap<String, String> {
         match Self::validate_config_types(&props) {
-            Ok(_) => props,
+            Ok(_) => props.clone(),
             Err(err) => {
-                let valid_props = props.clone();
-                let invalid_props = HashMap::new();
+                let mut valid_props = props.clone();
+                let mut invalid_props = HashMap::new();
                 for (prop_key, prop_value) in props {
-                    let props1: HashMap<String, String> = HashMap::new();
+                    let mut props1: HashMap<String, String> = HashMap::new();
                     props1.insert(prop_key.to_string(), prop_value.to_string());
                     match Self::validate_config_types(&props1) {
                         Ok(()) => {
@@ -123,7 +123,7 @@ impl DynamicBrokerConfig {
                         },
                         Err(_) => {
                             debug!("Property {} is invalid, will ignore value", prop_key);
-                            valid_props.remove(&prop_key);
+                            valid_props.remove(prop_key);
                             invalid_props.insert(prop_key.to_string(), prop_value.to_string());
                         },
                     };
@@ -141,11 +141,11 @@ impl DynamicBrokerConfig {
 
     /// `non_dynamic_configs` Returns a list of config keys that are not dynamic (can only be set
     /// at startup)
-    pub fn non_dynamic_configs(props: HashMap<String, String>) -> Vec<String> {
+    pub fn non_dynamic_configs(props: &HashMap<String, String>) -> Vec<String> {
         let res: Vec<String> = props.keys().cloned().collect();
         let non_dynamic_props = DynamicConfig::default().broker.non_dynamic_props;
         let (res, _): (Vec<_>, Vec<_>) =
-            res.into_iter().partition(|&e| non_dynamic_props.contains(&e));
+            res.into_iter().partition(|e| non_dynamic_props.contains(&e));
         res
     }
 
@@ -154,22 +154,22 @@ impl DynamicBrokerConfig {
         unimplemented!()
     }
 
-    /// `remove_invalid_props` removes a Vec of invalid_prop_name keys from a property HashMAp
+    /// `remove_invalid_props` removes a Vec of invalid_prop_name keys from a property HashMap
     fn remove_invalid_props(
         properties: &mut HashMap<String, String>,
         invalid_prop_names: Vec<String>,
         error_message: String,
     ) {
         if !invalid_prop_names.is_empty() {
-            for invalid_prop_name in invalid_prop_names {
-                properties.remove(&invalid_prop_name);
+            for invalid_prop_name in &invalid_prop_names {
+                properties.remove(invalid_prop_name);
             }
             error!("{}: {:?}", error_message, invalid_prop_names);
         }
     }
 
     fn per_broker_configs(
-        props: HashMap<String, String>,
+        props: &HashMap<String, String>,
         per_broker_configs: &[String],
         cluster_level_listener_configs: &[String],
     ) -> Vec<String> {
@@ -178,8 +178,8 @@ impl DynamicBrokerConfig {
         // On the config_names, capture the listener name using LISTENER_CONFIG_REGEX and retain
         // the entries that are not in the cluster_level_listener_configs
         let (intersect, _): (Vec<_>, Vec<_>) =
-            config_names.into_iter().partition(|&e| per_broker_configs.contains(&e));
-        let (filtered, _): (Vec<_>, Vec<_>) = intersect.into_iter().partition(|&e| {
+            config_names.into_iter().partition(|e| per_broker_configs.contains(&e));
+        let (mut filtered, _): (Vec<_>, Vec<_>) = intersect.into_iter().partition(|e| {
             if let Some(base_name) = listener_config_regex_captures(&e) {
                 !cluster_level_listener_configs.contains(&base_name)
             } else {
@@ -194,37 +194,36 @@ impl DynamicBrokerConfig {
 
     fn from_persistent_props(
         &self,
-        persistent_props: HashMap<String, String>,
+        persistent_props: &HashMap<String, String>,
         per_broker_config: bool,
     ) -> HashMap<String, String> {
-        let props = persistent_props.clone();
-
         // Remove all invalid configs from `props`
-        let props = Self::remove_invalid_configs(props, per_broker_config);
+        let mut props = Self::remove_invalid_configs(&persistent_props, per_broker_config);
+        let non_dynamic_props = Self::non_dynamic_configs(&props);
         Self::remove_invalid_props(
             &mut props,
-            Self::non_dynamic_configs(props),
+            non_dynamic_props,
             String::from("Non-dynamic configs configured in ZooKeeper will be ignored"),
         );
         // Self::remove_invalid_props(&mut props,
         // Self::security_configs_without_listener_prefix(props), "Security configs can be
         // dynamically updated only using listener prefix, base configs will be ignored");
+        let per_broker_configs = Self::per_broker_configs(
+            &props,
+            &self.per_broker_configs,
+            &self.cluster_level_listener_configs,
+        );
         if !per_broker_config {
             Self::remove_invalid_props(
                 &mut props,
-                Self::per_broker_configs(
-                    props,
-                    &self.per_broker_configs,
-                    &self.cluster_level_listener_configs,
-                ),
+                per_broker_configs,
                 String::from("Per-broker configs defined at default cluster level will be ignored"),
             )
         }
-
         props
     }
 
-    fn broker_config_synonyms(key: &str, match_listener_override: bool) -> Vec<String> {
+    fn broker_config_synonyms(_key: &str, _match_listener_override: bool) -> Vec<String> {
         unimplemented!();
     }
 
@@ -238,9 +237,9 @@ impl DynamicBrokerConfig {
     /// 1 - `log.roll.hours` from the dynamic configuration will be used
     /// 2 - `log.roll.ms` will be removed from `props`
     fn override_props(
-        self,
+        &self,
         props: &mut HashMap<String, String>,
-        props_override: HashMap<String, String>,
+        props_override: &HashMap<String, String>,
     ) {
         for (override_key, override_value) in props_override {
             // TODO: disable `matchListenerOverride` so that base configs corresponding to listener
@@ -251,30 +250,36 @@ impl DynamicBrokerConfig {
             for synonym in Self::broker_config_synonyms(&override_key, false) {
                 props.remove(&synonym);
             }
-            props.insert(override_key, override_value);
+            props.insert(override_key.to_string(), override_value.to_string());
         }
     }
 
     fn process_reconfiguration(
-        self,
-        new_props: HashMap<String, String>,
-        validate_only: bool,
-    ) -> (KafkaConfig, ()) {
+        &self,
+        _new_props: HashMap<String, String>,
+        _validate_only: bool,
+    ) -> (KafkaConfig, Vec<String>) {
         unimplemented!();
     }
 
     fn update_current_config(&mut self) -> Result<(), String> {
         let mut new_props = self.static_broker_configs.clone();
-        self.override_props(&mut new_props, self.dynamic_default_configs);
-        self.override_props(&mut new_props, self.dynamic_broker_configs);
+        self.override_props(&mut new_props, &self.dynamic_default_configs);
+        self.override_props(&mut new_props, &self.dynamic_broker_configs);
         let old_config = self.kafka_config.clone();
         let (new_config, broker_reconfigurables_to_update) =
             self.process_reconfiguration(new_props, false);
         if new_config != self.kafka_config {
-            current_config = new_config;
+            self.kafka_config = new_config;
 
-            for reconfigurable in broker_reconfigurables_to_update {
-                reconfigurable.reconfigure(old_config, new_config)
+            for reconfigurable in &broker_reconfigurables_to_update {
+                // RAFKA TODO: The broker_reconfigurables_to_update should be a
+                // Vec<BrokerReconfigurable> and then for each item that needs to be updated, we
+                // should iterate so that it can move from previouus config to new config
+                error!(
+                    "NOT implemented: Should reconfigure {} from {:?} to {:?}",
+                    reconfigurable, old_config, self.kafka_config
+                );
             }
         }
         Ok(())
@@ -284,7 +289,7 @@ impl DynamicBrokerConfig {
         &mut self,
         persistent_props: HashMap<String, String>,
     ) -> Result<(), AsyncTaskError> {
-        let props = self.from_persistent_props(persistent_props, false);
+        let props = self.from_persistent_props(&persistent_props, false);
         self.dynamic_default_configs.clear();
         for (prop_key, prop_value) in props {
             self.dynamic_default_configs.insert(prop_key, prop_value);
@@ -304,8 +309,8 @@ impl DynamicBrokerConfig {
 
     fn update_broker_config(
         &mut self,
-        broker_id: i32,
-        props: HashMap<String, String>,
+        _broker_id: i32,
+        _props: HashMap<String, String>,
     ) -> Result<(), AsyncTaskError> {
         unimplemented!()
     }

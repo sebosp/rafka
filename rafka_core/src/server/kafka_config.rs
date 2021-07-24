@@ -196,14 +196,14 @@ impl KafkaConfigProperties {
     pub fn config_names() -> Vec<String> {
         // TODO: This should be derivable somehow too.
         vec![
-            ZOOKEEPER_CONNECT_PROP,
-            ZOOKEEPER_SESSION_TIMEOUT_PROP,
-            ZOOKEEPER_CONNECTION_TIMEOUT_PROP,
-            LOG_DIR_PROP,
-            LOG_DIRS_PROP,
-            BROKER_ID_GENERATION_ENABLED_PROP,
-            RESERVED_BROKER_MAX_ID_PROP,
-            BROKER_ID_PROP,
+            ZOOKEEPER_CONNECT_PROP.to_string(),
+            ZOOKEEPER_SESSION_TIMEOUT_PROP.to_string(),
+            ZOOKEEPER_CONNECTION_TIMEOUT_PROP.to_string(),
+            LOG_DIR_PROP.to_string(),
+            LOG_DIRS_PROP.to_string(),
+            BROKER_ID_GENERATION_ENABLED_PROP.to_string(),
+            RESERVED_BROKER_MAX_ID_PROP.to_string(),
+            BROKER_ID_PROP.to_string(),
         ]
     }
 

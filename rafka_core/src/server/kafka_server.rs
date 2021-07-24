@@ -7,23 +7,22 @@
 //!   DynamicBrokerConfig that in turn has a reference to the parent KafkaConfig. In this version,
 //!   KafkaServer has a Dynamic Broker Config field that owns the KafkaConfig (inversed)
 
-use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask};
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
 use crate::server::dynamic_broker_config::DynamicBrokerConfig;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
-use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
 use crate::server::kafka_config::KafkaConfig;
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::AtomicU32;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 use tracing_attributes::instrument;
 #[derive(Debug)]
 pub struct CountDownLatch(u8);
@@ -139,7 +138,7 @@ impl Default for KafkaServer {
         // unusable, maybe this is usable for testing
         let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         let majordomo_tx_cp = majordomo_tx.clone();
-        let (main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -258,7 +257,7 @@ impl KafkaServer {
 
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after DynamicConfigManager starts.
-        self.dynamic_broker_config.initialize(self.async_task_tx.clone());
+        self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
         //}
         Ok(())
     }
@@ -341,13 +340,9 @@ impl KafkaServer {
     /// If a client wants a response it may use a oneshot::channel for it
     #[instrument]
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
-        while let Some(task) = self.rx.recv().await {
-            info!("KafkaServer coordinator {:?}", task);
-            match task {
-                KafkaServerAsyncTask::Shutdown => break,
-                _ => unimplemented!("Task not implemented"),
-            }
-        }
+        // For now only the shutdown signal exists. so just wait for it and exit
+        let shutdown_task = self.rx.recv().await;
+        info!("KafkaServer shutdown task received: {:?}", shutdown_task);
         Ok(())
     }
 
