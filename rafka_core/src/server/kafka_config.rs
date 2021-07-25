@@ -13,6 +13,16 @@ use tracing::debug;
 // Log section
 pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_DIRS_PROP: &str = "log.dirs";
+pub const LOG_ROLL_TIME_MILLIS_PROP: &str = "log.roll.ms"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_ROLL_TIME_HOURS_PROP: &str = "log.roll.hours"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_ROLL_TIME_JITTER_MILLIS_PROP: &str = "log.roll.jitter.ms"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
+
 // General section
 pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
 pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
