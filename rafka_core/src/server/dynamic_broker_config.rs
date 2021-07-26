@@ -223,8 +223,57 @@ impl DynamicBrokerConfig {
         props
     }
 
-    fn broker_config_synonyms(_key: &str, _match_listener_override: bool) -> Vec<String> {
-        unimplemented!();
+    fn broker_config_synonyms(name: &str, match_listener_override: bool) -> Vec<String> {
+        let res = match name {
+            kafka_config::LOG_ROLL_TIME_MILLIS_PROP | kafka_config::LOG_ROLL_TIME_HOURS_PROP => {
+                vec![
+                    kafka_config::LOG_ROLL_TIME_MILLIS_PROP,
+                    kafka_config::LOG_ROLL_TIME_HOURS_PROP,
+                ]
+            },
+            kafka_config::LOG_ROLL_TIME_JITTER_MILLIS_PROP
+            | kafka_config::LOG_ROLL_TIME_JITTER_HOURS_PROP => vec![
+                kafka_config::LOG_ROLL_TIME_JITTER_MILLIS_PROP,
+                kafka_config::LOG_ROLL_TIME_JITTER_HOURS_PROP,
+            ],
+            kafka_config::LOG_FLUSH_INTERVAL_MS_PROP =>
+            // LogFlushSchedulerIntervalMsProp is used as default
+            {
+                vec![
+                    kafka_config::LOG_FLUSH_INTERVAL_MS_PROP,
+                    kafka_config::LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP,
+                ]
+            },
+            kafka_config::LOG_RETENTION_TIME_MILLIS_PROP
+            | kafka_config::LOG_RETENTION_TIME_MINUTES_PROP
+            | kafka_config::LOG_RETENTION_TIME_HOURS_PROP => vec![
+                kafka_config::LOG_RETENTION_TIME_MILLIS_PROP,
+                kafka_config::LOG_RETENTION_TIME_MINUTES_PROP,
+                kafka_config::LOG_RETENTION_TIME_HOURS_PROP,
+            ],
+            _ => {
+                if match_listener_override {
+                    if let Some(base_name) = listener_config_regex_captures(name) {
+                        // `ListenerMechanismConfigs` are specified as
+                        // listenerPrefix.mechanism.<configName>
+                        // and other listener configs are specified as listenerPrefix.<configName>
+                        // Add <configName> as a synonym in both cases. RAFKA NOTE: This is all
+                        // about SASL and Auth which is not the target for
+                        // this yet.
+                        error!(
+                            "broker_config_synonyms: Property name {} may not be supported, no \
+                             sasl config is done yet",
+                            name
+                        );
+                        if !base_name.contains("sasl\\.") {
+                            return vec![name.to_string(), base_name];
+                        }
+                    }
+                }
+                vec![name]
+            },
+        };
+        res.into_iter().map(|val| val.to_string()).collect()
     }
 
     /// Updates the values in `props` with the new values from `props_override`.
@@ -262,6 +311,10 @@ impl DynamicBrokerConfig {
         unimplemented!();
     }
 
+    /// `update_current_config` gathers static broker configs, then adds the default broker
+    /// properties and then adds the broker-specific properties, if there are  differences to the
+    /// current config, then a reconfiguration event must happen, at this moment this is not
+    /// handled.
     fn update_current_config(&mut self) -> Result<(), String> {
         let mut new_props = self.static_broker_configs.clone();
         self.override_props(&mut new_props, &self.dynamic_default_configs);
@@ -289,7 +342,8 @@ impl DynamicBrokerConfig {
         &mut self,
         persistent_props: HashMap<String, String>,
     ) -> Result<(), AsyncTaskError> {
-        let props = self.from_persistent_props(&persistent_props, false);
+        let per_broker_config = false;
+        let props = self.from_persistent_props(&persistent_props, per_broker_config);
         self.dynamic_default_configs.clear();
         for (prop_key, prop_value) in props {
             self.dynamic_default_configs.insert(prop_key, prop_value);
@@ -309,10 +363,25 @@ impl DynamicBrokerConfig {
 
     fn update_broker_config(
         &mut self,
-        _broker_id: i32,
-        _props: HashMap<String, String>,
+        broker_id: i32,
+        persistent_props: HashMap<String, String>,
     ) -> Result<(), AsyncTaskError> {
-        unimplemented!()
+        let per_broker_config = true;
+        let props = self.from_persistent_props(&persistent_props, per_broker_config);
+        self.dynamic_default_configs.clear();
+        for (prop_key, prop_value) in props {
+            self.dynamic_default_configs.insert(prop_key, prop_value);
+        }
+        match self.update_current_config() {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                error!(
+                    "Per-broker configs of {} could not be applied: {:?}: {:?}",
+                    broker_id, persistent_props, err
+                );
+                Ok(())
+            },
+        }
     }
 }
 
