@@ -51,6 +51,8 @@ $ cargo run -- -v info rafka-config
 - Reading configuration file.
 - Creation of persistent paths in zookeeper.
 - Finalized Feature Change Listeners
+- Dynamic Config can be recognized from zookeeper, but the reconfiguration is not done
+yet, that should be done later, will focus on functionality and deal with this later.
 
 ## Next
 - Dynamic Broker Configurations
