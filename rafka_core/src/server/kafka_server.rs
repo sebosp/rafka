@@ -1,25 +1,28 @@
 //! Core KafkaServer
 //! core/src/main/scala/kafka/server/KafkaServer.scala
-//! Changes:
+//! Rafka Changes:
 //! - All fields that were initially null have been coverted to Option<T>, This is probably a bad
 //!   idea, let's see how far we can go
+//! - In the original code, KafkaServer has a field of type KafkaConfig that contains a
+//!   DynamicBrokerConfig that in turn has a reference to the parent KafkaConfig. In this version,
+//!   KafkaServer has a Dynamic Broker Config field that owns the KafkaConfig (inversed)
 
-use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask};
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
+use crate::server::dynamic_broker_config::DynamicBrokerConfig;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
-use crate::server::dynamic_config_manager::{ConfigEntityName, ConfigType};
 use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
 use crate::server::kafka_config::KafkaConfig;
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::AtomicU32;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info};
 use tracing_attributes::instrument;
 #[derive(Debug)]
 pub struct CountDownLatch(u8);
@@ -102,9 +105,7 @@ pub struct KafkaServer {
 
     pub metadata_cache: Option<MetadataCache>, // was null, changed to Option<>
     pub init_time: Instant,
-    pub zk_client_config: ZKClientConfig, /* = KafkaServer.
-                                           * zkClientConfigFromKafkaConfig(config).
-                                           * getOrElse(new ZKClientConfig()) */
+    pub zk_client_config: ZKClientConfig,
     _zk_client: KafkaZkClient,
 
     pub correlation_id: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
@@ -116,8 +117,7 @@ pub struct KafkaServer {
 
     feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
                                                                       * Option<> */
-    pub kafka_config: KafkaConfig,
-
+    dynamic_broker_config: DynamicBrokerConfig,
     /// `async_task_tx` contains a handle to send taskt to the majordomo async_coordinator
     pub async_task_tx: mpsc::Sender<AsyncTask>,
 
@@ -137,6 +137,7 @@ impl Default for KafkaServer {
         // TODO: Consider removing this implementation in favor of new() as the channel is basically
         // unusable, maybe this is usable for testing
         let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let majordomo_tx_cp = majordomo_tx.clone();
         let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
@@ -157,7 +158,7 @@ impl Default for KafkaServer {
             admin_manager: None,
             token_manager: None,
             dynamic_config_handlers: HashMap::new(),
-            dynamic_config_manager: DynamicConfigManager::default(),
+            dynamic_config_manager: DynamicConfigManager::new(majordomo_tx_cp),
             group_coordinator: None,
             transaction_coordinator: None,
             kafka_controller: None,
@@ -172,7 +173,7 @@ impl Default for KafkaServer {
             _broker_topic_stats: None,
             feature_change_listener: None,
             init_time: Instant::now(),
-            kafka_config: KafkaConfig::default(),
+            dynamic_broker_config: DynamicBrokerConfig::default(),
             async_task_tx: majordomo_tx,
             rx: main_rx,
         }
@@ -202,7 +203,7 @@ impl KafkaServer {
                 .insert(bmc_log_dir.clone(), BrokerMetadataCheckpoint::new(&filename));
         }
         kafka_server.init_time = time;
-        kafka_server.kafka_config = config;
+        kafka_server.dynamic_broker_config = DynamicBrokerConfig::new(config);
         kafka_server
     }
 
@@ -250,9 +251,13 @@ impl KafkaServer {
                 )));
             }
         }
-        self.kafka_config.broker_id =
+        self.dynamic_broker_config.kafka_config.broker_id =
             self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint).await?;
-        debug!("KafkaServer id = {}", self.kafka_config.broker_id);
+        debug!("KafkaServer id = {}", self.dynamic_broker_config.kafka_config.broker_id);
+
+        // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
+        // applied after DynamicConfigManager starts.
+        self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
         //}
         Ok(())
     }
@@ -271,7 +276,7 @@ impl KafkaServer {
         let mut broker_metadata_found = String::from("");
         let mut offline_dirs: Vec<String> = vec![];
 
-        for log_dir in &self.kafka_config.log_dirs {
+        for log_dir in &self.dynamic_broker_config.kafka_config.log_dirs {
             if let Some(checkpoint_dir) = self.broker_metadata_checkpoints.get(log_dir) {
                 match checkpoint_dir.read() {
                     Ok(res) => {
@@ -335,13 +340,9 @@ impl KafkaServer {
     /// If a client wants a response it may use a oneshot::channel for it
     #[instrument]
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
-        while let Some(task) = self.rx.recv().await {
-            info!("KafkaServer coordinator {:?}", task);
-            match task {
-                KafkaServerAsyncTask::Shutdown => break,
-                _ => unimplemented!("Task not implemented"),
-            }
-        }
+        // For now only the shutdown signal exists. so just wait for it and exit
+        let shutdown_task = self.rx.recv().await;
+        info!("KafkaServer shutdown task received: {:?}", shutdown_task);
         Ok(())
     }
 
@@ -355,7 +356,7 @@ impl KafkaServer {
         self.async_task_tx
             .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GenerateBrokerId(tx)))
             .await?;
-        Ok(rx.await? + self.kafka_config.reserved_broker_max_id)
+        Ok(rx.await? + self.dynamic_broker_config.kafka_config.reserved_broker_max_id)
     }
 
     /// Generates new broker_id if enabled or reads from meta.properties based on following
@@ -372,7 +373,7 @@ impl KafkaServer {
         &mut self,
         broker_metadata: BrokerMetadata,
     ) -> Result<i32, AsyncTaskError> {
-        let broker_id = self.kafka_config.broker_id;
+        let broker_id = self.dynamic_broker_config.kafka_config.broker_id;
 
         if broker_id >= 0
             && broker_metadata.broker_id >= 0
@@ -384,7 +385,7 @@ impl KafkaServer {
             )))
         } else if broker_metadata.broker_id < 0
             && broker_id < 0
-            && self.kafka_config.broker_id_generation_enable
+            && self.dynamic_broker_config.kafka_config.broker_id_generation_enable
         {
             // generate a new brokerId from Zookeeper
             self.generate_broker_id().await
@@ -475,27 +476,32 @@ mod tests {
             )
             .is_err());
     }
-    #[test]
-    fn it_gets_or_generates_broker_id() {
+    #[tokio::test]
+    async fn it_gets_or_generates_broker_id() {
+        // NOTE: Even tho function is asynchronous, it won't hit the path where it needs to
+        // actually perform an async call. If it does, this test will never finish...
         let bm_b1 = BrokerMetadata::new(1, None);
         let bm_b2 = BrokerMetadata::new(2, None);
         let bm_b_unset = BrokerMetadata::new(-1, None);
         let ks_b1 = KafkaServer {
-            kafka_config: KafkaConfig { broker_id: 1, ..KafkaConfig::default() },
+            dynamic_broker_config: DynamicBrokerConfig::new(KafkaConfig {
+                broker_id: 1,
+                ..KafkaConfig::default()
+            }),
             ..KafkaServer::default()
         };
-        let same_broker_id = ks_b1.get_or_generate_broker_id(bm_b1.clone());
+        let same_broker_id = ks_b1.get_or_generate_broker_id(bm_b1.clone()).await;
         assert!(same_broker_id.is_ok());
         let same_broker_id = same_broker_id.unwrap();
         assert_eq!(same_broker_id, 1);
-        let diff_broker_id = ks_b1.get_or_generate_broker_id(bm_b2);
+        let diff_broker_id = ks_b1.get_or_generate_broker_id(bm_b2).await;
         assert!(diff_broker_id.is_err());
-        let with_bm_b_unset = ks_b1.get_or_generate_broker_id(bm_b_unset.clone());
+        let with_bm_b_unset = ks_b1.get_or_generate_broker_id(bm_b_unset.clone()).await;
         assert!(with_bm_b_unset.is_ok());
         let with_bm_b_unset = with_bm_b_unset.unwrap();
         assert_eq!(with_bm_b_unset, 1);
         let ks_b_unset = KafkaServer::default();
-        let broker_1 = ks_b_unset.get_or_generate_broker_id(bm_b1).unwrap();
+        let broker_1 = ks_b_unset.get_or_generate_broker_id(bm_b1).await.unwrap();
         assert_eq!(broker_1, 1);
         // NOTE: We cannot test with both KafaServer.config.broker_id being -1 and
         // BrokerMetadata.broker_id being -1 because that actually requires calling zookeeper

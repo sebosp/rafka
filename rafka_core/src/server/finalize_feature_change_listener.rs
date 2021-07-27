@@ -11,7 +11,9 @@
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::finalized_feature_cache::FinalizedFeatureCache;
 use crate::server::supported_features::SupportedFeatures;
-use crate::zk::kafka_zk_client::{GetDataAndVersionResponse, KafkaZkClientAsyncTask};
+use crate::zk::kafka_zk_client::{
+    GetDataAndVersionResponse, KafkaZkClient, KafkaZkClientAsyncTask,
+};
 use crate::zk::zk_data;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
@@ -67,23 +69,26 @@ impl FeatureCacheUpdater {
     ) -> Result<(), AsyncTaskError> {
         // TODO: Currently this unwraps errors, figure out how to return AsyncErrors from tasks
         tokio::spawn(async move {
-            trace!("Requesting read on feature ZK node at path: {}", feature_zk_node_path);
             let (tx, rx) = oneshot::channel();
-            majordomo_tx
-                .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetDataAndVersion(
-                    tx,
-                    feature_zk_node_path,
-                )))
-                .await
-                .unwrap();
-            trace!("Sent read request on feature ZK node to majordomo, awaiting response");
+            match KafkaZkClient::req_get_data_and_version(
+                majordomo_tx.clone(),
+                tx,
+                feature_zk_node_path,
+            )
+            .await
+            {
+                Ok(()) => {
+                    trace!("Successfully requested {} through KafkaZkClient", "GetDataAndVersion")
+                },
+                // RAFKA TODO: Send a Result through tx/rx so that we can send Errors to callers
+                Err(err) => panic!("Error requesting read through KafkaZkClient"),
+            };
             let response = rx.await.unwrap();
-            majordomo_tx
-                .send(AsyncTask::FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask::UpdateLatest(
-                    response,
-                )))
-                .await
-                .unwrap();
+            match FeatureCacheUpdaterAsyncTask::rep_update_latest(majordomo_tx, response).await {
+                Ok(()) => trace!("Successfully replied {} to caller", "GetDataAndVersion"),
+                // RAFKA TODO: Send a Result through tx/rx so that we can send Errors to callers
+                Err(err) => panic!("Error requesting read through KafkaZkClient"),
+            };
         });
         Ok(())
     }
@@ -317,5 +322,15 @@ impl FeatureCacheUpdaterAsyncTask {
             },
         }
         Ok(())
+    }
+
+    /// rep_update_latest Replies/Sends an UpdateLatest response to the MajorDomoCoordinator
+    pub async fn rep_update_latest(
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+        res: GetDataAndVersionResponse,
+    ) -> Result<(), AsyncTaskError> {
+        Ok(majordomo_tx
+            .send(AsyncTask::FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask::UpdateLatest(res)))
+            .await?)
     }
 }

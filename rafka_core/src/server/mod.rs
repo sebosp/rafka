@@ -1,8 +1,11 @@
 pub mod broker_metadata_checkpoint;
 mod broker_states;
+pub mod dynamic_broker_config;
+pub mod dynamic_config;
 pub mod dynamic_config_manager;
 pub mod finalize_feature_change_listener;
 pub mod finalized_feature_cache;
 pub mod kafka_config;
 pub mod kafka_server;
+pub mod replication_quota_manager;
 pub mod supported_features;

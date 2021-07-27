@@ -50,24 +50,24 @@ $ cargo run -- -v info rafka-config
 ## Status
 - Reading configuration file.
 - Creation of persistent paths in zookeeper.
+- Finalized Feature Change Listeners
+- Dynamic Config can be recognized from zookeeper, but the reconfiguration is not done
+yet, that should be done later, will focus on functionality and deal with this later.
 
 ## Next
-- Finalized Feature Change Listeners
+- Dynamic Broker Configurations
 
 ## Current issues
 -  If zookeeper is not available, the CPU usage goes crazy, using connection timeout/etc doesn't seem to help.
 
-
 ## TODO
 
-- The PathChildrenCache seems to be creating the /feature ZNode:
-```
-zookeeper_async::zookeeper: ZooKeeper::add_listener
-zookeeper_async::zookeeper_ext: ensure_path /feature
-zookeeper_async::zookeeper: ZooKeeper::create
-zookeeper_async::zookeeper: request opcode=Create xid=14
-```
+- PR created for zookeeper_async to fix watching over the chroot. Waiting for merge.
 
-Currently the PathChildrenCache is used to watch over the /feature, which has no children.
-Watching over / as a workaround doesn't work as Initialized event type doesn't include which path changed so we cannot know which ZNodeHandler to call.
-It seems a possible solution is to include an adaptation of code from src/recipes/cache.rs that doesn't create the path.
+
+## Current java/scala process flow.
+- core/src/main/scala/kafka/Kafka.scala parses flags such as --version and creates KafkaServerStartable
+  - This is moved to rafka/src/main.rs where clap is used to parse version/help
+    TODO: Die early with `--version/--help`
+- core/src/main/scala/kafka/server/KafkaServerStartable.scala creates KafkaServer with staticServerConfig and then calls the KafkaServer startup()
+  - This is moved to rafka/src/main.rs kafka_server is moved to its own thread and communicates with majordomo thread to talk to zk/etc.

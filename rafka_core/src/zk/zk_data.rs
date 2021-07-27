@@ -8,7 +8,7 @@ use rafka_derive::{SubZNodeHandle, ZNodeHandle};
 use serde_json::json;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use tracing::{debug, error};
+use tracing::{debug, error, trace, warn};
 use zookeeper_async::Acl;
 // NOTE: Maybe all of this could be moved into a hashmap or something?
 
@@ -54,7 +54,7 @@ pub struct ZkData {
     /// old consumer path znode
     consumer_path: ConsumerPathZNode,
     config: ConfigZNode,
-    config_types: ConfigType,
+    pub config_types: ConfigType,
     topics: TopicsZNode,
     broker_ids: BrokerIdsZNode,
     delegation_token_auth: DelegationTokenAuthZNode,
@@ -188,6 +188,76 @@ pub struct ConfigEntityTypeZNode(ZNode);
 impl ConfigEntityTypeZNode {
     pub fn build(config_znode: &ConfigZNode, entity_type: &str) -> Self {
         Self(ZNode { path: format!("{}/{}", config_znode.path(), entity_type) })
+    }
+}
+
+#[derive(Debug, SubZNodeHandle)]
+pub struct ConfigEntityZNode(ZNode);
+impl ConfigEntityZNode {
+    pub fn build(config_znode: &ConfigZNode, entity_type: &str, entity_name: &str) -> Self {
+        let config_entity_path =
+            ConfigEntityTypeZNode::build(config_znode, entity_type).path().to_string();
+        Self(ZNode { path: format!("{}/{}", config_entity_path, entity_name) })
+    }
+
+    pub fn encode(config: HashMap<String, String>) -> Vec<u8> {
+        // RAFKA NOTE: This is asJava, how much could this change?
+        serde_json::to_vec(&json!({
+            "version": 1,
+            "config": config
+        }))
+        .unwrap()
+    }
+
+    pub fn decode(bytes: Option<Vec<u8>>) -> Result<HashMap<String, String>, ZNodeDecodeError> {
+        let mut res = HashMap::new();
+        if bytes.is_none() {
+            return Ok(res);
+        }
+        let bytes = bytes.unwrap();
+        if bytes.len() > 0 {
+            let parsed_json: serde_json::Value = serde_json::from_slice(&bytes)?;
+            match parsed_json {
+                serde_json::Value::Object(map) => match map.get(&String::from("config")) {
+                    Some(val) => {
+                        match val {
+                            serde_json::Value::Object(val) => {
+                                for (key, value) in val {
+                                    match value {
+                                        serde_json::Value::String(value) => {
+                                            trace!("Inserting key: {} -> value {}", key, value);
+                                            res.insert(key.to_string(), value.to_string());
+                                        },
+                                        _ => warn!(
+                                            "value type is not of type String(String), input: {:?}",
+                                            bytes
+                                        ),
+                                    };
+                                }
+                            },
+                            _ => warn!(
+                                "config key does not contain an Object(Map<String, Value). input: \
+                                 {:?}",
+                                bytes
+                            ),
+                        };
+                    },
+                    None => {
+                        warn!(
+                            "Unable to find .config key on the ConfigEntityZNode json, input: {:?}",
+                            bytes
+                        );
+                    },
+                },
+                _ => {
+                    error!(
+                        "ConfigEntityZNode does not contain Object(Map<String, Value). input: {:?}",
+                        bytes
+                    );
+                },
+            }
+        }
+        Ok(res)
     }
 }
 

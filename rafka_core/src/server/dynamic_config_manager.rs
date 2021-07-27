@@ -43,12 +43,13 @@
 //! but avoids any race conditions  on startup where a change might be missed between the initial
 //! config load and registering for change notifications.
 
+use crate::majordomo::AsyncTask;
 use crate::server::kafka_server::ConfigHandler;
 use crate::zk::admin_zk_client::AdminZkClient;
-use crate::zk::kafka_zk_client::KafkaZkClient;
 use crate::zk::zk_data::{ConfigZNode, ZNodeHandle};
 use std::collections::HashMap;
 use std::time::Instant;
+use tokio::sync::mpsc;
 
 /// Represents all the entities that can be configured via ZK
 #[derive(Debug)]
@@ -65,9 +66,7 @@ impl ConfigType {
     pub fn all(&self) -> Vec<&str> {
         vec![&self.topic, &self.client, &self.user, &self.broker]
     }
-}
 
-impl ConfigType {
     pub fn build(config_znode: &ConfigZNode) -> Self {
         Self {
             topic: format!("{}/topics", config_znode.path()),
@@ -80,7 +79,7 @@ impl ConfigType {
 
 #[derive(Debug)]
 pub struct ConfigEntityName {
-    default: &'static str,
+    pub default: &'static str,
 }
 impl Default for ConfigEntityName {
     fn default() -> Self {
@@ -89,21 +88,22 @@ impl Default for ConfigEntityName {
 }
 #[derive(Debug)]
 pub struct DynamicConfigManager {
-    zk_client: KafkaZkClient,
+    zk_client: mpsc::Sender<AsyncTask>,
     config_handlers: HashMap<String, ConfigHandler>,
     change_expiration_ms: u32,      // Long = 15*60*1000,
     time: Instant,                  // = Time.SYSTEM
     admin_zk_client: AdminZkClient, // = new AdminZkClient(zkClient)
 }
 
-impl Default for DynamicConfigManager {
-    fn default() -> Self {
+impl DynamicConfigManager {
+    pub fn new(tx: mpsc::Sender<AsyncTask>) -> Self {
+        let tx_cp = tx.clone();
         DynamicConfigManager {
-            zk_client: KafkaZkClient::default(),
+            zk_client: tx,
             config_handlers: HashMap::new(),
             change_expiration_ms: 15 * 60 * 1000,
             time: Instant::now(),
-            admin_zk_client: AdminZkClient::default(),
+            admin_zk_client: AdminZkClient::new(tx_cp),
         }
     }
 }

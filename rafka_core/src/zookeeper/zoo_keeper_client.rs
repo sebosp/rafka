@@ -12,7 +12,6 @@
 
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::finalize_feature_change_listener::FeatureCacheUpdaterAsyncTask;
-use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
 use std::fmt;
 use std::sync::Arc;
@@ -39,11 +38,6 @@ impl Default for ZKClientConfig {
     fn default() -> Self {
         ZKClientConfig::PlainText
     }
-}
-
-/// A placeholder for the possible requests to zookeeper
-pub enum ZookeeperRequest {
-    Unimplemented,
 }
 
 struct LoggingWatcher;
@@ -77,8 +71,8 @@ pub struct ZooKeeperClient {
     /// before blocking
     max_in_flight_requests: u32,
     /// name of the client instance
-    name: Option<String>,
-    time: Instant,
+    // name: Option<String>,
+    // time: Instant,
     // zk_client_config ZooKeeper client configuration, for TLS configs if desired
     zk_client_config: Option<ZKClientConfig>,
     // RAFKA unimplemented:
@@ -113,8 +107,6 @@ impl ZooKeeperClient {
         session_timeout_ms: u32,
         connection_timeout_ms: u32,
         max_in_flight_requests: u32,
-        time: Instant,
-        name: Option<String>,
         zk_client_config: Option<ZKClientConfig>,
     ) -> Self {
         ZooKeeperClient {
@@ -122,8 +114,6 @@ impl ZooKeeperClient {
             session_timeout_ms,
             connection_timeout_ms,
             max_in_flight_requests,
-            time,
-            name,
             zk_client_config,
             // expiry_scheduler_handler: KafkaScheduler { tx, ..KafkaScheduler::default() },
             // zNodeChangeHandlers: HashMap::new(),
@@ -294,8 +284,6 @@ impl Default for ZooKeeperClient {
             session_timeout_ms,
             connection_timeout_ms: session_timeout_ms,
             max_in_flight_requests: 10,
-            time: Instant::now(),
-            name: None,
             zk_client_config: None,
             zookeeper: None,
         }

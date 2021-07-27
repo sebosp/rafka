@@ -5,7 +5,7 @@ use rafka_core::server::kafka_server::KafkaServer;
 use rafka_core::zk::kafka_zk_client::KafkaZkClientCoordinator;
 use std::time::Instant;
 use tokio::signal;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::FmtSubscriber;

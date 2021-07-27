@@ -1,4 +1,5 @@
-//! Provides higher level Kafka-specific operations on top of the pipelined
+//! Coordinates majordomo requests of type KafkaZkClientAsyncTask, it holds the connection to
+//! zookeeper in its own thread and communicates via channels to callers
 //! [[kafka::zookeeper::ZooKeeperClient]]. ( TODO RAFKA version may not be pipelined?)
 //! core/src/main/scala/kafka/zk/KafkaZkClient.scala
 //!
@@ -83,7 +84,7 @@ impl KafkaZkClient {
     pub fn build(
         zk_connect: &str,
         kafka_config: &KafkaConfig,
-        name: Option<String>,
+        _name: Option<String>,
         time: std::time::Instant,
         zk_client_config: Option<ZKClientConfig>,
     ) -> Self {
@@ -92,8 +93,8 @@ impl KafkaZkClient {
             kafka_config.zk_session_timeout_ms,
             kafka_config.zk_connection_timeout_ms,
             kafka_config.zk_max_in_flight_requests,
-            time,
-            name,
+            // time,
+            // name,
             zk_client_config,
         );
         KafkaZkClient::new(zoo_keeper_client, time)
@@ -412,16 +413,11 @@ impl KafkaZkClient {
         let get_data_request = self.zoo_keeper_client.get_data_request(path).await;
         match get_data_request {
             Err(err) => {
-                if let Some(err) = err.source() {
-                    if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
-                        match zk_err {
-                            zookeeper_async::ZkError::NoNode => return Ok((None, None)),
-
-                            _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeper(*zk_err)),
-                        }
-                    }
+                if err.is_zookeeper_async_no_node() {
+                    Ok((None, None))
+                } else {
+                    Err(err)
                 }
-                Err(err)
             },
             Ok((data, stat)) => Ok((Some(data), Some(stat))),
         }
@@ -440,35 +436,65 @@ impl KafkaZkClient {
                 Ok(stat.version)
             },
             Err(err) => {
-                if let Some(err) = err.source() {
-                    if let Some(zk_err) = err.downcast_ref::<zookeeper_async::ZkError>() {
-                        match zk_err {
-                            zookeeper_async::ZkError::NoNode => {
-                                trace!("Broker Sequence ID does not exist, creating");
-                                self.create_looped(
-                                    &broker_sequence_id_path,
-                                    vec![],
-                                    true, /* Fail on exists, so we can capture the error and
-                                           * set the content */
-                                )
-                                .await?;
-                                trace!(
-                                    "Create finished, setting Broker Sequence ID data: {}",
-                                    broker_sequence_id_path
-                                );
-                                let stat = self
-                                    .zoo_keeper_client
-                                    .set_data(&broker_sequence_id_path, vec![], None)
-                                    .await?;
-                                return Ok(stat.version);
-                            },
-                            _ => return Err(crate::majordomo::AsyncTaskError::ZooKeeper(*zk_err)),
-                        }
-                    }
+                if err.is_zookeeper_async_no_node() {
+                    trace!("Broker Sequence ID does not exist, creating");
+                    self.create_looped(
+                        &broker_sequence_id_path,
+                        vec![],
+                        true, /* Fail on exists, so we can capture the error and
+                               * set the content */
+                    )
+                    .await?;
+                    trace!(
+                        "Create finished, setting Broker Sequence ID data: {}",
+                        broker_sequence_id_path
+                    );
+                    let stat = self
+                        .zoo_keeper_client
+                        .set_data(&broker_sequence_id_path, vec![], None)
+                        .await?;
+                    return Ok(stat.version);
+                } else {
+                    Err(err)
                 }
-                Err(err)
             },
         }
+    }
+
+    /// Wrapper to request a Majordomo Request for GetDataAndVersion on a given path.
+    /// This function helps encapsulate logic to prevent leaking too many implementation details to
+    /// other functions.
+    #[instrument]
+    pub async fn req_get_data_and_version(
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+        res_tx: oneshot::Sender<GetDataAndVersionResponse>,
+        path: String,
+    ) -> Result<(), AsyncTaskError> {
+        trace!("Requesting GetDataAndVersion on ZK node at path: {}", path);
+        Ok(majordomo_tx
+            .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetDataAndVersion(res_tx, path)))
+            .await?)
+    }
+
+    /// Read the entity (topic, broker, client, user or <user, client>) config (if any) from zk
+    /// sanitizedEntityName is <topic>, <broker>, <client-id>, <user> or <user>/clients/<client-id>.
+    #[instrument]
+    pub async fn get_entity_configs(
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+        root_entity_type: &str,
+        sanitized_entity_name: &str,
+    ) -> Result<Option<Vec<u8>>, AsyncTaskError> {
+        let (tx, rx) = oneshot::channel();
+        let config_znode = zk_data::ConfigZNode::build();
+        let root_entity_zk_node_path = zk_data::ConfigEntityZNode::build(
+            &config_znode,
+            root_entity_type,
+            sanitized_entity_name,
+        )
+        .path()
+        .to_string();
+        KafkaZkClient::req_get_data_and_version(majordomo_tx, tx, root_entity_zk_node_path).await?;
+        Ok(rx.await.unwrap().data)
     }
 }
 
@@ -488,7 +514,6 @@ pub struct GetDataAndVersionResponse {
 pub enum KafkaZkClientAsyncTask {
     EnsurePersistentPathExists(String),
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
-    GetData(oneshot::Sender<Option<Vec<u8>>>, String),
     RegisterFeatureChange(mpsc::Sender<AsyncTask>),
     Shutdown,
     GetOrGenerateClusterId(oneshot::Sender<String>),
