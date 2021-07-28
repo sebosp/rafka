@@ -308,7 +308,7 @@ impl DynamicBrokerConfig {
         _new_props: HashMap<String, String>,
         _validate_only: bool,
     ) -> (KafkaConfig, Vec<String>) {
-        unimplemented!();
+        (self.kafka_config.clone(), vec![])
     }
 
     /// `update_current_config` gathers static broker configs, then adds the default broker
