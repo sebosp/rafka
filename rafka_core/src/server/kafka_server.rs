@@ -101,7 +101,7 @@ pub struct KafkaServer {
 
     pub kafka_controller: Option<KafkaController>, // was null, changed to Option<>
 
-    pub kafka_scheduler: Option<KafkaScheduler>, // was null, changed to Option<>
+    pub kafka_scheduler: KafkaScheduler, // was null, changed to Option<>
 
     pub metadata_cache: Option<MetadataCache>, // was null, changed to Option<>
     pub init_time: Instant,
@@ -162,7 +162,7 @@ impl Default for KafkaServer {
             group_coordinator: None,
             transaction_coordinator: None,
             kafka_controller: None,
-            kafka_scheduler: None,
+            kafka_scheduler: KafkaScheduler::default(),
             metadata_cache: None,
             zk_client_config: ZKClientConfig::default(),
             _zk_client: KafkaZkClient::default(),
@@ -258,7 +258,7 @@ impl KafkaServer {
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after DynamicConfigManager starts.
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
-        //}
+
         Ok(())
     }
 
