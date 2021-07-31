@@ -1,6 +1,9 @@
 /// From core/src/main/scala/kafka/server/ClientQuotaManager.scala
+use crate::server::quota_manager::QuotaType;
+use std::time::Instant;
 
 /// Configuration settings for quota management
+#[derive(Debug)]
 pub struct ClientQuotaManagerConfig {
     /// The default bytes per second quota allocated to any client-id if
     /// dynamic defaults or user quotas are not set
@@ -25,4 +28,27 @@ impl ClientQuotaManagerConfig {
     }
 }
 
-pub struct ClientQuotaManager;
+/// Provides several ways to throttle the users, and the clients, the configs for them are stored
+/// in zookeeper with this precedence:
+/// - /config/users/<user>/clients/<client-id>
+/// - /config/users/<user>/clients/<default>
+/// - /config/users/<user>
+/// - /config/users/<default>/clients/<client-id>
+/// - /config/users/<default>/clients/<default>
+/// - /config/users/<default>
+/// - /config/clients/<client-id>
+/// - /config/clients/<default>
+#[derive(Debug)]
+pub struct ClientQuotaManager {
+    pub config: ClientQuotaManagerConfig,
+    pub quota_type: QuotaType,
+    pub time: Instant,
+}
+
+impl ClientQuotaManager {
+    pub fn new(config: ClientQuotaManagerConfig, quota_type: QuotaType, time: Instant) -> Self {
+        // A thread is spawned for controlling quotas, handling delays and throttling.
+        // Not sure this would at all be added.
+        Self { config, quota_type, time }
+    }
+}
