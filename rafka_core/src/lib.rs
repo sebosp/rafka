@@ -3,6 +3,8 @@
 extern crate failure;
 #[macro_use]
 extern crate slog_term;
+#[macro_use]
+extern crate serde_derive;
 
 pub mod common;
 pub mod majordomo;
