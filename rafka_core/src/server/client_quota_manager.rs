@@ -2,6 +2,9 @@
 use crate::server::quota_manager::QuotaType;
 use std::time::Instant;
 
+pub const QUOTA_BYTES_PER_SECOND_DEFAULT: i64 = i64::MAX;
+pub const QUOTA_WINDOW_SIZE_SECONDS_DEFAULT: i32 = 1;
+
 /// Configuration settings for quota management
 #[derive(Debug)]
 pub struct ClientQuotaManagerConfig {
@@ -12,15 +15,6 @@ pub struct ClientQuotaManagerConfig {
     /// The time span of each sample, used f or throttling
     pub quota_window_size_seconds: i32,
 }
-
-// impl Default for ClientQuotaManagerConfig {
-// fn default() -> Self {
-// Self {
-// quota_bytes_per_second_default: i64::MAX,
-// quota_window_size_seconds: 1,
-// }
-// }
-// }
 
 impl ClientQuotaManagerConfig {
     pub fn new(quota_bytes_per_second_default: i64, quota_window_size_seconds: i32) -> Self {
