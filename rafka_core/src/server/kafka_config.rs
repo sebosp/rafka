@@ -96,21 +96,33 @@ impl PartialEq for KafkaConfigError {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KafkaConfigProperties {
+    #[serde(rename = "zookeeper.connect")]
     zk_connect: ConfigDef<String>,
+    #[serde(rename = "zookeeper.session.timeout.ms")]
     zk_session_timeout_ms: ConfigDef<u32>,
+    #[serde(rename = "zookeeper.connection.timeout.ms")]
     zk_connection_timeout_ms: ConfigDef<u32>,
     // Singular log.dir
     #[serde(rename = "log.dir")]
     log_dir: ConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
+    #[serde(rename = "log.dirs")]
     log_dirs: ConfigDef<String>,
+    #[serde(rename = "broker.id.generation.enable")]
     broker_id_generation_enable: ConfigDef<bool>,
+    #[serde(rename = "reserved.broker.max.id")]
     reserved_broker_max_id: ConfigDef<i32>,
+    #[serde(rename = "broker.id")]
     broker_id: ConfigDef<i32>,
+    #[serde(rename = "zookeeper.max.in.flight.requests")]
     zk_max_in_flight_requests: ConfigDef<u32>,
+    #[serde(rename = "advertised.listeners")]
     advertised_listeners: ConfigDef<String>,
+    #[serde(rename = "quota.consumer.default")]
     consumer_quota_bytes_per_second_default: ConfigDef<i64>,
+    #[serde(rename = "quota.producer.default")]
     producer_quota_bytes_per_second_default: ConfigDef<i64>,
+    #[serde(rename = "quota.window.size.seconds")]
     quota_window_size_seconds: ConfigDef<i32>,
 }
 
