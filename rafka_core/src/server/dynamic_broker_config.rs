@@ -43,10 +43,7 @@ fn listener_config_regex_captures(text: &str) -> Option<String> {
         static ref LISTENER_CONFIG_REGEX: Regex =
             Regex::new(r"listener\.name\.[^.]*\.(.*)").unwrap();
     }
-    match LISTENER_CONFIG_REGEX.captures(text) {
-        Some(val) => Some(val[1].to_string()),
-        None => None,
-    }
+    LISTENER_CONFIG_REGEX.captures(text).map(|val| val[1].to_string())
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
@@ -65,7 +62,7 @@ impl DynamicBrokerConfig {
         let (_, per_broker_configs): (Vec<_>, Vec<_>) =
             DynamicListenerConfig::reconfigurable_configs()
                 .into_iter()
-                .partition(|e| (cluster_level_listener_configs.contains(&e)));
+                .partition(|e| (cluster_level_listener_configs.contains(e)));
         Self {
             kafka_config,
             dynamic_default_configs: HashMap::new(),
@@ -109,7 +106,7 @@ impl DynamicBrokerConfig {
         props: &HashMap<String, String>,
         per_broker_config: bool,
     ) -> HashMap<String, String> {
-        match Self::validate_config_types(&props) {
+        match Self::validate_config_types(props) {
             Ok(_) => props.clone(),
             Err(err) => {
                 let mut valid_props = props.clone();
@@ -145,7 +142,7 @@ impl DynamicBrokerConfig {
         let res: Vec<String> = props.keys().cloned().collect();
         let non_dynamic_props = DynamicConfig::default().broker.non_dynamic_props;
         let (res, _): (Vec<_>, Vec<_>) =
-            res.into_iter().partition(|e| non_dynamic_props.contains(&e));
+            res.into_iter().partition(|e| non_dynamic_props.contains(e));
         res
     }
 
@@ -178,9 +175,9 @@ impl DynamicBrokerConfig {
         // On the config_names, capture the listener name using LISTENER_CONFIG_REGEX and retain
         // the entries that are not in the cluster_level_listener_configs
         let (intersect, _): (Vec<_>, Vec<_>) =
-            config_names.into_iter().partition(|e| per_broker_configs.contains(&e));
+            config_names.into_iter().partition(|e| per_broker_configs.contains(e));
         let (mut filtered, _): (Vec<_>, Vec<_>) = intersect.into_iter().partition(|e| {
-            if let Some(base_name) = listener_config_regex_captures(&e) {
+            if let Some(base_name) = listener_config_regex_captures(e) {
                 !cluster_level_listener_configs.contains(&base_name)
             } else {
                 false
@@ -198,7 +195,7 @@ impl DynamicBrokerConfig {
         per_broker_config: bool,
     ) -> HashMap<String, String> {
         // Remove all invalid configs from `props`
-        let mut props = Self::remove_invalid_configs(&persistent_props, per_broker_config);
+        let mut props = Self::remove_invalid_configs(persistent_props, per_broker_config);
         let non_dynamic_props = Self::non_dynamic_configs(&props);
         Self::remove_invalid_props(
             &mut props,
@@ -296,7 +293,7 @@ impl DynamicBrokerConfig {
             // they may be used by other listeners. It is ok to retain them in `props`
             // since base configs cannot be dynamically updated and listener-specific configs have
             // the higher precedence.
-            for synonym in Self::broker_config_synonyms(&override_key, false) {
+            for synonym in Self::broker_config_synonyms(override_key, false) {
                 props.remove(&synonym);
             }
             props.insert(override_key.to_string(), override_value.to_string());
