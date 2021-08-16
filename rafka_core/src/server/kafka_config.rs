@@ -2,10 +2,11 @@
 /// core/src/main/scala/kafka/server/KafkaConfig.scala
 /// Changes:
 /// - No SSL, no SASL
+/// - RAFKA NOTE: Using serde_json doesn't work very well because for example
+/// ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual listeners
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::server::client_quota_manager;
 use fs_err::File;
-use serde_json::Deserializer;
 use std::collections::HashMap;
 use std::io::{self, BufReader};
 use std::num;
@@ -263,6 +264,9 @@ impl KafkaConfigProperties {
             },
             QUOTA_WINDOW_SIZE_SECONDS_PROP => {
                 self.quota_window_size_seconds.try_set_parsed_value(property_value)?
+            },
+            ADVERTISED_LISTENERS_PROP => {
+                self.advertised_listeners.try_set_parsed_value(property_value)?
             },
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         };
