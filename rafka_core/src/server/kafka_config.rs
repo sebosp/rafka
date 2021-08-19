@@ -2,7 +2,10 @@
 /// core/src/main/scala/kafka/server/KafkaConfig.scala
 /// Changes:
 /// - No SSL, no SASL
+/// - RAFKA NOTE: Using serde_json doesn't work very well because for example
+/// ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual listeners
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use crate::server::client_quota_manager;
 use fs_err::File;
 use std::collections::HashMap;
 use std::io::{self, BufReader};
@@ -36,6 +39,11 @@ pub const ZOOKEEPER_CONNECT_PROP: &str = "zookeeper.connect";
 pub const ZOOKEEPER_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
 pub const ZOOKEEPER_CONNECTION_TIMEOUT_PROP: &str = "zookeeper.connection.timeout.ms";
 pub const ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS: &str = "zookeeper.max.in.flight.requests";
+
+// Quota section
+pub const CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.consumer.default";
+pub const PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.producer.default";
+pub const QUOTA_WINDOW_SIZE_SECONDS_PROP: &str = "quota.window.size.seconds";
 
 // RAFKA TODO: Since ConfigDef was moved, maybe this ConfigError should be moved there and be
 // generalized?
@@ -86,26 +94,44 @@ impl PartialEq for KafkaConfigError {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KafkaConfigProperties {
+    #[serde(rename = "zookeeper.connect")]
     zk_connect: ConfigDef<String>,
+    #[serde(rename = "zookeeper.session.timeout.ms")]
     zk_session_timeout_ms: ConfigDef<u32>,
+    #[serde(rename = "zookeeper.connection.timeout.ms")]
     zk_connection_timeout_ms: ConfigDef<u32>,
     // Singular log.dir
+    #[serde(rename = "log.dir")]
     log_dir: ConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
+    #[serde(rename = "log.dirs")]
     log_dirs: ConfigDef<String>,
+    #[serde(rename = "broker.id.generation.enable")]
     broker_id_generation_enable: ConfigDef<bool>,
+    #[serde(rename = "reserved.broker.max.id")]
     reserved_broker_max_id: ConfigDef<i32>,
+    #[serde(rename = "broker.id")]
     broker_id: ConfigDef<i32>,
+    #[serde(rename = "zookeeper.max.in.flight.requests")]
     zk_max_in_flight_requests: ConfigDef<u32>,
+    #[serde(rename = "advertised.listeners")]
     advertised_listeners: ConfigDef<String>,
+    #[serde(rename = "quota.consumer.default")]
+    consumer_quota_bytes_per_second_default: ConfigDef<i64>,
+    #[serde(rename = "quota.producer.default")]
+    producer_quota_bytes_per_second_default: ConfigDef<i64>,
+    #[serde(rename = "quota.window.size.seconds")]
+    quota_window_size_seconds: ConfigDef<i32>,
 }
 
 impl Default for KafkaConfigProperties {
     fn default() -> Self {
         Self {
             zk_connect: ConfigDef::default()
+                .with_key(ZOOKEEPER_CONNECT_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from(r#"
                     Specifies the ZooKeeper connection string in the form <code>hostname:port</code> where host and port are the
@@ -116,10 +142,12 @@ impl Default for KafkaConfigProperties {
                     "#
                 )),
             zk_session_timeout_ms: ConfigDef::default()
+                .with_key(ZOOKEEPER_SESSION_TIMEOUT_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from("Zookeeper session timeout"))
                 .with_default(String::from("18000")),
             zk_connection_timeout_ms: ConfigDef::default()
+                .with_key(ZOOKEEPER_CONNECTION_TIMEOUT_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(
                     format!("The max time that the client waits to establish a connection to zookeeper. If \
@@ -132,18 +160,21 @@ impl Default for KafkaConfigProperties {
                 ))
                 .with_default(String::from("10")),
             log_dir: ConfigDef::default()
+                .with_key(LOG_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(
                     format!("The directory in which the log data is kept (supplemental for {} property)", LOG_DIRS_PROP),
                 )
                 .with_default(String::from("/tmp/kafka-logs")),
             log_dirs: ConfigDef::default()
+                .with_key(LOG_DIRS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(
                     format!("The directories in which the log data is kept. If not set, the value in {} \
                      is used", LOG_DIR_PROP),
                 ),
             broker_id_generation_enable: ConfigDef::default()
+                .with_key(BROKER_ID_GENERATION_ENABLED_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(
                     format!("Enable automatic broker id generation on the server. When enabled the value \
@@ -151,10 +182,12 @@ impl Default for KafkaConfigProperties {
                 )
                 .with_default(String::from("true")),
             reserved_broker_max_id: ConfigDef::default()
+                .with_key(RESERVED_BROKER_MAX_ID_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
                 .with_default(String::from("1000")),
             broker_id: ConfigDef::default()
+                .with_key(BROKER_ID_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(
                     format!("The broker id for this server. If unset, a unique broker id will be generated. \
@@ -163,13 +196,39 @@ impl Default for KafkaConfigProperties {
                 )
                 .with_default(String::from("-1")),
             advertised_listeners: ConfigDef::default()
+                .with_key(ADVERTISED_LISTENERS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The broker id for this server. If unset, a unique broker id will be generated. \
-                     To avoid conflicts between zookeeper generated broker id's and user configured \
-                     broker id's, generated broker ids start from {} + 1.", RESERVED_BROKER_MAX_ID_PROP),
-                )
+                .with_doc(String::from(
+                    "Listeners to publish to ZooKeeper for clients to use, if different than the `listeners` config property.\
+                    In IaaS environments, this may need to be different from the interface to which the broker binds. \
+                    If this is not set, the value for `listeners` will be used. \
+                    Unlike `listeners` it is not valid to advertise the 0.0.0.0 meta-address "
+                ))
                 .with_default(String::from("-1")),
+            consumer_quota_bytes_per_second_default: ConfigDef::default()
+                .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
+                    Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
+                ))
+                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT.to_string()),
+            producer_quota_bytes_per_second_default: ConfigDef::default()
+                .with_key(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
+                    Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
+                ))
+                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT.to_string()),
+            quota_window_size_seconds: ConfigDef::default()
+                .with_key(QUOTA_WINDOW_SIZE_SECONDS_PROP)
+                .with_importance(ConfigDefImportance::Low)
+                .with_doc(String::from(
+                    "The time span of each sample for client quotas"
+                ))
+                .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT.to_string())
+
         }
     }
 }
@@ -197,6 +256,18 @@ impl KafkaConfigProperties {
                 self.reserved_broker_max_id.try_set_parsed_value(property_value)?
             },
             BROKER_ID_PROP => self.broker_id.try_set_parsed_value(property_value)?,
+            CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+                self.consumer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
+            },
+            PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+                self.producer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
+            },
+            QUOTA_WINDOW_SIZE_SECONDS_PROP => {
+                self.quota_window_size_seconds.try_set_parsed_value(property_value)?
+            },
+            ADVERTISED_LISTENERS_PROP => {
+                self.advertised_listeners.try_set_parsed_value(property_value)?
+            },
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         };
         Ok(())
@@ -214,6 +285,9 @@ impl KafkaConfigProperties {
             BROKER_ID_GENERATION_ENABLED_PROP.to_string(),
             RESERVED_BROKER_MAX_ID_PROP.to_string(),
             BROKER_ID_PROP.to_string(),
+            CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP.to_string(),
+            PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP.to_string(),
+            QUOTA_WINDOW_SIZE_SECONDS_PROP.to_string(),
         ]
     }
 
@@ -327,6 +401,7 @@ impl KafkaConfigProperties {
         // at least 0
         if let Some(zk_max_in_flight_requests) = self.zk_max_in_flight_requests.get_value() {
             if *zk_max_in_flight_requests < 1 {
+                // RAFKA TODO: This doesn't make much sense if it's u32...
                 Err(KafkaConfigError::InvalidValue(format!(
                     "{}: '{}' should be at least 0",
                     ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS, *zk_max_in_flight_requests
@@ -337,6 +412,42 @@ impl KafkaConfigProperties {
         } else {
             panic!(
                 "zk_max_in_flight_requests has a default but found its value to be None, bug in \
+                 parsing defaults"
+            );
+        }
+    }
+
+    fn resolve_consumer_quota_bytes_per_second_default(&mut self) -> Result<i64, KafkaConfigError> {
+        if let Some(val) = self.consumer_quota_bytes_per_second_default.get_value() {
+            if *val < 1 {
+                Err(KafkaConfigError::InvalidValue(format!(
+                    "{}: '{}' should be at least 1",
+                    CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP, *val
+                )))
+            } else {
+                Ok(*val)
+            }
+        } else {
+            panic!(
+                "consumer_quota_bytes_per_second_default has a default but found its value to be \
+                 None, bug in parsing defaults"
+            );
+        }
+    }
+
+    fn resolve_quota_window_size_seconds(&mut self) -> Result<i32, KafkaConfigError> {
+        if let Some(val) = self.quota_window_size_seconds.get_value() {
+            if *val < 1 {
+                Err(KafkaConfigError::InvalidValue(format!(
+                    "{}: '{}' should be at least 1",
+                    QUOTA_WINDOW_SIZE_SECONDS_PROP, *val
+                )))
+            } else {
+                Ok(*val)
+            }
+        } else {
+            panic!(
+                "quota_window_size_seconds has a default but found its value to be None, bug in \
                  parsing defaults"
             );
         }
@@ -353,6 +464,9 @@ impl KafkaConfigProperties {
         let broker_id_generation_enable = self.resolve_broker_id_generation_enable()?;
         let zk_connect = self.resolve_zk_connect()?;
         let zk_max_in_flight_requests = self.resolve_zk_max_in_flight_requests()?;
+        let consumer_quota_bytes_per_second_default =
+            self.resolve_consumer_quota_bytes_per_second_default()?;
+        let quota_window_size_seconds = self.resolve_quota_window_size_seconds()?;
         let kafka_config = KafkaConfig {
             zk_connect,
             zk_session_timeout_ms,
@@ -362,6 +476,8 @@ impl KafkaConfigProperties {
             reserved_broker_max_id,
             broker_id_generation_enable,
             broker_id,
+            consumer_quota_bytes_per_second_default,
+            quota_window_size_seconds,
         };
         kafka_config.validate_values()
     }
@@ -377,6 +493,8 @@ pub struct KafkaConfig {
     pub reserved_broker_max_id: i32,
     pub broker_id_generation_enable: bool,
     pub broker_id: i32,
+    pub consumer_quota_bytes_per_second_default: i64,
+    pub quota_window_size_seconds: i32,
 }
 
 impl KafkaConfig {
@@ -421,6 +539,10 @@ impl Default for KafkaConfig {
         let zk_connect = String::from("UNSET");
         let zk_max_in_flight_requests =
             config_properties.resolve_zk_max_in_flight_requests().unwrap();
+        let consumer_quota_bytes_per_second_default =
+            config_properties.resolve_consumer_quota_bytes_per_second_default().unwrap();
+        let quota_window_size_seconds =
+            config_properties.resolve_quota_window_size_seconds().unwrap();
         Self {
             zk_connect,
             zk_session_timeout_ms,
@@ -430,6 +552,8 @@ impl Default for KafkaConfig {
             reserved_broker_max_id,
             broker_id_generation_enable,
             broker_id,
+            consumer_quota_bytes_per_second_default,
+            quota_window_size_seconds,
         }
     }
 }

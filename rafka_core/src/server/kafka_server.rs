@@ -14,6 +14,7 @@ use crate::server::dynamic_broker_config::DynamicBrokerConfig;
 use crate::server::dynamic_config_manager::DynamicConfigManager;
 use crate::server::finalize_feature_change_listener::FinalizedFeatureChangeListener;
 use crate::server::kafka_config::KafkaConfig;
+use crate::server::quota_manager::{QuotaFactory, QuotaManagers};
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::{KafkaZkClient, KafkaZkClientAsyncTask};
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
@@ -122,6 +123,8 @@ pub struct KafkaServer {
     pub async_task_tx: mpsc::Sender<AsyncTask>,
 
     pub rx: mpsc::Receiver<KafkaServerAsyncTask>,
+
+    pub quota_managers: QuotaManagers,
 }
 
 // RAFKA Unimplemented:
@@ -129,8 +132,6 @@ pub struct KafkaServer {
 // var kafkaYammerMetrics: KafkaYammerMetrics = null
 // credentialProvider: CredentialProvider = null
 // tokenCache: DelegationTokenCache = null
-// quotaManagers: Option<QuotaFactory.QuotaManagers>, // was null, changed to Option<>, TODO: figure
-// out what to do with this
 
 impl Default for KafkaServer {
     fn default() -> Self {
@@ -139,6 +140,8 @@ impl Default for KafkaServer {
         let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         let majordomo_tx_cp = majordomo_tx.clone();
         let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let dynamic_broker_config = DynamicBrokerConfig::default();
+        let time = Instant::now();
         KafkaServer {
             // startup_complete: Arc::new(AtomicBool::new(false)),
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
@@ -173,9 +176,10 @@ impl Default for KafkaServer {
             _broker_topic_stats: None,
             feature_change_listener: None,
             init_time: Instant::now(),
-            dynamic_broker_config: DynamicBrokerConfig::default(),
+            dynamic_broker_config: dynamic_broker_config.clone(),
             async_task_tx: majordomo_tx,
             rx: main_rx,
+            quota_managers: QuotaFactory::instantiate(&dynamic_broker_config.kafka_config, time),
         }
     }
 }

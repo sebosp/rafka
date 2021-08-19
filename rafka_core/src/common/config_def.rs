@@ -1,12 +1,13 @@
 /// This class is used for specifying the set of expected configurations.
 /// From clients/src/main/java/org/apache/kafka/common/config/ConfigDef.java
 use crate::server::kafka_config::KafkaConfigError;
+use serde_derive::{Deserialize, Serialize};
 use std::str::FromStr;
 use tracing::error;
 
 /// `ConfigDefImportance` provides the levels of importance that different java_properties
 /// have.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum ConfigDefImportance {
     High,
     Medium,
@@ -16,10 +17,12 @@ pub enum ConfigDefImportance {
 /// `ConfigDef` defines the configuration properties, how they can be resolved from other
 /// values and their defaults This should be later transformed into a derivable from something like
 /// DocOpt.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct ConfigDef<T> {
     importance: ConfigDefImportance,
     doc: String,
+    // The configuration key that is used to apply this value
+    key: String,
     /// `default` of the value, this would be parsed and transformed into each field type from
     /// KafkaConfig
     default: Option<String>,
@@ -34,6 +37,7 @@ impl<T> Default for ConfigDef<T> {
         Self {
             importance: ConfigDefImportance::Low,
             doc: String::from("TODO: Missing Docs"),
+            key: String::from("unset.key"),
             default: None,
             provided: false,
             value: None,
@@ -50,6 +54,12 @@ where
 {
     pub fn with_importance(mut self, importance: ConfigDefImportance) -> Self {
         self.importance = importance;
+        self
+    }
+
+    /// Sets the `key` value, this comes from const &str values in the calling modules
+    pub fn with_key(mut self, key: &str) -> Self {
+        self.key = key.to_string();
         self
     }
 
