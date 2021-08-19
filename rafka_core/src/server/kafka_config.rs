@@ -419,7 +419,7 @@ impl KafkaConfigProperties {
 
     fn resolve_consumer_quota_bytes_per_second_default(&mut self) -> Result<i64, KafkaConfigError> {
         if let Some(val) = self.consumer_quota_bytes_per_second_default.get_value() {
-            if *val <= 1 {
+            if *val < 1 {
                 Err(KafkaConfigError::InvalidValue(format!(
                     "{}: '{}' should be at least 1",
                     CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP, *val
@@ -437,10 +437,10 @@ impl KafkaConfigProperties {
 
     fn resolve_quota_window_size_seconds(&mut self) -> Result<i32, KafkaConfigError> {
         if let Some(val) = self.quota_window_size_seconds.get_value() {
-            if *val <= 1 {
+            if *val < 1 {
                 Err(KafkaConfigError::InvalidValue(format!(
                     "{}: '{}' should be at least 1",
-                    CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP, *val
+                    QUOTA_WINDOW_SIZE_SECONDS_PROP, *val
                 )))
             } else {
                 Ok(*val)
