@@ -262,7 +262,14 @@ impl KafkaServer {
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after DynamicConfigManager starts.
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
+        self.notify_cluster_listeners();
 
+        Ok(())
+    }
+
+    fn notify_cluster_listeners(&self) -> Result<(), ()> {
+        let cluster_resource_listeners = ClusterResourceListeners::new();
+        cluster_resource_listeners.on_update(ClusterResource::new(self.cluster_id));
         Ok(())
     }
 
