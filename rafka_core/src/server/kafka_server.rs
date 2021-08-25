@@ -7,6 +7,8 @@
 //!   DynamicBrokerConfig that in turn has a reference to the parent KafkaConfig. In this version,
 //!   KafkaServer has a Dynamic Broker Config field that owns the KafkaConfig (inversed)
 
+use crate::common::cluster_resource::ClusterResource;
+use crate::common::internals::cluster_resource_listeners::ClusterResourceListeners;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
@@ -72,6 +74,7 @@ pub struct KafkaServer {
     // is_starting_up: Arc<AtomicBool>,   // false
     //
     // shutdown_latch: CountDownLatch, // (1)
+    pub cluster_id: Option<String>,
     pub metrics: Option<Metrics>, // was null, changed to Option<>
     // TODO: BrokerState is volatile, nede to make sure we can make its changes sync through the
     // threads
@@ -147,6 +150,7 @@ impl Default for KafkaServer {
             // is_shutting_down: Arc::new(AtomicBool::new(false)),
             // is_starting_up: Arc::new(AtomicBool::new(false)),
             // shutdown_latch: CountDownLatch(1),
+            cluster_id: None,
             metrics: None,
             broker_state: BrokerState::default(),
             data_plane_request_processor: None,
@@ -255,6 +259,7 @@ impl KafkaServer {
                 )));
             }
         }
+        self.cluster_id = Some(cluster_id);
         self.dynamic_broker_config.kafka_config.broker_id =
             self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint).await?;
         debug!("KafkaServer id = {}", self.dynamic_broker_config.kafka_config.broker_id);
