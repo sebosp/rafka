@@ -2,7 +2,7 @@
 //! From clients/src/main/java/org/apache/kafka/common/ClusterResource.java
 
 use std::fmt::Display;
-#[derive(PartialEq, Debug, Hash)]
+#[derive(PartialEq, Debug, Hash, Clone)]
 pub struct ClusterResource {
     pub cluster_id: Option<String>,
 }
