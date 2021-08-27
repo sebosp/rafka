@@ -8,7 +8,6 @@
 //!   KafkaServer has a Dynamic Broker Config field that owns the KafkaConfig (inversed)
 
 use crate::common::cluster_resource::ClusterResource;
-use crate::common::internals::cluster_resource_listeners::ClusterResourceListeners;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
@@ -267,14 +266,17 @@ impl KafkaServer {
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after DynamicConfigManager starts.
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
-        self.notify_cluster_listeners();
+        self.notify_cluster_listeners().await?;
 
         Ok(())
     }
 
-    fn notify_cluster_listeners(&self) -> Result<(), ()> {
-        let cluster_resource_listeners = ClusterResourceListeners::new();
-        cluster_resource_listeners.on_update(ClusterResource::new(self.cluster_id));
+    /// `notify_cluster_listeners` seems to be used by metrics to enrich the output with the
+    /// current cluster_id as well as Metadata to provide the cluster context (probably)
+    async fn notify_cluster_listeners(&self) -> Result<(), AsyncTaskError> {
+        self.async_task_tx
+            .send(AsyncTask::ClusterResource(ClusterResource::new(self.cluster_id.clone())))
+            .await?;
         Ok(())
     }
 
