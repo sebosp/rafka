@@ -16,6 +16,8 @@
 //! TODO:
 //! - Add zookeeper watcher ties for the FeatureZNode
 
+use crate::common::cluster_resource::ClusterResource;
+use crate::common::internals::cluster_resource_listeners::ClusterResourceListeners;
 use crate::server::finalize_feature_change_listener::{
     FeatureCacheUpdater, FeatureCacheUpdaterAsyncTask, FeatureCacheUpdaterError,
 };
@@ -44,6 +46,7 @@ pub enum AsyncTask {
     Zookeeper(KafkaZkClientAsyncTask),
     FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask),
     Coordinator(CoordinatorTask),
+    ClusterResource(ClusterResource),
 }
 
 #[derive(Error, Debug)]
@@ -108,6 +111,7 @@ pub struct MajordomoCoordinator {
     kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
     tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
+    cluster_resource_listeners: ClusterResourceListeners,
 }
 
 impl MajordomoCoordinator {
@@ -119,6 +123,7 @@ impl MajordomoCoordinator {
     ) -> Result<Self, AsyncTaskError> {
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
+        let cluster_resource_listeners = ClusterResourceListeners::default();
         Ok(MajordomoCoordinator {
             kafka_config,
             tx: main_tx,
@@ -126,12 +131,13 @@ impl MajordomoCoordinator {
             feature_cache_updater,
             kafka_zk_tx,
             supported_features,
+            cluster_resource_listeners,
         })
     }
 
     #[instrument]
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
-        debug!("majordomo coordinator: Preparing");
+        debug!("majordomo coordinator: Preparing",);
         self.feature_cache_updater
             .init_or_throw(self.tx.clone(), self.kafka_config.zk_connection_timeout_ms.into())
             .await?;
@@ -158,6 +164,9 @@ impl MajordomoCoordinator {
                         task,
                     )
                     .await?;
+                },
+                AsyncTask::ClusterResource(cluster_resource) => {
+                    self.notify_cluster_listeners(cluster_resource).await?;
                 },
             }
         }
@@ -202,5 +211,13 @@ impl MajordomoCoordinator {
     #[instrument]
     pub async fn shutdown(tx: mpsc::Sender<AsyncTask>) {
         tx.send(AsyncTask::Coordinator(CoordinatorTask::Shutdown)).await.unwrap();
+    }
+
+    pub async fn notify_cluster_listeners(
+        &self,
+        cluster_resource: ClusterResource,
+    ) -> Result<(), AsyncTaskError> {
+        self.cluster_resource_listeners.on_update(cluster_resource).await?;
+        Ok(())
     }
 }
