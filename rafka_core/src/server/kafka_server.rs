@@ -41,8 +41,6 @@ pub struct KafkaRequestHandlerPool;
 #[derive(Debug)]
 pub struct LogManager;
 #[derive(Debug)]
-pub struct LogDirFailureChannel;
-#[derive(Debug)]
 pub struct ReplicaManager;
 #[derive(Debug)]
 pub struct AdminManager;

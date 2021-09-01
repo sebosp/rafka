@@ -23,6 +23,7 @@ use crate::server::finalize_feature_change_listener::{
 };
 use crate::server::kafka_config::KafkaConfig;
 use crate::server::kafka_server::KafkaServerError;
+use crate::server::log_failure_channel::LogDirFailureChannel;
 use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
@@ -112,6 +113,7 @@ pub struct MajordomoCoordinator {
     tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
     cluster_resource_listeners: ClusterResourceListeners,
+    log_dir_failure_channel: LogDirFailureChannel,
 }
 
 impl MajordomoCoordinator {
@@ -124,6 +126,7 @@ impl MajordomoCoordinator {
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
         let cluster_resource_listeners = ClusterResourceListeners::default();
+        let log_dir_failure_channel = LogDirFailureChannel::new(kafka_config.log_dirs.len());
         Ok(MajordomoCoordinator {
             kafka_config,
             tx: main_tx,
@@ -132,6 +135,7 @@ impl MajordomoCoordinator {
             kafka_zk_tx,
             supported_features,
             cluster_resource_listeners,
+            log_dir_failure_channel,
         })
     }
 
