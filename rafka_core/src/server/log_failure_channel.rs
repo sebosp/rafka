@@ -29,10 +29,7 @@ impl LogDirFailureChannel {
     /// there yet.
     pub fn maybe_add_offline_log_dir(&mut self, log_dir: String, msg: String) {
         error!("maybe_add_offline_log_dir: {}", msg);
-        let log_dir_already_added = match self.offline_log_dirs.get(&log_dir) {
-            Some(_) => true,
-            None => false,
-        };
+        let log_dir_already_added = self.offline_log_dirs.get(&log_dir).is_some();
         if !log_dir_already_added {
             self.offline_log_dir_queue.push(log_dir.clone());
             self.offline_log_dirs.insert(log_dir.clone(), log_dir);

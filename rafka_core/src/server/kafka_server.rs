@@ -87,7 +87,6 @@ pub struct KafkaServer {
     pub control_plane_request_handler_pool: Option<KafkaRequestHandlerPool>, /* was null, changed to
                                                                               * Option<> */
     pub log_manager: Option<LogManager>, // was null, changed to Option<>
-    pub log_dir_failure_channel: Option<LogDirFailureChannel>, // was null, changed to Option<>
 
     pub replica_manager: Option<ReplicaManager>, // was null, changed to Option<>
     pub admin_manager: Option<AdminManager>,     // was null, changed to Option<>
@@ -157,7 +156,6 @@ impl Default for KafkaServer {
             data_plane_request_handler_pool: None,
             control_plane_request_handler_pool: None,
             log_manager: None,
-            log_dir_failure_channel: None,
             replica_manager: None,
             admin_manager: None,
             token_manager: None,
