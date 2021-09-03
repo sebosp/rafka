@@ -7,6 +7,7 @@ extern crate slog_term;
 extern crate serde_derive;
 
 pub mod common;
+pub mod log;
 pub mod majordomo;
 pub mod server;
 mod utils;

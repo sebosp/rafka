@@ -8,6 +8,7 @@
 //!   KafkaServer has a Dynamic Broker Config field that owns the KafkaConfig (inversed)
 
 use crate::common::cluster_resource::ClusterResource;
+use crate::log::log_manager::LogManager;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
@@ -39,8 +40,6 @@ pub struct SocketServer;
 #[derive(Debug)]
 pub struct KafkaRequestHandlerPool;
 #[derive(Debug)]
-pub struct LogManager;
-#[derive(Debug)]
 pub struct ReplicaManager;
 #[derive(Debug)]
 pub struct AdminManager;
@@ -56,6 +55,7 @@ pub struct TransactionCoordinator;
 pub struct KafkaController;
 #[derive(Debug)]
 pub struct MetadataCache;
+/// `BrokerTopicStats` contains metrics per topic, bytes in, bytes out, messages in, etc.
 #[derive(Debug)]
 struct BrokerTopicStats;
 
@@ -110,10 +110,11 @@ pub struct KafkaServer {
 
     pub correlation_id: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
                                     * capacity? */
+    pub config: KafkaConfig,
     pub broker_meta_props_file: String,
     pub broker_metadata_checkpoints: HashMap<String, BrokerMetadataCheckpoint>,
     _cluster_id: Option<String>, // was null, changed to Option<>
-    _broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>$
+    broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>$
 
     feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
                                                                       * Option<> */
@@ -172,10 +173,11 @@ impl Default for KafkaServer {
             broker_meta_props_file: String::from("meta.properties"),
             broker_metadata_checkpoints: HashMap::new(),
             _cluster_id: None,
-            _broker_topic_stats: None,
+            broker_topic_stats: None,
             feature_change_listener: None,
             init_time: Instant::now(),
             dynamic_broker_config: dynamic_broker_config.clone(),
+            config: KafkaConfig::default(),
             async_task_tx: majordomo_tx,
             rx: main_rx,
             quota_managers: QuotaFactory::instantiate(&dynamic_broker_config.kafka_config, time),
@@ -207,6 +209,7 @@ impl KafkaServer {
         }
         kafka_server.init_time = time;
         kafka_server.dynamic_broker_config = DynamicBrokerConfig::new(config);
+        kafka_server.config = config;
         kafka_server
     }
 
@@ -263,6 +266,17 @@ impl KafkaServer {
         // applied after DynamicConfigManager starts.
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
         self.notify_cluster_listeners().await?;
+
+        self.log_manager = LogManager::new(
+            self.config.clone(),
+            initial_offline_dirs.clone(),
+            self.broker_state,
+            self.kafka_scheduler.clone(),
+            self.init_time, // should this be re-calculated?
+            self.broker_topic_stats,
+            self.async_task_tx.clone(), /* log_dir_failure_channel needs to be acquaired through
+                                         * the async_task_tx */
+        );
 
         Ok(())
     }
