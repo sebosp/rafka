@@ -21,8 +21,8 @@ pub enum ConfigDefImportance {
 pub struct ConfigDef<T> {
     importance: ConfigDefImportance,
     doc: String,
-    // The configuration key that is used to apply this value
-    key: String,
+    /// The configuration key that is used to apply this value
+    pub key: String,
     /// `default` of the value, this would be parsed and transformed into each field type from
     /// KafkaConfig
     default: Option<String>,
@@ -69,7 +69,8 @@ where
     }
 
     pub fn with_default(mut self, default: String) -> Self {
-        //  Pre-fill the value with the default
+        //  Pre-fill the value with the default, if it doesn't parse we should panic as that means
+        //  a bug in our code, not the config params
         match default.parse::<T>() {
             Ok(val) => self.value = Some(val),
             Err(err) => {
