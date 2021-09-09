@@ -14,8 +14,9 @@ use thiserror::Error;
 use tracing::debug;
 
 // Log section
-pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_DIRS_PROP: &str = "log.dirs";
+pub const LOG_DIR_PROP: &str = "log.dir";
+pub const LOG_SEGMENT_BYTES_PROP: &str = "log.segment.bytes";
 pub const LOG_ROLL_TIME_MILLIS_PROP: &str = "log.roll.ms"; // RAFKA TODO: Missing associated ConfigDef
 pub const LOG_ROLL_TIME_HOURS_PROP: &str = "log.roll.hours"; // RAFKA TODO: Missing associated ConfigDef
 pub const LOG_ROLL_TIME_JITTER_MILLIS_PROP: &str = "log.roll.jitter.ms"; // RAFKA TODO: Missing associated ConfigDef
@@ -125,6 +126,24 @@ pub struct KafkaConfigProperties {
     producer_quota_bytes_per_second_default: ConfigDef<i64>,
     #[serde(rename = "quota.window.size.seconds")]
     quota_window_size_seconds: ConfigDef<i32>,
+    #[serde(rename = "log.roll.ms")]
+    log_roll_time_millis_prop: ConfigDef<i64>,
+    #[serde(rename = "log.roll.hours")]
+    log_roll_time_hours_prop: ConfigDef<i32>,
+    #[serde(rename = "log.roll.jitter.ms")]
+    log_roll_time_jitter_millis_prop: ConfigDef<i64>,
+    #[serde(rename = "log.roll.jitter.hours")]
+    log_roll_time_jitter_hours_prop: ConfigDef<i32>,
+    #[serde(rename = "log.retention.ms")]
+    log_retention_time_millis_prop: ConfigDef<i64>,
+    #[serde(rename = "log.retention.minutes")]
+    log_retention_time_minutes_prop: ConfigDef<i32>,
+    #[serde(rename = "log.retention.hours")]
+    log_retention_time_hours_prop: ConfigDef<i32>,
+    #[serde(rename = "log.flush.scheduler.interval.ms")]
+    log_flush_scheduler_interval_ms_prop: ConfigDef<i64>,
+    #[serde(rename = "log.flush.interval.ms")]
+    log_flush_interval_ms_prop: ConfigDef<i64>,
 }
 
 impl Default for KafkaConfigProperties {
@@ -227,11 +246,37 @@ impl Default for KafkaConfigProperties {
                 .with_doc(String::from(
                     "The time span of each sample for client quotas"
                 ))
-                .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT.to_string())
+                .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT.to_string()),
 
+    log_roll_time_millis_prop: ConfigDef::default()
+        .with_key(LOG_ROLL_TIME_MILLIS_PROP)
+        .with_importance(ConfigDefImportance::High)
+        .with_doc(format!(
+                "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_HOURS_PROP
+        )),
+    log_roll_time_hours_prop: ConfigDef::default()
+        .with_key(LOG_ROLL_TIME_HOURS_PROP)
+        .with_importance(ConfigDefImportance::High)
+        .with_doc(format!(
+                "The maximum time before a new log segment is rolled out (in hours), secondary to {} property", LOG_ROLL_TIME_MILLIS_PROP
+        ))
+        .with_default(String::from("168")), // 24 * 7
+    log_roll_time_jitter_millis_prop: ConfigDef::default()
+        .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
+        .with_importance(ConfigDefImportance::High)
+        .with_doc(format!(
+                "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_JITTER_HOURS_PROP
+        )),
+    log_roll_time_jitter_hours_prop: ConfigDef::default().,
+    log_retention_time_millis_prop: ConfigDef::default(),
+    log_retention_time_minutes_prop: ConfigDef::default(),
+    log_retention_time_hours_prop: ConfigDef::default(),
+    log_flush_scheduler_interval_ms_prop: ConfigDef::default(),
+    log_flush_interval_ms_prop: ConfigDef::default(),
         }
     }
 }
+
 impl KafkaConfigProperties {
     /// `try_from_config_property` transforms a string value from the config into our actual types
     pub fn try_set_property(
