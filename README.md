@@ -61,9 +61,12 @@ yet, that should be done later, will focus on functionality and deal with this l
 -  If zookeeper is not available, the CPU usage goes crazy, using connection timeout/etc doesn't seem to help.
 
 ## TODO
+- The properties from KafkaConfig for example could be defined but unreferenced (i.e. when we read the config file, a specific property could not be in the `match{}`
+  Find a way to derive maybe something that requires a setteable?
+- Create a KafkaConfigDefaults that contains the default values when they are computed, i.e. `pub const fn default_something((24 * 7).to_string())`
 
+## In Progress
 - PR created for zookeeper_async to fix watching over the chroot. Waiting for merge.
-
 
 ## Current java/scala process flow.
 - core/src/main/scala/kafka/Kafka.scala parses flags such as --version and creates KafkaServerStartable
