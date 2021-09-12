@@ -247,47 +247,61 @@ impl Default for KafkaConfigProperties {
                     "The time span of each sample for client quotas"
                 ))
                 .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT.to_string()),
-
-    log_roll_time_millis_prop: ConfigDef::default()
-        .with_key(LOG_ROLL_TIME_MILLIS_PROP)
-        .with_importance(ConfigDefImportance::High)
-        .with_doc(format!(
-                "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_HOURS_PROP
-        )),
-    log_roll_time_hours_prop: ConfigDef::default()
-        .with_key(LOG_ROLL_TIME_HOURS_PROP)
-        .with_importance(ConfigDefImportance::High)
-        .with_doc(format!(
-                "The maximum time before a new log segment is rolled out (in hours), secondary to {} property", LOG_ROLL_TIME_MILLIS_PROP
-        ))
-        .with_default(String::from("168")), // 24 * 7 // RAFKA TODO: Make this lazy_static!
-    log_roll_time_jitter_millis_prop: ConfigDef::default()
-        .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
-        .with_importance(ConfigDefImportance::High)
-        .with_doc(format!(
-                "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_JITTER_HOURS_PROP
-        )),
-    log_roll_time_jitter_hours_prop: ConfigDef::default()
-        .with_key(LOG_ROLL_TIME_JITTER_HOURS_PROP)
-        .with_importance(ConfigDefImportance::High)
-        .with_doc(format!(
-                 "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary to {} property", LOG_ROLL_TIME_JITTER_MILLIS_PROP
-        )),
-    log_retention_time_millis_prop: ConfigDef::default()
-        .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
-        .with_importance(ConfigDefImportance::High)
-        .with_doc(format!(
-                "The number of milliseconds to keep a log file before deleting it (in milliseconds), If not set, the value in {} is used. If set to -1, no time limit is applied.", LOG_RETENTION_TIME_MINUTES_PROP
-        )),
-    log_retention_time_minutes_prop: ConfigDef::default()
-        .with_key(LOG_RETENTION_TIME_MINUTES_PROP)
-        .with_importance(ConfigDefImportance::High)
-        .with_doc(format!(
-                "The number of minutes to keep a log file before deleting it (in minutes), secondary to {} property. If not set, the value in {} is used", LOG_RETENTION_TIME_MILLIS_PROP, LOG_RETENTION_TIME_HOURS_PROP
-        )),
-    log_retention_time_hours_prop: ConfigDef::default(),
-    log_flush_scheduler_interval_ms_prop: ConfigDef::default(),
-    log_flush_interval_ms_prop: ConfigDef::default(),
+            log_roll_time_millis_prop: ConfigDef::default()
+                .with_key(LOG_ROLL_TIME_MILLIS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                        "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_HOURS_PROP
+                )),
+            log_roll_time_hours_prop: ConfigDef::default()
+                .with_key(LOG_ROLL_TIME_HOURS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                        "The maximum time before a new log segment is rolled out (in hours), secondary to {} property", LOG_ROLL_TIME_MILLIS_PROP
+                ))
+                .with_default(String::from("168")), // 24 * 7 // RAFKA TODO: Make this lazy_static!
+            log_roll_time_jitter_millis_prop: ConfigDef::default()
+                .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                        "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_JITTER_HOURS_PROP
+                )),
+            log_roll_time_jitter_hours_prop: ConfigDef::default()
+                .with_key(LOG_ROLL_TIME_JITTER_HOURS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                         "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary to {} property", LOG_ROLL_TIME_JITTER_MILLIS_PROP
+                )),
+            log_retention_time_millis_prop: ConfigDef::default()
+                .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                        "The number of milliseconds to keep a log file before deleting it (in milliseconds), If not set, the value in {} is used. If set to -1, no time limit is applied.", LOG_RETENTION_TIME_MINUTES_PROP
+                )),
+            log_retention_time_minutes_prop: ConfigDef::default()
+                .with_key(LOG_RETENTION_TIME_MINUTES_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                        "The number of minutes to keep a log file before deleting it (in minutes), secondary to {} property. If not set, the value in {} is used", LOG_RETENTION_TIME_MILLIS_PROP, LOG_RETENTION_TIME_HOURS_PROP
+                )),
+            log_retention_time_hours_prop: ConfigDef::default()
+                .with_key(LOG_RETENTION_TIME_HOURS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                    "The number of hours to keep a log file before deleting it (in hours), tertiary to {} property", LOG_RETENTION_TIME_MILLIS_PROP
+                    ))
+                .with_default(String::from("168")), // 24 * 7 // RAFKA TODO: Make this lazy_static!
+            log_flush_scheduler_interval_ms_prop: ConfigDef::default()
+                .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from("The frequency in ms that the log flusher checks whether any log needs to be flushed to disk"))
+                .with_default(u64::MAX.to_string()),
+            log_flush_interval_ms_prop: ConfigDef::default()
+                .with_key(LOG_FLUSH_INTERVAL_MS_PROP)
+                .with_doc(format!(
+                        "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. If not set, the value in {} is used", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP
+                ))
+                .with_default(u64::MAX.to_string()),
         }
     }
 }
