@@ -26,6 +26,7 @@ pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes"; // RA
 pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours"; // RAFKA TODO: Missing associated ConfigDef
 pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
 pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
+pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
 
 // General section
 pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
@@ -144,6 +145,8 @@ pub struct KafkaConfigProperties {
     log_flush_scheduler_interval_ms_prop: ConfigDef<i64>,
     #[serde(rename = "log.flush.interval.ms")]
     log_flush_interval_ms_prop: ConfigDef<i64>,
+    #[serde(rename = "num.recovery.threads.per.data.dir")]
+    num_recovery_threads_per_data_dir_prop: ConfigDef<i32>,
 }
 
 impl Default for KafkaConfigProperties {
@@ -302,6 +305,12 @@ impl Default for KafkaConfigProperties {
                         "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. If not set, the value in {} is used", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP
                 ))
                 .with_default(u64::MAX.to_string()),
+            num_recovery_threads_per_data_dir_prop: ConfigDef::default()
+                .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
+                .with_doc(String::from(
+                        "The number of threads per data directory to be used for log recovery at startup and flushing at shutdown"
+                ))
+                .with_default(String::from("1")),
         }
     }
 }
@@ -541,6 +550,7 @@ impl KafkaConfigProperties {
         let consumer_quota_bytes_per_second_default =
             self.resolve_consumer_quota_bytes_per_second_default()?;
         let quota_window_size_seconds = self.resolve_quota_window_size_seconds()?;
+        let num_recovery_threads_per_data_dir = self.resolve_num_recovery_threads_per_data_dir()?;
         let kafka_config = KafkaConfig {
             zk_connect,
             zk_session_timeout_ms,
@@ -552,6 +562,7 @@ impl KafkaConfigProperties {
             broker_id,
             consumer_quota_bytes_per_second_default,
             quota_window_size_seconds,
+            num_recovery_threads_per_data_dir,
         };
         kafka_config.validate_values()
     }
@@ -569,6 +580,7 @@ pub struct KafkaConfig {
     pub broker_id: i32,
     pub consumer_quota_bytes_per_second_default: i64,
     pub quota_window_size_seconds: i32,
+    pub num_recovery_threads_per_data_dir: i32,
 }
 
 impl KafkaConfig {
