@@ -17,8 +17,8 @@ use tracing::debug;
 pub const LOG_DIRS_PROP: &str = "log.dirs";
 pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_SEGMENT_BYTES_PROP: &str = "log.segment.bytes";
-pub const LOG_ROLL_TIME_MILLIS_PROP: &str = "log.roll.ms"; // RAFKA TODO: Missing associated ConfigDef
-pub const LOG_ROLL_TIME_HOURS_PROP: &str = "log.roll.hours"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_ROLL_TIME_MILLIS_PROP: &str = "log.roll.ms";
+pub const LOG_ROLL_TIME_HOURS_PROP: &str = "log.roll.hours";
 pub const LOG_ROLL_TIME_JITTER_MILLIS_PROP: &str = "log.roll.jitter.ms"; // RAFKA TODO: Missing associated ConfigDef
 pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours"; // RAFKA TODO: Missing associated ConfigDef
 pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms"; // RAFKA TODO: Missing associated ConfigDef
@@ -351,6 +351,12 @@ impl KafkaConfigProperties {
             ADVERTISED_LISTENERS_PROP => {
                 self.advertised_listeners.try_set_parsed_value(property_value)?
             },
+            LOG_ROLL_TIME_MILLIS_PROP => {
+                self.log_roll_time_millis_prop.try_set_parsed_value(property_value)?
+            },
+            LOG_ROLL_TIME_HOURS_PROP => {
+                self.log_roll_time_hours_prop.try_set_parsed_value(property_value)?
+            },
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         };
         Ok(())
@@ -371,6 +377,7 @@ impl KafkaConfigProperties {
             CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP.to_string(),
             PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP.to_string(),
             QUOTA_WINDOW_SIZE_SECONDS_PROP.to_string(),
+            LOG_ROLL_TIME_MILLIS_PROP.to_string(),
         ]
     }
 
