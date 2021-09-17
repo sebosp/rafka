@@ -19,11 +19,11 @@ pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_SEGMENT_BYTES_PROP: &str = "log.segment.bytes";
 pub const LOG_ROLL_TIME_MILLIS_PROP: &str = "log.roll.ms";
 pub const LOG_ROLL_TIME_HOURS_PROP: &str = "log.roll.hours";
-pub const LOG_ROLL_TIME_JITTER_MILLIS_PROP: &str = "log.roll.jitter.ms"; // RAFKA TODO: Missing associated ConfigDef
-pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours"; // RAFKA TODO: Missing associated ConfigDef
-pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms"; // RAFKA TODO: Missing associated ConfigDef
-pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes"; // RAFKA TODO: Missing associated ConfigDef
-pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_ROLL_TIME_JITTER_MILLIS_PROP: &str = "log.roll.jitter.ms";
+pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours";
+pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms";
+pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
+pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
 pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
 pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
@@ -356,6 +356,24 @@ impl KafkaConfigProperties {
             },
             LOG_ROLL_TIME_HOURS_PROP => {
                 self.log_roll_time_hours_prop.try_set_parsed_value(property_value)?
+            },
+            LOG_ROLL_TIME_JITTER_MILLIS_PROP => {
+                self.log_roll_time_jitter_millis_prop.try_set_parsed_value(property_value)?
+            },
+            LOG_ROLL_TIME_JITTER_HOURS_PROP => {
+                self.log_roll_time_jitter_hours_prop.try_set_parsed_value(property_value)?
+            },
+            LOG_RETENTION_TIME_MILLIS_PROP => {
+                self.log_retention_time_millis_prop.try_set_parsed_value(property_value)?
+            },
+            LOG_RETENTION_TIME_MINUTES_PROP => {
+                self.log_retention_time_minutes_prop.try_set_parsed_value(property_value)?
+            },
+            LOG_RETENTION_TIME_HOURS_PROP => {
+                self.log_retention_time_hours_prop.try_set_parsed_value(property_value)?
+            },
+            LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => {
+                self.log_flush_scheduler_interval_ms_prop.try_set_parsed_value(property_value)?
             },
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         };
