@@ -24,8 +24,8 @@ pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours";
 pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms";
 pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
 pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
-pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
-pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms"; // RAFKA TODO: Missing associated ConfigDef
+pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms";
+pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms";
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
 
 // General section
@@ -128,25 +128,25 @@ pub struct KafkaConfigProperties {
     #[serde(rename = "quota.window.size.seconds")]
     quota_window_size_seconds: ConfigDef<i32>,
     #[serde(rename = "log.roll.ms")]
-    log_roll_time_millis_prop: ConfigDef<i64>,
+    log_roll_time_millis: ConfigDef<i64>,
     #[serde(rename = "log.roll.hours")]
-    log_roll_time_hours_prop: ConfigDef<i32>,
+    log_roll_time_hours: ConfigDef<i32>,
     #[serde(rename = "log.roll.jitter.ms")]
-    log_roll_time_jitter_millis_prop: ConfigDef<i64>,
+    log_roll_time_jitter_millis: ConfigDef<i64>,
     #[serde(rename = "log.roll.jitter.hours")]
-    log_roll_time_jitter_hours_prop: ConfigDef<i32>,
+    log_roll_time_jitter_hours: ConfigDef<i32>,
     #[serde(rename = "log.retention.ms")]
-    log_retention_time_millis_prop: ConfigDef<i64>,
+    log_retention_time_millis: ConfigDef<i64>,
     #[serde(rename = "log.retention.minutes")]
-    log_retention_time_minutes_prop: ConfigDef<i32>,
+    log_retention_time_minutes: ConfigDef<i32>,
     #[serde(rename = "log.retention.hours")]
-    log_retention_time_hours_prop: ConfigDef<i32>,
+    log_retention_time_hours: ConfigDef<i32>,
     #[serde(rename = "log.flush.scheduler.interval.ms")]
-    log_flush_scheduler_interval_ms_prop: ConfigDef<i64>,
+    log_flush_scheduler_interval_ms: ConfigDef<i64>,
     #[serde(rename = "log.flush.interval.ms")]
-    log_flush_interval_ms_prop: ConfigDef<i64>,
+    log_flush_interval_ms: ConfigDef<i64>,
     #[serde(rename = "num.recovery.threads.per.data.dir")]
-    num_recovery_threads_per_data_dir_prop: ConfigDef<i32>,
+    num_recovery_threads_per_data_dir: ConfigDef<i32>,
 }
 
 impl Default for KafkaConfigProperties {
@@ -250,62 +250,62 @@ impl Default for KafkaConfigProperties {
                     "The time span of each sample for client quotas"
                 ))
                 .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT.to_string()),
-            log_roll_time_millis_prop: ConfigDef::default()
+            log_roll_time_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                         "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_HOURS_PROP
                 )),
-            log_roll_time_hours_prop: ConfigDef::default()
+            log_roll_time_hours: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                         "The maximum time before a new log segment is rolled out (in hours), secondary to {} property", LOG_ROLL_TIME_MILLIS_PROP
                 ))
                 .with_default(String::from("168")), // 24 * 7 // RAFKA TODO: Make this lazy_static!
-            log_roll_time_jitter_millis_prop: ConfigDef::default()
+            log_roll_time_jitter_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                         "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_JITTER_HOURS_PROP
                 )),
-            log_roll_time_jitter_hours_prop: ConfigDef::default()
+            log_roll_time_jitter_hours: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                          "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary to {} property", LOG_ROLL_TIME_JITTER_MILLIS_PROP
                 )),
-            log_retention_time_millis_prop: ConfigDef::default()
+            log_retention_time_millis: ConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                         "The number of milliseconds to keep a log file before deleting it (in milliseconds), If not set, the value in {} is used. If set to -1, no time limit is applied.", LOG_RETENTION_TIME_MINUTES_PROP
                 )),
-            log_retention_time_minutes_prop: ConfigDef::default()
+            log_retention_time_minutes: ConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_MINUTES_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                         "The number of minutes to keep a log file before deleting it (in minutes), secondary to {} property. If not set, the value in {} is used", LOG_RETENTION_TIME_MILLIS_PROP, LOG_RETENTION_TIME_HOURS_PROP
                 )),
-            log_retention_time_hours_prop: ConfigDef::default()
+            log_retention_time_hours: ConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                     "The number of hours to keep a log file before deleting it (in hours), tertiary to {} property", LOG_RETENTION_TIME_MILLIS_PROP
                     ))
                 .with_default(String::from("168")), // 24 * 7 // RAFKA TODO: Make this lazy_static!
-            log_flush_scheduler_interval_ms_prop: ConfigDef::default()
+            log_flush_scheduler_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from("The frequency in ms that the log flusher checks whether any log needs to be flushed to disk"))
                 .with_default(u64::MAX.to_string()),
-            log_flush_interval_ms_prop: ConfigDef::default()
+            log_flush_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_INTERVAL_MS_PROP)
                 .with_doc(format!(
                         "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. If not set, the value in {} is used", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP
                 ))
                 .with_default(u64::MAX.to_string()),
-            num_recovery_threads_per_data_dir_prop: ConfigDef::default()
+            num_recovery_threads_per_data_dir: ConfigDef::default()
                 .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
                 .with_doc(String::from(
                         "The number of threads per data directory to be used for log recovery at startup and flushing at shutdown"
@@ -352,28 +352,34 @@ impl KafkaConfigProperties {
                 self.advertised_listeners.try_set_parsed_value(property_value)?
             },
             LOG_ROLL_TIME_MILLIS_PROP => {
-                self.log_roll_time_millis_prop.try_set_parsed_value(property_value)?
+                self.log_roll_time_millis.try_set_parsed_value(property_value)?
             },
             LOG_ROLL_TIME_HOURS_PROP => {
-                self.log_roll_time_hours_prop.try_set_parsed_value(property_value)?
+                self.log_roll_time_hours.try_set_parsed_value(property_value)?
             },
             LOG_ROLL_TIME_JITTER_MILLIS_PROP => {
-                self.log_roll_time_jitter_millis_prop.try_set_parsed_value(property_value)?
+                self.log_roll_time_jitter_millis.try_set_parsed_value(property_value)?
             },
             LOG_ROLL_TIME_JITTER_HOURS_PROP => {
-                self.log_roll_time_jitter_hours_prop.try_set_parsed_value(property_value)?
+                self.log_roll_time_jitter_hours.try_set_parsed_value(property_value)?
             },
             LOG_RETENTION_TIME_MILLIS_PROP => {
-                self.log_retention_time_millis_prop.try_set_parsed_value(property_value)?
+                self.log_retention_time_millis.try_set_parsed_value(property_value)?
             },
             LOG_RETENTION_TIME_MINUTES_PROP => {
-                self.log_retention_time_minutes_prop.try_set_parsed_value(property_value)?
+                self.log_retention_time_minutes.try_set_parsed_value(property_value)?
             },
             LOG_RETENTION_TIME_HOURS_PROP => {
-                self.log_retention_time_hours_prop.try_set_parsed_value(property_value)?
+                self.log_retention_time_hours.try_set_parsed_value(property_value)?
             },
             LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => {
-                self.log_flush_scheduler_interval_ms_prop.try_set_parsed_value(property_value)?
+                self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
+            },
+            LOG_FLUSH_INTERVAL_MS_PROP => {
+                self.log_flush_interval_ms.try_set_parsed_value(property_value)?
+            },
+            NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => {
+                self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
             },
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         };
@@ -561,6 +567,24 @@ impl KafkaConfigProperties {
         }
     }
 
+    pub fn resolve_num_recovery_threads_per_data_dir(&mut self) -> Result<i32, KafkaConfigError> {
+        if let Some(val) = self.num_recovery_threads_per_data_dir.get_value() {
+            if *val < 1 {
+                Err(KafkaConfigError::InvalidValue(format!(
+                    "{}: '{}' should be at least 1",
+                    NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP, *val
+                )))
+            } else {
+                Ok(*val)
+            }
+        } else {
+            panic!(
+                "quota_window_size_seconds has a default but found its value to be None, bug in \
+                 parsing defaults"
+            );
+        }
+    }
+
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
@@ -575,6 +599,7 @@ impl KafkaConfigProperties {
         let consumer_quota_bytes_per_second_default =
             self.resolve_consumer_quota_bytes_per_second_default()?;
         let quota_window_size_seconds = self.resolve_quota_window_size_seconds()?;
+        let num_recovery_threads_per_data_dir = self.resolve_num_recovery_threads_per_data_dir()?;
         let num_recovery_threads_per_data_dir = self.resolve_num_recovery_threads_per_data_dir()?;
         let kafka_config = KafkaConfig {
             zk_connect,
@@ -605,6 +630,17 @@ pub struct KafkaConfig {
     pub broker_id: i32,
     pub consumer_quota_bytes_per_second_default: i64,
     pub quota_window_size_seconds: i32,
+    pub advertised_listeners: String,
+    pub producer_quota_bytes_per_second_default: i64,
+    pub log_roll_time_millis: i64,
+    pub log_roll_time_hours: i32,
+    pub log_roll_time_jitter_millis: i64,
+    pub log_roll_time_jitter_hours: i32,
+    pub log_retention_time_millis: i64,
+    pub log_retention_time_minutes: i32,
+    pub log_retention_time_hours: i32,
+    pub log_flush_scheduler_interval_ms: i64,
+    pub log_flush_interval_ms: i64,
     pub num_recovery_threads_per_data_dir: i32,
 }
 
