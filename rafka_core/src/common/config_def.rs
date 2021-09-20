@@ -32,7 +32,7 @@ pub struct ConfigDef<T> {
     /// The current value, be it the default or overwritten by config
     value: Option<T>,
     /// A validator to ensure the new field value is correct
-    validator: Option<Box<dyn Fn(String) -> T>>,
+    validator: Option<Box<dyn Fn(String) -> Result<T, KafkaConfigError>>>,
 }
 
 impl<T> fmt::Debug for ConfigDef<T>
@@ -117,7 +117,10 @@ where
         self
     }
 
-    pub fn with_validator(mut self, validator: Box<dyn Fn(String) -> T>) -> Self {
+    pub fn with_validator(
+        mut self,
+        validator: Box<dyn Fn(String) -> Result<T, KafkaConfigError>>,
+    ) -> Self {
         self.validator = Some(validator);
         self
     }
