@@ -96,56 +96,32 @@ impl PartialEq for KafkaConfigError {
     }
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 pub struct KafkaConfigProperties {
-    #[serde(rename = "zookeeper.connect")]
     zk_connect: ConfigDef<String>,
-    #[serde(rename = "zookeeper.session.timeout.ms")]
     zk_session_timeout_ms: ConfigDef<u32>,
-    #[serde(rename = "zookeeper.connection.timeout.ms")]
     zk_connection_timeout_ms: ConfigDef<u32>,
     // Singular log.dir
-    #[serde(rename = "log.dir")]
     log_dir: ConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
-    #[serde(rename = "log.dirs")]
     log_dirs: ConfigDef<String>,
-    #[serde(rename = "broker.id.generation.enable")]
     broker_id_generation_enable: ConfigDef<bool>,
-    #[serde(rename = "reserved.broker.max.id")]
     reserved_broker_max_id: ConfigDef<i32>,
-    #[serde(rename = "broker.id")]
     broker_id: ConfigDef<i32>,
-    #[serde(rename = "zookeeper.max.in.flight.requests")]
     zk_max_in_flight_requests: ConfigDef<u32>,
-    #[serde(rename = "advertised.listeners")]
     advertised_listeners: ConfigDef<String>,
-    #[serde(rename = "quota.consumer.default")]
     consumer_quota_bytes_per_second_default: ConfigDef<i64>,
-    #[serde(rename = "quota.producer.default")]
     producer_quota_bytes_per_second_default: ConfigDef<i64>,
-    #[serde(rename = "quota.window.size.seconds")]
     quota_window_size_seconds: ConfigDef<i32>,
-    #[serde(rename = "log.roll.ms")]
     log_roll_time_millis: ConfigDef<i64>,
-    #[serde(rename = "log.roll.hours")]
     log_roll_time_hours: ConfigDef<i32>,
-    #[serde(rename = "log.roll.jitter.ms")]
     log_roll_time_jitter_millis: ConfigDef<i64>,
-    #[serde(rename = "log.roll.jitter.hours")]
     log_roll_time_jitter_hours: ConfigDef<i32>,
-    #[serde(rename = "log.retention.ms")]
     log_retention_time_millis: ConfigDef<i64>,
-    #[serde(rename = "log.retention.minutes")]
     log_retention_time_minutes: ConfigDef<i32>,
-    #[serde(rename = "log.retention.hours")]
     log_retention_time_hours: ConfigDef<i32>,
-    #[serde(rename = "log.flush.scheduler.interval.ms")]
     log_flush_scheduler_interval_ms: ConfigDef<i64>,
-    #[serde(rename = "log.flush.interval.ms")]
     log_flush_interval_ms: ConfigDef<i64>,
-    #[serde(rename = "num.recovery.threads.per.data.dir")]
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
 }
 
@@ -207,7 +183,21 @@ impl Default for KafkaConfigProperties {
                 .with_key(RESERVED_BROKER_MAX_ID_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
-                .with_default(String::from("1000")),
+                .with_default(String::from("1000"))
+                .with_validator(Box::new(|data| {
+                    match data {
+                        Some(val) =>
+                            if *val < 0 {
+                                Err(KafkaConfigError::InvalidValue(format!(
+                                    "{}: '{}' should be at least 0",
+                                  RESERVED_BROKER_MAX_ID_PROP, *val
+                                )))
+                           } else {
+                                Ok(())
+                         },
+                        None => panic!("reserved_broker_max_id has a default but found its value to be None, bug in parsing defaults")
+                    }
+                })),
             broker_id: ConfigDef::default()
                 .with_key(BROKER_ID_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -419,7 +409,7 @@ impl KafkaConfigProperties {
     }
 
     /// `resolve_zk_session_timeout_ms` Returns the session timeout when connecting to zookeeper
-    fn resolve_zk_session_timeout_ms(&mut self) -> Result<u32, KafkaConfigError> {
+    fn resolve_zk_session_timeout_ms(&self) -> Result<u32, KafkaConfigError> {
         // NOTE: zk_session_timeout_ms has a default, so it is never None
         match self.zk_session_timeout_ms.get_value() {
             Some(val) => Ok(*val),
@@ -476,21 +466,8 @@ impl KafkaConfigProperties {
     }
 
     fn resolve_reserved_broker_max_id(&mut self) -> Result<i32, KafkaConfigError> {
-        if let Some(reserved_broker_max_id) = self.reserved_broker_max_id.get_value() {
-            if *reserved_broker_max_id < 0 {
-                Err(KafkaConfigError::InvalidValue(format!(
-                    "{}: '{}' should be at least 0",
-                    RESERVED_BROKER_MAX_ID_PROP, *reserved_broker_max_id
-                )))
-            } else {
-                Ok(*reserved_broker_max_id)
-            }
-        } else {
-            panic!(
-                "reserved_broker_max_id has a default but found its value to be None, bug in \
-                 parsing defaults"
-            );
-        }
+        self.reserved_broker_max_id.validate()?;
+        Ok(*self.reserved_broker_max_id.get_value().unwrap())
     }
 
     fn resolve_broker_id(&mut self) -> Result<i32, KafkaConfigError> {
