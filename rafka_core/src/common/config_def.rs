@@ -24,7 +24,7 @@ pub struct ConfigDef<T> {
     importance: ConfigDefImportance,
     /// `default` of the value, this would be parsed and transformed into each field type from
     /// KafkaConfig
-    default: Option<String>,
+    default: Option<T>,
     /// The documentation of the field, used for showing errors
     doc: String,
     /// Whether or not this variable was provided by the configuration file.
@@ -103,17 +103,25 @@ where
         self
     }
 
-    pub fn with_default(mut self, default: String) -> Self {
-        //  Pre-fill the value with the default, if it doesn't parse we should panic as that means
-        //  a bug in our code, not the config params
+    pub fn with_default(mut self, default: T) -> Self {
+        self.value = Some(default);
+        self.default = Some(default);
+        self
+    }
+
+    pub fn with_parseable_default(mut self, default: String) -> Self {
+        // Pre-fill the value with the default, if it doesn't parse we should panic as that means
+        // a bug in our code, not the config params
         match default.parse::<T>() {
-            Ok(val) => self.value = Some(val),
+            Ok(val) => {
+                self.value = Some(val);
+                self.default = Some(val);
+            },
             Err(err) => {
                 error!("Unable to parse default property for {:?}: {}", self.key, err);
                 panic!();
             },
         }
-        self.default = Some(default);
         self
     }
 

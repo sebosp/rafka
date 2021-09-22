@@ -136,14 +136,14 @@ impl Default for KafkaConfigProperties {
                     host and port of a ZooKeeper server. To allow connecting through other ZooKeeper nodes when that ZooKeeper machine is
                     down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.
                     The server can also have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data under some path in the global ZooKeeper namespace.
-                    For example to give a chroot path of <code>/chroot/path</code> you would give the connection string as <code>hostname1:port1,hostname2:port2,hostname3:port3/chroot/path</code>.
+                    For example to give a chroot path of `/chroot/path` you would give the connection string as `hostname1:port1,hostname2:port2,hostname3:port3/chroot/path`.
                     "#
                 )),
             zk_session_timeout_ms: ConfigDef::default()
                 .with_key(ZOOKEEPER_SESSION_TIMEOUT_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from("Zookeeper session timeout"))
-                .with_default(String::from("18000")),
+                .with_default(18000),
             zk_connection_timeout_ms: ConfigDef::default()
                 .with_key(ZOOKEEPER_CONNECTION_TIMEOUT_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -156,7 +156,7 @@ impl Default for KafkaConfigProperties {
                 .with_doc(String::from(
                     "The maximum number of unacknowledged requests the client will send to Zookeeper before blocking."
                 ))
-                .with_default(String::from("10")),
+                .with_default(10),
             log_dir: ConfigDef::default()
                 .with_key(LOG_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -178,12 +178,12 @@ impl Default for KafkaConfigProperties {
                     format!("Enable automatic broker id generation on the server. When enabled the value \
                      configured for {} should be reviewed.", RESERVED_BROKER_MAX_ID_PROP)
                 )
-                .with_default(String::from("true")),
+                .with_default(true),
             reserved_broker_max_id: ConfigDef::default()
                 .with_key(RESERVED_BROKER_MAX_ID_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
-                .with_default(String::from("1000"))
+                .with_default(1000)
                 .with_validator(Box::new(|data| {
                     match data {
                         Some(val) =>
@@ -206,7 +206,7 @@ impl Default for KafkaConfigProperties {
                      To avoid conflicts between zookeeper generated broker id's and user configured \
                      broker id's, generated broker ids start from {} + 1.", RESERVED_BROKER_MAX_ID_PROP),
                 )
-                .with_default(String::from("-1")),
+                .with_default(-1),
             advertised_listeners: ConfigDef::default()
                 .with_key(ADVERTISED_LISTENERS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -215,8 +215,7 @@ impl Default for KafkaConfigProperties {
                     In IaaS environments, this may need to be different from the interface to which the broker binds. \
                     If this is not set, the value for `listeners` will be used. \
                     Unlike `listeners` it is not valid to advertise the 0.0.0.0 meta-address "
-                ))
-                .with_default(String::from("-1")),
+                )),
             consumer_quota_bytes_per_second_default: ConfigDef::default()
                 .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -224,7 +223,7 @@ impl Default for KafkaConfigProperties {
                     "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
                     Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
                 ))
-                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT.to_string()),
+                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT),
             producer_quota_bytes_per_second_default: ConfigDef::default()
                 .with_key(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -232,14 +231,14 @@ impl Default for KafkaConfigProperties {
                     "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
                     Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
                 ))
-                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT.to_string()),
+                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT),
             quota_window_size_seconds: ConfigDef::default()
                 .with_key(QUOTA_WINDOW_SIZE_SECONDS_PROP)
                 .with_importance(ConfigDefImportance::Low)
                 .with_doc(String::from(
                     "The time span of each sample for client quotas"
                 ))
-                .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT.to_string()),
+                .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT),
             log_roll_time_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -252,7 +251,7 @@ impl Default for KafkaConfigProperties {
                 .with_doc(format!(
                         "The maximum time before a new log segment is rolled out (in hours), secondary to {} property", LOG_ROLL_TIME_MILLIS_PROP
                 ))
-                .with_default(String::from("168")), // 24 * 7 // RAFKA TODO: Make this lazy_static!
+                .with_default(24 * 7),
             log_roll_time_jitter_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -283,24 +282,24 @@ impl Default for KafkaConfigProperties {
                 .with_doc(format!(
                     "The number of hours to keep a log file before deleting it (in hours), tertiary to {} property", LOG_RETENTION_TIME_MILLIS_PROP
                     ))
-                .with_default(String::from("168")), // 24 * 7 // RAFKA TODO: Make this lazy_static!
+                .with_default(24 * 7),
             log_flush_scheduler_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from("The frequency in ms that the log flusher checks whether any log needs to be flushed to disk"))
-                .with_default(u64::MAX.to_string()),
+                .with_default(i64::MAX),
             log_flush_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_INTERVAL_MS_PROP)
                 .with_doc(format!(
                         "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. If not set, the value in {} is used", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP
                 ))
-                .with_default(u64::MAX.to_string()),
+                .with_default(i64::MAX),
             num_recovery_threads_per_data_dir: ConfigDef::default()
                 .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
                 .with_doc(String::from(
                         "The number of threads per data directory to be used for log recovery at startup and flushing at shutdown"
                 ))
-                .with_default(String::from("1")),
+                .with_default(1),
         }
     }
 }
