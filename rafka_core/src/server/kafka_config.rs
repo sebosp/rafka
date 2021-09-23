@@ -666,6 +666,26 @@ impl Default for KafkaConfig {
             config_properties.resolve_consumer_quota_bytes_per_second_default().unwrap();
         let quota_window_size_seconds =
             config_properties.resolve_quota_window_size_seconds().unwrap();
+        let advertised_listeners = config_properties.resolve_advertised_listeners().unwrap();
+        let producer_quota_bytes_per_second_default =
+            config_properties.resolve_producer_quota_bytes_per_second_default().unwrap();
+        let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
+        let log_roll_time_hours = config_properties.resolve_log_roll_time_hours().unwrap();
+        let log_roll_time_jitter_millis =
+            config_properties.resolve_log_roll_time_jitter_millis().unwrap();
+        let log_roll_time_jitter_hours =
+            config_properties.resolve_log_roll_time_jitter_hours().unwrap();
+        let log_retention_time_millis =
+            config_properties.resolve_log_retention_time_millis().unwrap();
+        let log_retention_time_minutes =
+            config_properties.resolve_log_retention_time_minutes().unwrap();
+        let log_retention_time_hours =
+            config_properties.resolve_log_retention_time_hours().unwrap();
+        let log_flush_scheduler_interval_ms =
+            config_properties.resolve_log_flush_scheduler_interval_ms().unwrap();
+        let log_flush_interval_ms = config_properties.resolve_log_flush_interval_ms().unwrap();
+        let num_recovery_threads_per_data_dir =
+            config_properties.resolve_num_recovery_threads_per_data_dir().unwrap();
         Self {
             zk_connect,
             zk_session_timeout_ms,
@@ -677,6 +697,18 @@ impl Default for KafkaConfig {
             broker_id,
             consumer_quota_bytes_per_second_default,
             quota_window_size_seconds,
+            advertised_listeners,
+            producer_quota_bytes_per_second_default,
+            log_roll_time_millis,
+            log_roll_time_hours,
+            log_roll_time_jitter_millis,
+            log_roll_time_jitter_hours,
+            log_retention_time_millis,
+            log_retention_time_minutes,
+            log_retention_time_hours,
+            log_flush_scheduler_interval_ms,
+            log_flush_interval_ms,
+            num_recovery_threads_per_data_dir,
         }
     }
 }
