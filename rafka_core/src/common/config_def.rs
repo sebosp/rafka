@@ -163,6 +163,22 @@ where
         self.provided
     }
 
+    pub fn has_default(&self) -> bool {
+        self.default.is_some()
+    }
+
+    /// `unwrap_value` should only be used for ConfigDef's  that have a default, this is an
+    /// infallible operation, it unwraps. It is up to the caller to know which fields are safe to
+    /// unwrap
+    pub fn unwrap_value(&self) -> T {
+        match self.value {
+            Some(val) => val,
+            None => {
+                panic!("{:?} value is None. ", self);
+            },
+        }
+    }
+
     pub fn validate(&self) -> Result<(), KafkaConfigError> {
         match self.validator {
             Some(validator) => (validator)(self.value.as_ref()),
