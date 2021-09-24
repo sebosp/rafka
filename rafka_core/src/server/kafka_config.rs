@@ -156,7 +156,19 @@ impl Default for KafkaConfigProperties {
                 .with_doc(String::from(
                     "The maximum number of unacknowledged requests the client will send to Zookeeper before blocking."
                 ))
-                .with_default(10),
+                .with_default(10)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    let val = data.unwrap();
+                    if *val < 1 {
+                        // RAFKA TODO: This doesn't make much sense if it's u32...
+                        Err(KafkaConfigError::InvalidValue(format!(
+                            "{}: '{}' should be at least 0",
+                            ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS, *val
+                        )))
+                    } else {
+                        Ok(())
+                    }})),
             log_dir: ConfigDef::default()
                 .with_key(LOG_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -185,19 +197,16 @@ impl Default for KafkaConfigProperties {
                 .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
                 .with_default(1000)
                 .with_validator(Box::new(|data| {
-                    match data {
-                        Some(val) =>
-                            if *val < 0 {
-                                Err(KafkaConfigError::InvalidValue(format!(
-                                    "{}: '{}' should be at least 0",
-                                  RESERVED_BROKER_MAX_ID_PROP, *val
-                                )))
-                           } else {
-                                Ok(())
-                         },
-                        None => panic!("reserved_broker_max_id has a default but found its value to be None, bug in parsing defaults")
-                    }
-                })),
+                    // Safe to unwrap, we have a default
+                    let val = data.unwrap();
+                    if *val < 0 {
+                        Err(KafkaConfigError::InvalidValue(format!(
+                            "{}: '{}' should be at least 0",
+                            RESERVED_BROKER_MAX_ID_PROP, *val
+                        )))
+                    } else {
+                        Ok(())
+                }})),
             broker_id: ConfigDef::default()
                 .with_key(BROKER_ID_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -409,18 +418,8 @@ impl KafkaConfigProperties {
 
     /// `resolve_zk_session_timeout_ms` Returns the session timeout when connecting to zookeeper
     fn resolve_zk_session_timeout_ms(&self) -> Result<u32, KafkaConfigError> {
-        // NOTE: zk_session_timeout_ms has a default, so it is never None
-        match self.zk_session_timeout_ms.get_value() {
-            Some(val) => Ok(*val),
-            None => {
-                // TODO: Find a way to make it not-compile of the value is None and the default is
-                // not None
-                panic!(
-                    "zk_session_timeout_ms has a default but found its value to be None, bug in \
-                     parsing defaults"
-                );
-            },
-        }
+        // zk_session_timeout_ms has a default, so it is never None
+        Ok(self.zk_session_timeout_ms.unwrap_value())
     }
 
     /// `resolve_zk_connection_timeout_ms` Satisties REQ-01, if zk_connection_timeout_ms is unset
@@ -488,7 +487,7 @@ impl KafkaConfigProperties {
     }
 
     fn resolve_zk_max_in_flight_requests(&mut self) -> Result<u32, KafkaConfigError> {
-        // at least 0
+        self.zk_max_in_flight_requests.validate()?;
         if let Some(zk_max_in_flight_requests) = self.zk_max_in_flight_requests.get_value() {
             if *zk_max_in_flight_requests < 1 {
                 // RAFKA TODO: This doesn't make much sense if it's u32...
@@ -561,6 +560,52 @@ impl KafkaConfigProperties {
         }
     }
 
+    pub fn resolve_advertised_listeners(&mut self) -> Result<String, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_producer_quota_bytes_per_second_default(
+        &mut self,
+    ) -> Result<i64, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_roll_time_hours(&mut self) -> Result<i32, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_roll_time_jitter_hours(&mut self) -> Result<i32, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_retention_time_minutes(&mut self) -> Result<i32, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_retention_time_hours(&mut self) -> Result<i32, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_flush_scheduler_interval_ms(&mut self) -> Result<i64, KafkaConfigError> {
+        unimplemented!()
+    }
+
+    pub fn resolve_log_flush_interval_ms(&mut self) -> Result<i64, KafkaConfigError> {
+        unimplemented!()
+    }
+
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
@@ -577,6 +622,18 @@ impl KafkaConfigProperties {
         let quota_window_size_seconds = self.resolve_quota_window_size_seconds()?;
         let num_recovery_threads_per_data_dir = self.resolve_num_recovery_threads_per_data_dir()?;
         let num_recovery_threads_per_data_dir = self.resolve_num_recovery_threads_per_data_dir()?;
+        let advertised_listeners = self.resolve_advertised_listeners()?;
+        let producer_quota_bytes_per_second_default =
+            self.resolve_producer_quota_bytes_per_second_default()?;
+        let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
+        let log_roll_time_hours = self.resolve_log_roll_time_hours()?;
+        let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
+        let log_roll_time_jitter_hours = self.resolve_log_roll_time_jitter_hours()?;
+        let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
+        let log_retention_time_minutes = self.resolve_log_retention_time_minutes()?;
+        let log_retention_time_hours = self.resolve_log_retention_time_hours()?;
+        let log_flush_scheduler_interval_ms = self.resolve_log_flush_scheduler_interval_ms()?;
+        let log_flush_interval_ms = self.resolve_log_flush_interval_ms()?;
         let kafka_config = KafkaConfig {
             zk_connect,
             zk_session_timeout_ms,
@@ -589,6 +646,17 @@ impl KafkaConfigProperties {
             consumer_quota_bytes_per_second_default,
             quota_window_size_seconds,
             num_recovery_threads_per_data_dir,
+            advertised_listeners,
+            producer_quota_bytes_per_second_default,
+            log_roll_time_millis,
+            log_roll_time_hours,
+            log_roll_time_jitter_millis,
+            log_roll_time_jitter_hours,
+            log_retention_time_millis,
+            log_retention_time_minutes,
+            log_retention_time_hours,
+            log_flush_scheduler_interval_ms,
+            log_flush_interval_ms,
         };
         kafka_config.validate_values()
     }
