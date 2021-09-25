@@ -151,6 +151,20 @@ where
         }
     }
 
+    pub fn at_least(val: &T, rhs: &T, key: &str) -> Result<(), KafkaConfigError>
+    where
+        T: PartialEq + PartialOrd + fmt::Display,
+    {
+        if val < rhs {
+            Err(KafkaConfigError::InvalidValue(format!(
+                "{}: '{}' should be at least {}",
+                key, val, rhs
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn get_value(&self) -> Option<&T> {
         self.value.as_ref()
     }
@@ -184,5 +198,10 @@ where
             Some(validator) => (validator)(self.value.as_ref()),
             None => Ok(()),
         }
+    }
+
+    pub fn build(&self) -> Result<T, KafkaConfigError> {
+        self.validate()?;
+        Ok(self.unwrap_value())
     }
 }
