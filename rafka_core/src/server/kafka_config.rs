@@ -158,17 +158,10 @@ impl Default for KafkaConfigProperties {
                 ))
                 .with_default(10)
                 .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
+                    // RAFKA TODO: This doesn't make much sense if it's u32...
                     let val = data.unwrap();
-                    if *val < 1 {
-                        // RAFKA TODO: This doesn't make much sense if it's u32...
-                        Err(KafkaConfigError::InvalidValue(format!(
-                            "{}: '{}' should be at least 0",
-                            ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS, *val
-                        )))
-                    } else {
-                        Ok(())
-                    }})),
+                    ConfigDef::at_least(val, &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
+                    })),
             log_dir: ConfigDef::default()
                 .with_key(LOG_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -199,14 +192,8 @@ impl Default for KafkaConfigProperties {
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
                     let val = data.unwrap();
-                    if *val < 0 {
-                        Err(KafkaConfigError::InvalidValue(format!(
-                            "{}: '{}' should be at least 0",
-                            RESERVED_BROKER_MAX_ID_PROP, *val
-                        )))
-                    } else {
-                        Ok(())
-                }})),
+                    ConfigDef::at_least(val, &0, RESERVED_BROKER_MAX_ID_PROP)
+                })),
             broker_id: ConfigDef::default()
                 .with_key(BROKER_ID_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -464,18 +451,11 @@ impl KafkaConfigProperties {
     }
 
     fn resolve_reserved_broker_max_id(&mut self) -> Result<i32, KafkaConfigError> {
-        self.reserved_broker_max_id.validate()?;
-        Ok(*self.reserved_broker_max_id.get_value().unwrap())
+        self.reserved_broker_max_id.build()
     }
 
     fn resolve_broker_id(&mut self) -> Result<i32, KafkaConfigError> {
-        if let Some(broker_id) = self.broker_id.get_value() {
-            Ok(*broker_id)
-        } else {
-            panic!(
-                "broker_id has a default but found its value to be None, bug in parsing defaults"
-            );
-        }
+        self.broker_id.build()
     }
 
     fn resolve_broker_id_generation_enable(&mut self) -> Result<bool, KafkaConfigError> {
@@ -488,22 +468,7 @@ impl KafkaConfigProperties {
 
     fn resolve_zk_max_in_flight_requests(&mut self) -> Result<u32, KafkaConfigError> {
         self.zk_max_in_flight_requests.validate()?;
-        if let Some(zk_max_in_flight_requests) = self.zk_max_in_flight_requests.get_value() {
-            if *zk_max_in_flight_requests < 1 {
-                // RAFKA TODO: This doesn't make much sense if it's u32...
-                Err(KafkaConfigError::InvalidValue(format!(
-                    "{}: '{}' should be at least 0",
-                    ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS, *zk_max_in_flight_requests
-                )))
-            } else {
-                Ok(*zk_max_in_flight_requests)
-            }
-        } else {
-            panic!(
-                "zk_max_in_flight_requests has a default but found its value to be None, bug in \
-                 parsing defaults"
-            );
-        }
+        Ok(self.zk_max_in_flight_requests.unwrap_value())
     }
 
     fn resolve_consumer_quota_bytes_per_second_default(&mut self) -> Result<i64, KafkaConfigError> {
