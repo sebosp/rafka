@@ -3,7 +3,7 @@
 use crate::server::kafka_config::KafkaConfigError;
 use std::fmt;
 use std::str::FromStr;
-use tracing::error;
+use tracing::{error, info, warn};
 
 /// `ConfigDefImportance` provides the levels of importance that different java_properties
 /// have.
@@ -151,17 +151,25 @@ where
         }
     }
 
-    pub fn at_least(val: &T, rhs: &T, key: &str) -> Result<(), KafkaConfigError>
+    pub fn at_least(data: Option<&T>, rhs: &T, key: &str) -> Result<(), KafkaConfigError>
     where
         T: PartialEq + PartialOrd + fmt::Display,
     {
-        if val < rhs {
-            Err(KafkaConfigError::InvalidValue(format!(
-                "{}: '{}' should be at least {}",
-                key, val, rhs
-            )))
-        } else {
-            Ok(())
+        match data {
+            Some(val) => {
+                if val < rhs {
+                    Err(KafkaConfigError::InvalidValue(format!(
+                        "{}: '{}' should be at least {}",
+                        key, val, rhs
+                    )))
+                } else {
+                    Ok(())
+                }
+            },
+            None => {
+                error!("Running at_least() with no value provided for ConfigDef {:?}", data);
+                Err(KafkaConfigError::ComparisonOnNone(key.to_string()))
+            },
         }
     }
 
@@ -181,18 +189,6 @@ where
         self.default.is_some()
     }
 
-    /// `unwrap_value` should only be used for ConfigDef's  that have a default, this is an
-    /// infallible operation, it unwraps. It is up to the caller to know which fields are safe to
-    /// unwrap
-    pub fn unwrap_value(&self) -> T {
-        match self.value {
-            Some(val) => val,
-            None => {
-                panic!("{:?} value is None. ", self);
-            },
-        }
-    }
-
     pub fn validate(&self) -> Result<(), KafkaConfigError> {
         match self.validator {
             Some(validator) => (validator)(self.value.as_ref()),
@@ -202,6 +198,36 @@ where
 
     pub fn build(&self) -> Result<T, KafkaConfigError> {
         self.validate()?;
-        Ok(self.unwrap_value())
+        match self.value {
+            Some(value) => Ok(value),
+            None => Err(KafkaConfigError::MissingKey(self.key.to_string())),
+        }
+    }
+
+    /// `resolve` attempts to resolve the current value, if the current value is None it tries to
+    /// find the value from a fallback property. If the fallback property is None, a
+    /// KafkaConfigError is returned.
+    pub fn resolve(&mut self, fallback: &Self) -> Result<(), KafkaConfigError> {
+        if let Some(val) = self.value {
+            Ok(())
+        } else {
+            info!(
+                "Unspecified property {}: attempting to use fallback property {} as value",
+                self.key, fallback.key
+            );
+            match fallback.value {
+                Some(val) => {
+                    self.value = fallback.value;
+                    Ok(())
+                },
+                None => {
+                    error!(
+                        "Unspecified property {}: fallback property {} has no value",
+                        self.key, fallback.key
+                    );
+                    Err(KafkaConfigError::MissingKey(fallback.key.to_string()))
+                },
+            }
+        }
     }
 }
