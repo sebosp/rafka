@@ -162,7 +162,7 @@ impl Default for KafkaConfigProperties {
                 .with_default(10)
                 .with_validator(Box::new(|data| {
                     // RAFKA TODO: This doesn't make much sense if it's u32...
-                    ConfigDef::at_least(data.unwrap(), &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
+                    ConfigDef::at_least(data, &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
                     })),
             log_dir: ConfigDef::default()
                 .with_key(LOG_DIR_PROP)
@@ -193,7 +193,7 @@ impl Default for KafkaConfigProperties {
                 .with_default(1000)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data.unwrap(), &0, RESERVED_BROKER_MAX_ID_PROP)
+                    ConfigDef::at_least(data, &0, RESERVED_BROKER_MAX_ID_PROP)
                 })),
             broker_id: ConfigDef::default()
                 .with_key(BROKER_ID_PROP)
@@ -429,38 +429,16 @@ impl KafkaConfigProperties {
         }
     }
 
-    fn resolve_zk_connect(&mut self) -> Result<String, KafkaConfigError> {
-        self.zk_connect.build()
-    }
-
-    fn resolve_broker_id(&mut self) -> Result<i32, KafkaConfigError> {
-        // broker_id_generation_enable has a default, safe to unwrap
-        self.broker_id.build()
-    }
-
-    fn resolve_broker_id_generation_enable(&mut self) -> Result<bool, KafkaConfigError> {
-        // broker_id_generation_enable has a default, safe to unwrap
-        self.broker_id_generation_enable.build()
-    }
-
-    fn resolve_zk_max_in_flight_requests(&mut self) -> Result<u32, KafkaConfigError> {
-        self.zk_max_in_flight_requests.build()
-    }
-
-    fn resolve_consumer_quota_bytes_per_second_default(&mut self) -> Result<i64, KafkaConfigError> {
-        self.consumer_quota_bytes_per_second_default.build()
-    }
-
-    fn resolve_quota_window_size_seconds(&mut self) -> Result<i32, KafkaConfigError> {
-        self.quota_window_size_seconds.build()
-    }
-
-    pub fn resolve_num_recovery_threads_per_data_dir(&mut self) -> Result<i32, KafkaConfigError> {
-        self.num_recovery_threads_per_data_dir.build()
-    }
-
+    /// If user did not define advertised listeners, we'll use host:port, if they were not set either
+    /// we set listeners
     pub fn resolve_advertised_listeners(&mut self) -> Result<String, KafkaConfigError> {
-        unimplemented!()
+        if let Some(advertised_listeners) = self.advertised_listeners.get_value() {
+            CoreUtils::listenerListToEndPoints(advertised_listeners)
+        } else if (Some(advertised_host_name), Some(advertised_port)) = (self.advertised_host_name, self.advertised_port) {
+            CoreUtils::listener_list_to_end_points(&format!("PLAINTEXT://{}:{}", advertised_host_name, advertised_port)
+        } else {
+            self.listeners
+        }
     }
 
     pub fn resolve_producer_quota_bytes_per_second_default(
@@ -515,15 +493,14 @@ impl KafkaConfigProperties {
         let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
         let log_dirs = self.resolve_log_dirs()?;
         let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
-        let broker_id = self.resolve_broker_id()?;
+        let broker_id = self.broker_id.build()?;
         let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
-        let zk_connect = self.resolve_zk_connect()?;
-        let zk_max_in_flight_requests = self.resolve_zk_max_in_flight_requests()?;
+        let zk_connect = self.zk_connect.build()?;
+        let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
         let consumer_quota_bytes_per_second_default =
-            self.resolve_consumer_quota_bytes_per_second_default()?;
-        let quota_window_size_seconds = self.resolve_quota_window_size_seconds()?;
-        let num_recovery_threads_per_data_dir = self.resolve_num_recovery_threads_per_data_dir()?;
-        let num_recovery_threads_per_data_dir = self.resolve_num_recovery_threads_per_data_dir()?;
+            self.consumer_quota_bytes_per_second_default.build()?;
+        let quota_window_size_seconds = self.quota_window_size_seconds.build()?;
+        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
         let advertised_listeners = self.resolve_advertised_listeners()?;
         let producer_quota_bytes_per_second_default =
             self.resolve_producer_quota_bytes_per_second_default()?;
@@ -628,16 +605,16 @@ impl Default for KafkaConfig {
         let zk_connection_timeout_ms = config_properties.zk_connection_timeout_ms.build().unwrap();
         let log_dirs = config_properties.resolve_log_dirs().unwrap();
         let reserved_broker_max_id = config_properties.reserved_broker_max_id.build().unwrap();
-        let broker_id = config_properties.resolve_broker_id().unwrap();
+        let broker_id = config_properties.broker_id.build().unwrap();
         let broker_id_generation_enable =
             config_properties.broker_id_generation_enable.build().unwrap();
         let zk_connect = String::from("UNSET");
         let zk_max_in_flight_requests =
-            config_properties.resolve_zk_max_in_flight_requests().unwrap();
+            config_properties.zk_max_in_flight_requests.build().unwrap();
         let consumer_quota_bytes_per_second_default =
-            config_properties.resolve_consumer_quota_bytes_per_second_default().unwrap();
+            config_properties.consumer_quota_bytes_per_second_default.build().unwrap();
         let quota_window_size_seconds =
-            config_properties.resolve_quota_window_size_seconds().unwrap();
+            config_properties.quota_window_size_seconds.build().unwrap();
         let advertised_listeners = config_properties.resolve_advertised_listeners().unwrap();
         let producer_quota_bytes_per_second_default =
             config_properties.resolve_producer_quota_bytes_per_second_default().unwrap();
@@ -657,7 +634,7 @@ impl Default for KafkaConfig {
             config_properties.resolve_log_flush_scheduler_interval_ms().unwrap();
         let log_flush_interval_ms = config_properties.resolve_log_flush_interval_ms().unwrap();
         let num_recovery_threads_per_data_dir =
-            config_properties.resolve_num_recovery_threads_per_data_dir().unwrap();
+            config_properties.num_recovery_threads_per_data_dir.build().unwrap();
         Self {
             zk_connect,
             zk_session_timeout_ms,
