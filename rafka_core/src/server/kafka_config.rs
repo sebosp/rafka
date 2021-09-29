@@ -222,6 +222,7 @@ impl Default for KafkaConfigProperties {
                 ))
                 .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT)
                 .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &1, CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 })),
             producer_quota_bytes_per_second_default: ConfigDef::default()
@@ -250,6 +251,10 @@ impl Default for KafkaConfigProperties {
             log_roll_time_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                }))
                 .with_doc(format!(
                         "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_HOURS_PROP
                 )),
@@ -259,7 +264,11 @@ impl Default for KafkaConfigProperties {
                 .with_doc(format!(
                         "The maximum time before a new log segment is rolled out (in hours), secondary to {} property", LOG_ROLL_TIME_MILLIS_PROP
                 ))
-                .with_default(24 * 7),
+                .with_default(24 * 7)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                })),
             log_roll_time_jitter_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -441,14 +450,14 @@ impl KafkaConfigProperties {
         }
     }
 
-    pub fn resolve_producer_quota_bytes_per_second_default(
-        &mut self,
-    ) -> Result<i64, KafkaConfigError> {
-        unimplemented!()
-    }
-
+    /// The `resolve()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
+    /// be currently performed by the resolver.
     pub fn resolve_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
-        unimplemented!()
+        if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
+            Ok(*log_roll_time_millis)
+        } else {
+            Ok(i64::from(self.resolve_log_roll_time_hours()?) * 60 * 60 * 1000)
+        }
     }
 
     pub fn resolve_log_roll_time_hours(&mut self) -> Result<i32, KafkaConfigError> {
@@ -503,7 +512,7 @@ impl KafkaConfigProperties {
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
         let advertised_listeners = self.resolve_advertised_listeners()?;
         let producer_quota_bytes_per_second_default =
-            self.resolve_producer_quota_bytes_per_second_default()?;
+            self.producer_quota_bytes_per_second_default.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
         let log_roll_time_hours = self.resolve_log_roll_time_hours()?;
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
@@ -617,7 +626,7 @@ impl Default for KafkaConfig {
             config_properties.quota_window_size_seconds.build().unwrap();
         let advertised_listeners = config_properties.resolve_advertised_listeners().unwrap();
         let producer_quota_bytes_per_second_default =
-            config_properties.resolve_producer_quota_bytes_per_second_default().unwrap();
+            config_properties.producer_quota_bytes_per_second_default.build().unwrap();
         let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
         let log_roll_time_hours = config_properties.resolve_log_roll_time_hours().unwrap();
         let log_roll_time_jitter_millis =
