@@ -267,7 +267,7 @@ impl Default for KafkaConfigProperties {
                 .with_default(24 * 7)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                    ConfigDef::at_least(data, &1, LOG_ROLL_TIME_HOURS_PROP)
                 })),
             log_roll_time_jitter_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
@@ -280,7 +280,12 @@ impl Default for KafkaConfigProperties {
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                          "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary to {} property", LOG_ROLL_TIME_JITTER_MILLIS_PROP
-                )),
+                ))
+                .with_default(0)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, LOG_ROLL_TIME_JITTER_HOURS_PROP)
+                })),
             log_retention_time_millis: ConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -456,20 +461,16 @@ impl KafkaConfigProperties {
         if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
             Ok(*log_roll_time_millis)
         } else {
-            Ok(i64::from(self.resolve_log_roll_time_hours()?) * 60 * 60 * 1000)
+            Ok(i64::from(self.log_roll_time_hours.build()?) * 60 * 60 * 1000)
         }
     }
 
-    pub fn resolve_log_roll_time_hours(&mut self) -> Result<i32, KafkaConfigError> {
-        unimplemented!()
-    }
-
     pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
-        unimplemented!()
-    }
-
-    pub fn resolve_log_roll_time_jitter_hours(&mut self) -> Result<i32, KafkaConfigError> {
-        unimplemented!()
+        if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
+            Ok(*log_roll_time_jitter_millis)
+        } else {
+            Ok(i64::from(self.log_roll_time_jitter_hours.build()?) * 60 * 60 * 1000)
+        }
     }
 
     pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
@@ -514,9 +515,9 @@ impl KafkaConfigProperties {
         let producer_quota_bytes_per_second_default =
             self.producer_quota_bytes_per_second_default.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
-        let log_roll_time_hours = self.resolve_log_roll_time_hours()?;
+        let log_roll_time_hours = self.log_roll_time_hours.build()?;
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
-        let log_roll_time_jitter_hours = self.resolve_log_roll_time_jitter_hours()?;
+        let log_roll_time_jitter_hours = self.log_roll_time_jitter_hours.build()?;
         let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
         let log_retention_time_minutes = self.resolve_log_retention_time_minutes()?;
         let log_retention_time_hours = self.resolve_log_retention_time_hours()?;
@@ -628,11 +629,11 @@ impl Default for KafkaConfig {
         let producer_quota_bytes_per_second_default =
             config_properties.producer_quota_bytes_per_second_default.build().unwrap();
         let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
-        let log_roll_time_hours = config_properties.resolve_log_roll_time_hours().unwrap();
+        let log_roll_time_hours = config_properties.log_roll_time_hours.build().unwrap();
         let log_roll_time_jitter_millis =
             config_properties.resolve_log_roll_time_jitter_millis().unwrap();
         let log_roll_time_jitter_hours =
-            config_properties.resolve_log_roll_time_jitter_hours().unwrap();
+            config_properties.log_roll_time_jitter_hours.build().unwrap();
         let log_retention_time_millis =
             config_properties.resolve_log_retention_time_millis().unwrap();
         let log_retention_time_minutes =
