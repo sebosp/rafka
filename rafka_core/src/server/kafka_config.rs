@@ -32,6 +32,7 @@ pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.p
 pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
 pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
 pub const BROKER_ID_PROP: &str = "broker.id";
+
 // Socket server section
 pub const LISTENERS_PROP: &str = "listeners";
 pub const ADVERTISED_LISTENERS_PROP: &str = "advertised.listeners";
@@ -76,6 +77,8 @@ pub enum KafkaConfigError {
     DuplicateKey(String),
     #[error("Attempt to compare a value that is not provided and has no default: {0}")]
     ComparisonOnNone(String),
+    #[error("ListenerMisconfig")]
+    ListenerMisconfig(String),
 }
 
 /// This implementation is only for testing, for example any I/O error is considered equal
@@ -95,6 +98,9 @@ impl PartialEq for KafkaConfigError {
             Self::UnknownKey(lhs) => matches!(rhs, Self::UnknownKey(rhs) if lhs == rhs),
             Self::DuplicateKey(lhs) => matches!(rhs, Self::DuplicateKey(rhs) if lhs == rhs),
             Self::ComparisonOnNone(lhs) => matches!(rhs, Self::ComparisonOnNone(rhs) if lhs == rhs),
+            Self::ListenerMisconfig(lhs) => {
+                matches!(rhs, Self::ListenerMisconfig(rhs) if lhs == rhs)
+            },
         }
     }
 }
@@ -443,14 +449,17 @@ impl KafkaConfigProperties {
         }
     }
 
-    /// If user did not define advertised listeners, we'll use host:port, if they were not set either
-    /// we set listeners
+    /// If user did not define advertised listeners, we'll use host:port, if they were not set
+    /// either we set listeners
     pub fn resolve_advertised_listeners(&mut self) -> Result<String, KafkaConfigError> {
         if let Some(advertised_listeners) = self.advertised_listeners.get_value() {
             CoreUtils::listenerListToEndPoints(advertised_listeners)
-        } else if (Some(advertised_host_name), Some(advertised_port)) = (self.advertised_host_name, self.advertised_port) {
-            CoreUtils::listener_list_to_end_points(&format!("PLAINTEXT://{}:{}", advertised_host_name, advertised_port)
         } else {
+            warn!(
+                "The properties for advertised.host.name and advertised.port have been DEPRECATED \
+                 and are not used in this poc, reverting to {}",
+                LISTENERS_PROP
+            );
             self.listeners
         }
     }
