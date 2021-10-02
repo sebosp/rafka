@@ -1,17 +1,20 @@
-/// Core Kafka Config
-/// core/src/main/scala/kafka/server/KafkaConfig.scala
-/// Changes:
-/// - No SSL, no SASL
-/// - RAFKA NOTE: Using serde_json doesn't work very well because for example
-/// ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual listeners
+//! Core Kafka Config
+//! core/src/main/scala/kafka/server/KafkaConfig.scala
+//! Changes:
+//! - No SSL, no SASL
+//! - RAFKA NOTE: Using serde_json doesn't work very well because for example
+//! ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual listeners
+
+use crate::cluster::end_point::EndPoint;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::server::client_quota_manager;
+use crate::utils::core_utils;
 use fs_err::File;
 use std::collections::HashMap;
 use std::io::{self, BufReader};
 use std::num;
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // Log section
 pub const LOG_DIRS_PROP: &str = "log.dirs";
@@ -451,9 +454,9 @@ impl KafkaConfigProperties {
 
     /// If user did not define advertised listeners, we'll use host:port, if they were not set
     /// either we set listeners
-    pub fn resolve_advertised_listeners(&mut self) -> Result<String, KafkaConfigError> {
+    pub fn resolve_advertised_listeners(&mut self) -> Result<Vec<EndPoint>, KafkaConfigError> {
         if let Some(advertised_listeners) = self.advertised_listeners.get_value() {
-            CoreUtils::listenerListToEndPoints(advertised_listeners)
+            core_utils::listener_list_to_end_points(&advertised_listeners)
         } else {
             warn!(
                 "The properties for advertised.host.name and advertised.port have been DEPRECATED \
