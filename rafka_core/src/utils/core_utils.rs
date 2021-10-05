@@ -14,7 +14,7 @@ pub fn parse_csv_list(csv_list: &str) -> Vec<String> {
         .split(csv_list)
         .collect::<Vec<&str>>()
         .iter()
-        .filter(|x| **x != "")
+        .filter(|x| !x.is_empty())
         .map(|x| x.to_string())
         .collect()
 }
@@ -53,7 +53,7 @@ pub fn listener_list_to_end_points(listeners: &str) -> Result<Vec<EndPoint>, Kaf
     let mut end_points: Vec<EndPoint> = vec![];
     let listener_list = parse_csv_list(listeners);
     for listener in listener_list {
-        match EndPoint::create_end_point(listener) {
+        match EndPoint::create_end_point(&listener) {
             Ok(val) => {
                 debug!("Successfully created endpoint for listener: {}", listener);
                 end_points.push(val);
