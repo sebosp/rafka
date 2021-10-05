@@ -37,7 +37,11 @@ pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
 pub const BROKER_ID_PROP: &str = "broker.id";
 
 // Socket server section
+pub const PORT_PROP: &str = "port";
+pub const HOST_NAME_PROP: &str = "host.name";
 pub const LISTENERS_PROP: &str = "listeners";
+pub const ADVERTISED_HOST_NAME_PROP: &str = "advertised.host.name";
+pub const ADVERTISED_PORT_PROP: &str = "advertised.port";
 pub const ADVERTISED_LISTENERS_PROP: &str = "advertised.listeners";
 pub const MAX_CONNECTIONS_PROP: &str = "max.connections";
 // Zookeeper section
@@ -121,6 +125,11 @@ pub struct KafkaConfigProperties {
     reserved_broker_max_id: ConfigDef<i32>,
     broker_id: ConfigDef<i32>,
     zk_max_in_flight_requests: ConfigDef<u32>,
+    port: ConfigDef<i32>,
+    host_name: ConfigDef<String>,
+    listeners: ConfigDef<String>,
+    advertised_host_name: ConfigDef<String>,
+    advertised_port: ConfigDef<i32>,
     advertised_listeners: ConfigDef<String>,
     consumer_quota_bytes_per_second_default: ConfigDef<i64>,
     producer_quota_bytes_per_second_default: ConfigDef<i64>,
@@ -213,15 +222,63 @@ impl Default for KafkaConfigProperties {
                      broker id's, generated broker ids start from {} + 1.", RESERVED_BROKER_MAX_ID_PROP),
                 )
                 .with_default(-1),
+            port: ConfigDef::default()
+                .with_key(PORT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                    "DEPRECATED: only used when `listeners` is not set. Use `{}` instead. the port to listen and accept connections on", LISTENERS_PROP
+                ))
+                .with_default(9092),
+            host_name: ConfigDef::default()
+                .with_key(HOST_NAME_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+                    "DEPRECATED: only used when `listeners` is not set. Use `{}` instead. \
+                    hostname of broker. If this is set, it will only bind to this address. If this is not set, it will bind to all interfaces", LISTENERS_PROP
+                ))
+                .with_default(String::from("")),
+            listeners: ConfigDef::default()
+                .with_key(LISTENERS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(
+                    format!("Listener List - Comma-separated list of URIs we will listen on and the listener names. \
+                      NOTE: RAFKA does not implement listener security protocols \
+                      Specify hostname as 0.0.0.0 to bind to all interfaces. \
+                      Leave hostname empty to bind to default interface. \
+                      Examples of legal listener lists: \
+                      PLAINTEXT://myhost:9092,SSL://:9091 \
+                      CLIENT://0.0.0.0:9092,REPLICATION://localhost:9093"
+                )),
             advertised_listeners: ConfigDef::default()
                 .with_key(ADVERTISED_LISTENERS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "Listeners to publish to ZooKeeper for clients to use, if different than the `listeners` config property.\
+                .with_doc(format!(
+                    "Listeners to publish to ZooKeeper for clients to use, if different than the `{}` config property.\
                     In IaaS environments, this may need to be different from the interface to which the broker binds. \
                     If this is not set, the value for `listeners` will be used. \
-                    Unlike `listeners` it is not valid to advertise the 0.0.0.0 meta-address "
+                    Unlike `listeners` it is not valid to advertise the 0.0.0.0 meta-address ", LISTENERS_PROP
                 )),
+            advertised_host_name: ConfigDef::default()
+                .with_key(ADVERTISED_HOST_NAME_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+  "DEPRECATED: only used when `{}` or `{}` are not set. \
+  Use `{}` instead. \
+  Hostname to publish to ZooKeeper for clients to use. In IaaS environments, this may \
+  need to be different from the interface to which the broker binds. If this is not set, \
+  it will use the value for `{}` if configured. Otherwise \
+  it will use the value returned from gethostname", ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP, HOST_NAME_PROP
+                   )),
+            advertised_port: ConfigDef::default()
+                .with_key(ADVERTISED_PORT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(format!(
+  "DEPRECATED: only used when `{}` or `{}` are not set. \
+  Use `{}` instead. \
+  The port to publish to ZooKeeper for clients to use. In IaaS environments, this may \
+  need to be different from the port to which the broker binds. If this is not set, \
+  it will publish the same port that the broker binds to.", ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP
+                    )),
             consumer_quota_bytes_per_second_default: ConfigDef::default()
                 .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -368,6 +425,16 @@ impl KafkaConfigProperties {
             QUOTA_WINDOW_SIZE_SECONDS_PROP => {
                 self.quota_window_size_seconds.try_set_parsed_value(property_value)?
             },
+            PORT_PROP => self.port.try_set_parsed_value(property_value)?,
+            HOST_NAME_PROP => self.host_name.try_set_parsed_value(property_value)?,
+            LISTENERS_PROP => self.listeners.try_set_parsed_value(property_value)?,
+            ADVERTISED_HOST_NAME_PROP => {
+                self.advertised_host_name.try_set_parsed_value(property_value)?
+            },
+            ADVERTISED_PORT_PROP => self.advertised_port.try_set_parsed_value(property_value)?,
+            ADVERTISED_LISTENERS_PROP => {
+                self.advertised_listeners.try_set_parsed_value(property_value)?
+            },
             ADVERTISED_LISTENERS_PROP => {
                 self.advertised_listeners.try_set_parsed_value(property_value)?
             },
@@ -463,7 +530,26 @@ impl KafkaConfigProperties {
                  and are not used in this poc, reverting to {}",
                 LISTENERS_PROP
             );
-            self.listeners
+            self.resolve_listeners()
+        }
+    }
+
+    /// If the user did not define listeners but did define host or port, let's use them in backward
+    /// compatible way If none of those are defined, we default to PLAINTEXT://:9092
+    pub fn resolve_listeners(&mut self) -> Result<Vec<EndPoint>, KafkaConfigError> {
+        match self.listeners.get_value() {
+            Some(val) => core_utils::listener_list_to_end_points(val),
+            None => match (self.host_name.get_value(), self.port.get_value()) {
+                (Some(host_name), Some(port)) => core_utils::listener_list_to_end_points(&format!(
+                    "PLAINTEXT://{}:{}",
+                    host_name, port
+                )),
+                (Some(host_name), None) => Err(KafkaConfigError::MissingKey(PORT_PROP)),
+                (None, Some(port)) => Err(KafkaConfigError::MissingKey(HOST_NAME_PROP)),
+                (None, None) => {
+                    Err(KafkaConfigError::MissingKey(format("{}, {}", HOST_NAME_PROP, PORT_PROP)))
+                },
+            },
         }
     }
 
@@ -575,7 +661,7 @@ pub struct KafkaConfig {
     pub broker_id: i32,
     pub consumer_quota_bytes_per_second_default: i64,
     pub quota_window_size_seconds: i32,
-    pub advertised_listeners: String,
+    pub advertised_listeners: Vec<EndPoint>,
     pub producer_quota_bytes_per_second_default: i64,
     pub log_roll_time_millis: i64,
     pub log_roll_time_hours: i32,
