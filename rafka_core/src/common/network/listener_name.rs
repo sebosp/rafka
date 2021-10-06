@@ -1,6 +1,6 @@
 //! From clients/src/main/java/org/apache/kafka/common/network/ListenerName.java
 use std::fmt;
-#[derive(PartialEq, PartialOrd, Clone, Ord, Eq)]
+#[derive(PartialEq, PartialOrd, Clone, Ord, Eq, Debug)]
 pub struct ListenerName {
     pub value: String,
 }

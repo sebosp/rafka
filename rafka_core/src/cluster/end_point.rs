@@ -4,7 +4,7 @@ use crate::{common::network::listener_name::ListenerName, server::kafka_config::
 use regex::Regex;
 use tracing::error;
 
-#[derive(PartialOrd, PartialEq, Clone)]
+#[derive(PartialOrd, PartialEq, Clone, Debug)]
 pub struct EndPoint {
     pub host: String,
     pub port: i32,
