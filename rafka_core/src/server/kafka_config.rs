@@ -544,10 +544,10 @@ impl KafkaConfigProperties {
                     "PLAINTEXT://{}:{}",
                     host_name, port
                 )),
-                (Some(host_name), None) => Err(KafkaConfigError::MissingKey(PORT_PROP)),
-                (None, Some(port)) => Err(KafkaConfigError::MissingKey(HOST_NAME_PROP)),
+                (Some(host_name), None) => Err(KafkaConfigError::MissingKey(PORT_PROP.to_string())),
+                (None, Some(port)) => Err(KafkaConfigError::MissingKey(HOST_NAME_PROP.to_string())),
                 (None, None) => {
-                    Err(KafkaConfigError::MissingKey(format("{}, {}", HOST_NAME_PROP, PORT_PROP)))
+                    Err(KafkaConfigError::MissingKey(format!("{}, {}", HOST_NAME_PROP, PORT_PROP)))
                 },
             },
         }
