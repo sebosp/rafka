@@ -572,15 +572,30 @@ impl KafkaConfigProperties {
     }
 
     pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
-        unimplemented!()
-    }
+        let millis_in_minute = 60 * 1000;
+        let millis_in_hour = 60 * millis_in_minute;
 
-    pub fn resolve_log_retention_time_minutes(&mut self) -> Result<i32, KafkaConfigError> {
-        unimplemented!()
-    }
-
-    pub fn resolve_log_retention_time_hours(&mut self) -> Result<i32, KafkaConfigError> {
-        unimplemented!()
+        let millis: i64 = match self.log_retention_time_millis.get_value() {
+            Some(millis) => *millis,
+            None => match self.log_retention_time_minutes.get_value() {
+                Some(mins) => i64::from(millis_in_minute) * i64::from(*mins),
+                None => {
+                    i64::from(*self.log_retention_time_hours.get_value().unwrap()) * millis_in_hour
+                },
+            },
+        };
+        if millis < 0 {
+            warn!(
+                "Resolved Log Retention Time millis is below zero: '{}' Setting to -1 (unlimited)",
+                millis
+            );
+            millis = -1;
+        } else if millis == 0 {
+            return Err(KafkaConfigError::InvalidValue(String::from(
+                "log.retention.ms must be unlimited (-1) or, equal or greater than 1",
+            )));
+        }
+        Ok(millis)
     }
 
     pub fn resolve_log_flush_scheduler_interval_ms(&mut self) -> Result<i64, KafkaConfigError> {
@@ -617,8 +632,8 @@ impl KafkaConfigProperties {
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
         let log_roll_time_jitter_hours = self.log_roll_time_jitter_hours.build()?;
         let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
-        let log_retention_time_minutes = self.resolve_log_retention_time_minutes()?;
-        let log_retention_time_hours = self.resolve_log_retention_time_hours()?;
+        let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
+        let log_retention_time_hours = self.log_retention_time_hours.build()?;
         let log_flush_scheduler_interval_ms = self.resolve_log_flush_scheduler_interval_ms()?;
         let log_flush_interval_ms = self.resolve_log_flush_interval_ms()?;
         let kafka_config = KafkaConfig {
@@ -735,9 +750,8 @@ impl Default for KafkaConfig {
         let log_retention_time_millis =
             config_properties.resolve_log_retention_time_millis().unwrap();
         let log_retention_time_minutes =
-            config_properties.resolve_log_retention_time_minutes().unwrap();
-        let log_retention_time_hours =
-            config_properties.resolve_log_retention_time_hours().unwrap();
+            config_properties.log_retention_time_minutes.build().unwrap();
+        let log_retention_time_hours = config_properties.log_retention_time_hours.build().unwrap();
         let log_flush_scheduler_interval_ms =
             config_properties.resolve_log_flush_scheduler_interval_ms().unwrap();
         let log_flush_interval_ms = config_properties.resolve_log_flush_interval_ms().unwrap();
