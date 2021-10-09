@@ -18,10 +18,12 @@
 
 use crate::common::cluster_resource::ClusterResource;
 use crate::common::internals::cluster_resource_listeners::ClusterResourceListeners;
+use crate::log::log_manager::LogManagerError;
 use crate::server::finalize_feature_change_listener::{
     FeatureCacheUpdater, FeatureCacheUpdaterAsyncTask, FeatureCacheUpdaterError,
 };
 use crate::server::kafka_config::KafkaConfig;
+use crate::server::kafka_config::KafkaConfigError;
 use crate::server::kafka_server::KafkaServerError;
 use crate::server::log_failure_channel::LogDirFailureChannel;
 use crate::server::supported_features::SupportedFeatures;
@@ -70,6 +72,10 @@ pub enum AsyncTaskError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("KafkaServer {0:?}")]
     KafkaServer(#[from] KafkaServerError),
+    #[error("KafkaConfig {0:?}")]
+    KafkaConfig(#[from] KafkaConfigError),
+    #[error("LogManager {0:?}")]
+    LogManager(#[from] LogManagerError),
 }
 
 impl AsyncTaskError {
