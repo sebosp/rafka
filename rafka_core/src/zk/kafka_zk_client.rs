@@ -11,12 +11,14 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
+use crate::log::log_config::LogConfig;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
 use crate::zk::zk_data::ZNodeHandle;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
+use std::collections::HashMap;
 use std::error::Error;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -495,6 +497,24 @@ impl KafkaZkClient {
         .to_string();
         KafkaZkClient::req_get_data_and_version(majordomo_tx, tx, root_entity_zk_node_path).await?;
         Ok(rx.await.unwrap().data)
+    }
+
+    /// `get_log_configs` TODO
+    #[instrument]
+    pub async fn get_log_configs(
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+        _topic_list: Vec<String>,
+        _log_config: &LogConfig,
+    ) -> Result<(HashMap<String, LogConfig>, Vec<String>), AsyncTaskError> {
+        unimplemented!()
+    }
+
+    /// `get_all_topics_in_cluster` TODO
+    #[instrument]
+    pub async fn get_all_topics_in_cluster(
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<Vec<String>, AsyncTaskError> {
+        unimplemented!()
     }
 }
 

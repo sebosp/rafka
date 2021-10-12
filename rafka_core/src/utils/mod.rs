@@ -1,3 +1,4 @@
+pub mod core_utils;
 pub mod kafka_scheduler;
 pub mod verifiable_properties;
 pub fn default_logger() -> slog::Logger {
