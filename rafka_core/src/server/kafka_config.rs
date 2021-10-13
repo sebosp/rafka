@@ -13,6 +13,7 @@ use fs_err::File;
 use std::collections::HashMap;
 use std::io::{self, BufReader};
 use std::num;
+use std::str::FromStr;
 use thiserror::Error;
 use tracing::{debug, warn};
 
@@ -57,6 +58,81 @@ pub const QUOTA_WINDOW_SIZE_SECONDS_PROP: &str = "quota.window.size.seconds";
 
 // RAFKA TODO: Since ConfigDef was moved, maybe this ConfigError should be moved there and be
 // generalized?
+
+// A Helper Enum to aid with the miriad of properties that could be forgotten to be matched.
+#[derive(Debug)]
+pub enum KafkaConfigKey {
+    ZkConnect,
+    ZkSessionTimeoutMs,
+    ZkConnectionTimeoutMs,
+    LogDir,
+    LogDirs,
+    BrokerIdGenerationEnable,
+    ReservedBrokerMaxId,
+    BrokerId,
+    ZkMaxInFlightRequests,
+    Port,
+    HostName,
+    Listeners,
+    AdvertisedHostName,
+    AdvertisedPort,
+    AdvertisedListeners,
+    ConsumerQuotaBytesPerSecondDefault,
+    ProducerQuotaBytesPerSecondDefault,
+    QuotaWindowSizeSeconds,
+    LogRollTimeMillis,
+    LogRollTimeHours,
+    LogRollTimeJitterMillis,
+    LogRollTimeJitterHours,
+    LogRetentionTimeMillis,
+    LogRetentionTimeMinutes,
+    LogRetentionTimeHours,
+    LogFlushSchedulerIntervalMs,
+    LogFlushIntervalMs,
+    NumRecoveryThreadsPerDataDir,
+}
+
+impl FromStr for KafkaConfigKey {
+    type Err = KafkaConfigError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            ZOOKEEPER_CONNECT_PROP => Ok(Self::ZkConnect),
+            ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
+            ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
+            LOG_DIR_PROP => Ok(Self::LogDir),
+            LOG_DIRS_PROP => Ok(Self::LogDirs),
+            BROKER_ID_GENERATION_ENABLE_PROP => Ok(Self::BrokerIdGenerationEnable),
+            RESERVED_BROKER_MAX_ID_PROP => Ok(Self::ReservedBrokerMaxId),
+            BROKER_ID_PROP => Ok(Self::BrokerId),
+            ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
+            PORT_PROP => Ok(Self::Port),
+            HOST_NAME_PROP => Ok(Self::HostName),
+            LISTENERS_PROP => Ok(Self::Listeners),
+            ADVERTISED_HOST_NAME_PROP => Ok(Self::AdvertisedHostName),
+            ADVERTISED_PORT_PROP => Ok(Self::AdvertisedPort),
+            ADVERTISED_LISTENERS_PROP => Ok(Self::AdvertisedListeners),
+            CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+                Ok(Self::ConsumerQuotaBytesPerSecondDefault)
+            },
+            PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+                Ok(Self::ProducerQuotaBytesPerSecondDefault)
+            },
+            QUOTA_WINDOW_SIZE_SECONDS_PROP => Ok(Self::QuotaWindowSizeSeconds),
+            LOG_ROLL_TIME_MILLIS_PROP => Ok(Self::LogRollTimeMillis),
+            LOG_ROLL_TIME_HOURS_PROP => Ok(Self::LogRollTimeHours),
+            LOG_ROLL_TIME_JITTER_MILLIS_PROP => Ok(Self::LogRollTimeJitterMillis),
+            LOG_ROLL_TIME_JITTER_HOURS_PROP => Ok(Self::LogRollTimeJitterHours),
+            LOG_RETENTION_TIME_MILLIS_PROP => Ok(Self::LogRetentionTimeMillis),
+            LOG_RETENTION_TIME_MINUTES_PROP => Ok(Self::LogRetentionTimeMinutes),
+            LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
+            LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
+            LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
+            NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
+            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
+        }
+    }
+}
 
 /// `KafkaConfigError` is a custom error that is returned when properties are invalid, unknown,
 /// missing or the config file is not readable.
@@ -399,73 +475,73 @@ impl KafkaConfigProperties {
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        match property_name {
-            ZOOKEEPER_CONNECT_PROP => self.zk_connect.try_set_parsed_value(property_value)?,
-            ZOOKEEPER_SESSION_TIMEOUT_PROP => {
+        let kafka_config_key = KafkaConfigKey::from_str(property_name)?;
+        match kafka_config_key {
+            KafkaConfigKey::ZkConnect => self.zk_connect.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::ZkSessionTimeoutMs => {
                 self.zk_session_timeout_ms.try_set_parsed_value(property_value)?
             },
-            ZOOKEEPER_CONNECTION_TIMEOUT_PROP => {
+            KafkaConfigKey::ZkConnectionTimeoutMs => {
                 self.zk_connection_timeout_ms.try_set_parsed_value(property_value)?
             },
-            LOG_DIR_PROP => self.log_dir.try_set_parsed_value(property_value)?,
-            LOG_DIRS_PROP => self.log_dirs.try_set_parsed_value(property_value)?,
-            BROKER_ID_GENERATION_ENABLED_PROP => {
+            KafkaConfigKey::LogDir => self.log_dir.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::LogDirs => self.log_dirs.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::BrokerIdGenerationEnable => {
                 self.broker_id_generation_enable.try_set_parsed_value(property_value)?
             },
-            RESERVED_BROKER_MAX_ID_PROP => {
+            KafkaConfigKey::ReservedBrokerMaxId => {
                 self.reserved_broker_max_id.try_set_parsed_value(property_value)?
             },
-            BROKER_ID_PROP => self.broker_id.try_set_parsed_value(property_value)?,
-            CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+            KafkaConfigKey::BrokerId => self.broker_id.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::ConsumerQuotaBytesPerSecondDefault => {
                 self.consumer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
             },
-            PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+            KafkaConfigKey::ProducerQuotaBytesPerSecondDefault => {
                 self.producer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
             },
-            QUOTA_WINDOW_SIZE_SECONDS_PROP => {
+            KafkaConfigKey::QuotaWindowSizeSeconds => {
                 self.quota_window_size_seconds.try_set_parsed_value(property_value)?
             },
-            PORT_PROP => self.port.try_set_parsed_value(property_value)?,
-            HOST_NAME_PROP => self.host_name.try_set_parsed_value(property_value)?,
-            LISTENERS_PROP => self.listeners.try_set_parsed_value(property_value)?,
-            ADVERTISED_HOST_NAME_PROP => {
+            KafkaConfigKey::Port => self.port.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::HostName => self.host_name.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::Listeners => self.listeners.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::AdvertisedHostName => {
                 self.advertised_host_name.try_set_parsed_value(property_value)?
             },
-            ADVERTISED_PORT_PROP => self.advertised_port.try_set_parsed_value(property_value)?,
-            ADVERTISED_LISTENERS_PROP => {
+            KafkaConfigKey::AdvertisedPort => {
+                self.advertised_port.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::AdvertisedListeners => {
                 self.advertised_listeners.try_set_parsed_value(property_value)?
             },
-            ADVERTISED_LISTENERS_PROP => {
-                self.advertised_listeners.try_set_parsed_value(property_value)?
-            },
-            LOG_ROLL_TIME_MILLIS_PROP => {
+            KafkaConfigKey::LogRollTimeMillis => {
                 self.log_roll_time_millis.try_set_parsed_value(property_value)?
             },
-            LOG_ROLL_TIME_HOURS_PROP => {
+            KafkaConfigKey::LogRollTimeHours => {
                 self.log_roll_time_hours.try_set_parsed_value(property_value)?
             },
-            LOG_ROLL_TIME_JITTER_MILLIS_PROP => {
+            KafkaConfigKey::LogRollTimeJitterMillis => {
                 self.log_roll_time_jitter_millis.try_set_parsed_value(property_value)?
             },
-            LOG_ROLL_TIME_JITTER_HOURS_PROP => {
+            KafkaConfigKey::LogRollTimeJitterHours => {
                 self.log_roll_time_jitter_hours.try_set_parsed_value(property_value)?
             },
-            LOG_RETENTION_TIME_MILLIS_PROP => {
+            KafkaConfigKey::LogRetentionTimeMillis => {
                 self.log_retention_time_millis.try_set_parsed_value(property_value)?
             },
-            LOG_RETENTION_TIME_MINUTES_PROP => {
+            KafkaConfigKey::LogRetentionTimeMinutes => {
                 self.log_retention_time_minutes.try_set_parsed_value(property_value)?
             },
-            LOG_RETENTION_TIME_HOURS_PROP => {
+            KafkaConfigKey::LogRetentionTimeHours => {
                 self.log_retention_time_hours.try_set_parsed_value(property_value)?
             },
-            LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => {
+            KafkaConfigKey::LogFlushSchedulerIntervalMs => {
                 self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
             },
-            LOG_FLUSH_INTERVAL_MS_PROP => {
+            KafkaConfigKey::LogFlushIntervalMs => {
                 self.log_flush_interval_ms.try_set_parsed_value(property_value)?
             },
-            NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => {
+            KafkaConfigKey::NumRecoveryThreadsPerDataDir => {
                 self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
             },
             _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
@@ -563,6 +639,8 @@ impl KafkaConfigProperties {
         }
     }
 
+    /// The `resolve()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
+    /// be currently performed by the resolver.
     pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
         if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
             Ok(*log_roll_time_jitter_millis)
@@ -598,14 +676,6 @@ impl KafkaConfigProperties {
         Ok(millis)
     }
 
-    pub fn resolve_log_flush_scheduler_interval_ms(&mut self) -> Result<i64, KafkaConfigError> {
-        unimplemented!()
-    }
-
-    pub fn resolve_log_flush_interval_ms(&mut self) -> Result<i64, KafkaConfigError> {
-        unimplemented!()
-    }
-
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
@@ -634,8 +704,8 @@ impl KafkaConfigProperties {
         let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
         let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
         let log_retention_time_hours = self.log_retention_time_hours.build()?;
-        let log_flush_scheduler_interval_ms = self.resolve_log_flush_scheduler_interval_ms()?;
-        let log_flush_interval_ms = self.resolve_log_flush_interval_ms()?;
+        let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
+        let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
         let kafka_config = KafkaConfig {
             zk_connect,
             zk_session_timeout_ms,
@@ -753,8 +823,8 @@ impl Default for KafkaConfig {
             config_properties.log_retention_time_minutes.build().unwrap();
         let log_retention_time_hours = config_properties.log_retention_time_hours.build().unwrap();
         let log_flush_scheduler_interval_ms =
-            config_properties.resolve_log_flush_scheduler_interval_ms().unwrap();
-        let log_flush_interval_ms = config_properties.resolve_log_flush_interval_ms().unwrap();
+            config_properties.log_flush_scheduler_interval_ms.build().unwrap();
+        let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
         let num_recovery_threads_per_data_dir =
             config_properties.num_recovery_threads_per_data_dir.build().unwrap();
         Self {
