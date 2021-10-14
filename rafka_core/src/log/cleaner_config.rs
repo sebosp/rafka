@@ -1,24 +1,24 @@
 //! From core/src/main/scala/kafka/log/CleanerConfig.scala
 //! Config parameters for the log cleaner
 
-// numThreads The number of cleaner threads to run
-// dedupeBufferSize The total memory used for log deduplication
-// dedupeBufferLoadFactor The maximum percent full for the deduplication buffer
-// maxMessageSize The maximum size of a message that can appear in the log
-// maxIoBytesPerSecond The maximum read and write I/O that all cleaner threads are allowed to do
-// backOffMs The amount of time to wait before rechecking if no logs are eligible for cleaning
-// enableCleaner Allows completely disabling the log cleaner
-// hashAlgorithm The hash algorithm to use in key comparison.
-
+#[derive(Debug)]
 pub struct CleanerConfig {
+    /// The number of cleaner threads to run
     num_threads: i32,
-    dedupe_buffer_size: u64,
+    /// The total memory used for log deduplication
+    ded/upe_buffer_size: u64,
+    /// The maximum percent full for the deduplication buffer
     dedupe_buffer_load_factor: f64,
     io_buffer_size: i32,
+    /// The maximum size of a message that can appear in the log
     max_message_size: i32,
+    /// The maximum read and write I/O that all cleaner threads are allowed to do
     max_io_bytes_per_second: f64,
+    /// The amount of time to wait before rechecking if no logs are eligible for cleaning
     back_off_ms: u64,
+    /// Allows completely disabling the log cleaner
     enable_cleaner: bool,
+    /// The hash algorithm to use in key comparison.
     hash_algorithm: String,
 }
 
