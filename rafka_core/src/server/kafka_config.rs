@@ -7,6 +7,7 @@
 
 use crate::cluster::end_point::EndPoint;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use crate::common::record::legacy_record;
 use crate::server::client_quota_manager;
 use crate::utils::core_utils;
 use fs_err::File;
@@ -67,6 +68,7 @@ pub enum KafkaConfigKey {
     ZkConnectionTimeoutMs,
     LogDir,
     LogDirs,
+    LogSegmentBytes,
     BrokerIdGenerationEnable,
     ReservedBrokerMaxId,
     BrokerId,
@@ -102,6 +104,7 @@ impl FromStr for KafkaConfigKey {
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
             LOG_DIR_PROP => Ok(Self::LogDir),
             LOG_DIRS_PROP => Ok(Self::LogDirs),
+            LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
             BROKER_ID_GENERATION_ENABLE_PROP => Ok(Self::BrokerIdGenerationEnable),
             RESERVED_BROKER_MAX_ID_PROP => Ok(Self::ReservedBrokerMaxId),
             BROKER_ID_PROP => Ok(Self::BrokerId),
@@ -197,6 +200,7 @@ pub struct KafkaConfigProperties {
     log_dir: ConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
     log_dirs: ConfigDef<String>,
+    log_segment_bytes: ConfigDef<usize>,
     broker_id_generation_enable: ConfigDef<bool>,
     reserved_broker_max_id: ConfigDef<i32>,
     broker_id: ConfigDef<i32>,
@@ -272,6 +276,15 @@ impl Default for KafkaConfigProperties {
                     format!("The directories in which the log data is kept. If not set, the value in {} \
                      is used", LOG_DIR_PROP),
                 ),
+            log_segment_bytes: ConfigDef::default()
+                .with_key(LOG_SEGMENT_BYTES_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from("The maximum size of a single log file"))
+                .with_default(1 * 1024 * 1024 * 1024)
+                .with_validator(Box::new(|data| {
+                    // RAFKA TODO: This doesn't make much sense if it's u32...
+                    ConfigDef::at_least(data, &legacy_record::RECORD_OVERHEAD_V0, LOG_SEGMENT_BYTES_PROP)
+                    })),
             broker_id_generation_enable: ConfigDef::default()
                 .with_key(BROKER_ID_GENERATION_ENABLED_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -486,6 +499,9 @@ impl KafkaConfigProperties {
             },
             KafkaConfigKey::LogDir => self.log_dir.try_set_parsed_value(property_value)?,
             KafkaConfigKey::LogDirs => self.log_dirs.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::LogSegmentBytes => {
+                self.log_segment_bytes.try_set_parsed_value(property_value)?
+            },
             KafkaConfigKey::BrokerIdGenerationEnable => {
                 self.broker_id_generation_enable.try_set_parsed_value(property_value)?
             },
@@ -544,7 +560,6 @@ impl KafkaConfigProperties {
             KafkaConfigKey::NumRecoveryThreadsPerDataDir => {
                 self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
             },
-            _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
         };
         Ok(())
     }
@@ -685,6 +700,7 @@ impl KafkaConfigProperties {
         self.zk_connection_timeout_ms.resolve(&self.zk_session_timeout_ms);
         let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
         let log_dirs = self.resolve_log_dirs()?;
+        let log_segment_bytes = self.log_segment_bytes.build()?;
         let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
         let broker_id = self.broker_id.build()?;
         let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
@@ -712,6 +728,7 @@ impl KafkaConfigProperties {
             zk_connection_timeout_ms,
             zk_max_in_flight_requests,
             log_dirs,
+            log_segment_bytes,
             reserved_broker_max_id,
             broker_id_generation_enable,
             broker_id,
@@ -741,6 +758,7 @@ pub struct KafkaConfig {
     pub zk_connection_timeout_ms: u32,
     pub zk_max_in_flight_requests: u32,
     pub log_dirs: Vec<String>,
+    pub log_segment_bytes: usize,
     pub reserved_broker_max_id: i32,
     pub broker_id_generation_enable: bool,
     pub broker_id: i32,
@@ -797,6 +815,7 @@ impl Default for KafkaConfig {
             .resolve(&config_properties.zk_session_timeout_ms);
         let zk_connection_timeout_ms = config_properties.zk_connection_timeout_ms.build().unwrap();
         let log_dirs = config_properties.resolve_log_dirs().unwrap();
+        let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
         let reserved_broker_max_id = config_properties.reserved_broker_max_id.build().unwrap();
         let broker_id = config_properties.broker_id.build().unwrap();
         let broker_id_generation_enable =
@@ -833,6 +852,7 @@ impl Default for KafkaConfig {
             zk_connection_timeout_ms,
             zk_max_in_flight_requests,
             log_dirs,
+            log_segment_bytes,
             reserved_broker_max_id,
             broker_id_generation_enable,
             broker_id,
