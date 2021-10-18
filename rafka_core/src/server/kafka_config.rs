@@ -29,6 +29,8 @@ pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours";
 pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms";
 pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
 pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
+pub const LOG_CLEANER_THREADS_PROP: &str = "log.cleaner.threads";
+pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP: &str = "log.cleaner.dedupe.buffer.size";
 pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms";
 pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms";
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
@@ -89,6 +91,8 @@ pub enum KafkaConfigKey {
     LogRetentionTimeMillis,
     LogRetentionTimeMinutes,
     LogRetentionTimeHours,
+    LogCleanerThreads,
+    LogCleanerDedupeBufferSize,
     LogFlushSchedulerIntervalMs,
     LogFlushIntervalMs,
     NumRecoveryThreadsPerDataDir,
@@ -221,6 +225,8 @@ pub struct KafkaConfigProperties {
     log_retention_time_millis: ConfigDef<i64>,
     log_retention_time_minutes: ConfigDef<i32>,
     log_retention_time_hours: ConfigDef<i32>,
+    log_cleaner_threads: ConfigDef<i32>,
+    log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
     log_flush_scheduler_interval_ms: ConfigDef<i64>,
     log_flush_interval_ms: ConfigDef<i64>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
@@ -460,6 +466,20 @@ impl Default for KafkaConfigProperties {
                     "The number of hours to keep a log file before deleting it (in hours), tertiary to {} property", LOG_RETENTION_TIME_MILLIS_PROP
                     ))
                 .with_default(24 * 7),
+            log_cleaner_threads: ConfigDef::default()
+                .with_key(LOG_CLEANER_THREADS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from("The number of background threads to use for log cleaning"))
+                .with_default(1)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
+                })),
+            log_cleaner_dedupe_buffer_size: ConfigDef::default()
+                .with_key(LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from("The total memory used for log deduplication across all cleaner threads"))
+                .with_default(128 * 1024 * 1024),
             log_flush_scheduler_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
