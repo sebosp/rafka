@@ -740,6 +740,8 @@ impl KafkaConfigProperties {
         let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
         let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
         let log_retention_time_hours = self.log_retention_time_hours.build()?;
+        let log_cleaner_threads = self.log_cleaner_threads.build()?;
+        let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
         let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
         let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
         let kafka_config = KafkaConfig {
@@ -764,6 +766,8 @@ impl KafkaConfigProperties {
             log_retention_time_millis,
             log_retention_time_minutes,
             log_retention_time_hours,
+            log_cleaner_threads,
+            log_cleaner_dedupe_buffer_size,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
         };
@@ -793,6 +797,8 @@ pub struct KafkaConfig {
     pub log_retention_time_millis: i64,
     pub log_retention_time_minutes: i32,
     pub log_retention_time_hours: i32,
+    pub log_cleaner_threads: i32,
+    pub log_cleaner_dedupe_buffer_size: i64,
     pub log_flush_scheduler_interval_ms: i64,
     pub log_flush_interval_ms: i64,
     pub num_recovery_threads_per_data_dir: i32,
@@ -861,6 +867,9 @@ impl Default for KafkaConfig {
         let log_retention_time_minutes =
             config_properties.log_retention_time_minutes.build().unwrap();
         let log_retention_time_hours = config_properties.log_retention_time_hours.build().unwrap();
+        let log_cleaner_threads = config_properties.log_cleaner_threads.build().unwrap();
+        let log_cleaner_dedupe_buffer_size =
+            config_properties.log_cleaner_dedupe_buffer_size.build().unwrap();
         let log_flush_scheduler_interval_ms =
             config_properties.log_flush_scheduler_interval_ms.build().unwrap();
         let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
@@ -887,6 +896,8 @@ impl Default for KafkaConfig {
             log_retention_time_millis,
             log_retention_time_minutes,
             log_retention_time_hours,
+            log_cleaner_threads,
+            log_cleaner_dedupe_buffer_size,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
             num_recovery_threads_per_data_dir,
