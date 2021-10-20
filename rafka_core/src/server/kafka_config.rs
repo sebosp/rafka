@@ -18,6 +18,12 @@ use std::str::FromStr;
 use thiserror::Error;
 use tracing::{debug, warn};
 
+// General section
+pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
+pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
+pub const BROKER_ID_PROP: &str = "broker.id";
+pub const MESSAGE_MAX_BYTES_PROP: &str = "message.max.bytes";
+
 // Log section
 pub const LOG_DIRS_PROP: &str = "log.dirs";
 pub const LOG_DIR_PROP: &str = "log.dir";
@@ -31,14 +37,11 @@ pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
 pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
 pub const LOG_CLEANER_THREADS_PROP: &str = "log.cleaner.threads";
 pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP: &str = "log.cleaner.dedupe.buffer.size";
+pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP: &str = "log.cleaner.io.buffer.load.factor";
+pub const LOG_CLEANER_IO_BUFFER_SIZE_PROP: &str = "log.cleaner.io.buffer.size";
 pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms";
 pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms";
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
-
-// General section
-pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
-pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
-pub const BROKER_ID_PROP: &str = "broker.id";
 
 // Socket server section
 pub const PORT_PROP: &str = "port";
@@ -65,15 +68,16 @@ pub const QUOTA_WINDOW_SIZE_SECONDS_PROP: &str = "quota.window.size.seconds";
 // A Helper Enum to aid with the miriad of properties that could be forgotten to be matched.
 #[derive(Debug)]
 pub enum KafkaConfigKey {
+    BrokerIdGenerationEnable,
+    ReservedBrokerMaxId,
+    BrokerId,
+    MessageMaxBytes,
     ZkConnect,
     ZkSessionTimeoutMs,
     ZkConnectionTimeoutMs,
     LogDir,
     LogDirs,
     LogSegmentBytes,
-    BrokerIdGenerationEnable,
-    ReservedBrokerMaxId,
-    BrokerId,
     ZkMaxInFlightRequests,
     Port,
     HostName,
@@ -93,6 +97,8 @@ pub enum KafkaConfigKey {
     LogRetentionTimeHours,
     LogCleanerThreads,
     LogCleanerDedupeBufferSize,
+    LogCleanerDedupeBufferLoadFactor,
+    LogCleanerIoBufferSize,
     LogFlushSchedulerIntervalMs,
     LogFlushIntervalMs,
     NumRecoveryThreadsPerDataDir,
@@ -103,15 +109,15 @@ impl FromStr for KafkaConfigKey {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input {
+            BROKER_ID_GENERATION_ENABLE_PROP => Ok(Self::BrokerIdGenerationEnable),
+            RESERVED_BROKER_MAX_ID_PROP => Ok(Self::ReservedBrokerMaxId),
+            BROKER_ID_PROP => Ok(Self::BrokerId),
             ZOOKEEPER_CONNECT_PROP => Ok(Self::ZkConnect),
             ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
             LOG_DIR_PROP => Ok(Self::LogDir),
             LOG_DIRS_PROP => Ok(Self::LogDirs),
             LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
-            BROKER_ID_GENERATION_ENABLE_PROP => Ok(Self::BrokerIdGenerationEnable),
-            RESERVED_BROKER_MAX_ID_PROP => Ok(Self::ReservedBrokerMaxId),
-            BROKER_ID_PROP => Ok(Self::BrokerId),
             ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
             PORT_PROP => Ok(Self::Port),
             HOST_NAME_PROP => Ok(Self::HostName),
