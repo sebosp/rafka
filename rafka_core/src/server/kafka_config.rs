@@ -8,6 +8,7 @@
 use crate::cluster::end_point::EndPoint;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
+use crate::common::record::records;
 use crate::server::client_quota_manager;
 use crate::utils::core_utils;
 use fs_err::File;
@@ -72,6 +73,12 @@ pub enum KafkaConfigKey {
     ReservedBrokerMaxId,
     BrokerId,
     MessageMaxBytes,
+    Port,
+    HostName,
+    Listeners,
+    AdvertisedHostName,
+    AdvertisedPort,
+    AdvertisedListeners,
     ZkConnect,
     ZkSessionTimeoutMs,
     ZkConnectionTimeoutMs,
@@ -79,12 +86,6 @@ pub enum KafkaConfigKey {
     LogDirs,
     LogSegmentBytes,
     ZkMaxInFlightRequests,
-    Port,
-    HostName,
-    Listeners,
-    AdvertisedHostName,
-    AdvertisedPort,
-    AdvertisedListeners,
     ConsumerQuotaBytesPerSecondDefault,
     ProducerQuotaBytesPerSecondDefault,
     QuotaWindowSizeSeconds,
@@ -112,6 +113,13 @@ impl FromStr for KafkaConfigKey {
             BROKER_ID_GENERATION_ENABLE_PROP => Ok(Self::BrokerIdGenerationEnable),
             RESERVED_BROKER_MAX_ID_PROP => Ok(Self::ReservedBrokerMaxId),
             BROKER_ID_PROP => Ok(Self::BrokerId),
+            MESSAGE_MAX_BYTES_PROP => Ok(Self::MessageMaxBytes),
+            PORT_PROP => Ok(Self::Port),
+            HOST_NAME_PROP => Ok(Self::HostName),
+            LISTENERS_PROP => Ok(Self::Listeners),
+            ADVERTISED_HOST_NAME_PROP => Ok(Self::AdvertisedHostName),
+            ADVERTISED_PORT_PROP => Ok(Self::AdvertisedPort),
+            ADVERTISED_LISTENERS_PROP => Ok(Self::AdvertisedListeners),
             ZOOKEEPER_CONNECT_PROP => Ok(Self::ZkConnect),
             ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
@@ -119,12 +127,6 @@ impl FromStr for KafkaConfigKey {
             LOG_DIRS_PROP => Ok(Self::LogDirs),
             LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
             ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
-            PORT_PROP => Ok(Self::Port),
-            HOST_NAME_PROP => Ok(Self::HostName),
-            LISTENERS_PROP => Ok(Self::Listeners),
-            ADVERTISED_HOST_NAME_PROP => Ok(Self::AdvertisedHostName),
-            ADVERTISED_PORT_PROP => Ok(Self::AdvertisedPort),
-            ADVERTISED_LISTENERS_PROP => Ok(Self::AdvertisedListeners),
             CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
                 Ok(Self::ConsumerQuotaBytesPerSecondDefault)
             },
@@ -139,6 +141,12 @@ impl FromStr for KafkaConfigKey {
             LOG_RETENTION_TIME_MILLIS_PROP => Ok(Self::LogRetentionTimeMillis),
             LOG_RETENTION_TIME_MINUTES_PROP => Ok(Self::LogRetentionTimeMinutes),
             LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
+            LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
+            LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
+            LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP => {
+                Ok(Self::LogCleanerDedupeBufferLoadFactor)
+            },
+            LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
             LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
             LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
             NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
@@ -203,6 +211,16 @@ impl PartialEq for KafkaConfigError {
 
 #[derive(Debug)]
 pub struct KafkaConfigProperties {
+    broker_id_generation_enable: ConfigDef<bool>,
+    reserved_broker_max_id: ConfigDef<i32>,
+    broker_id: ConfigDef<i32>,
+    message_max_bytes: ConfigDef<usize>,
+    port: ConfigDef<i32>,
+    host_name: ConfigDef<String>,
+    listeners: ConfigDef<String>,
+    advertised_host_name: ConfigDef<String>,
+    advertised_port: ConfigDef<i32>,
+    advertised_listeners: ConfigDef<String>,
     zk_connect: ConfigDef<String>,
     zk_session_timeout_ms: ConfigDef<u32>,
     zk_connection_timeout_ms: ConfigDef<u32>,
@@ -211,16 +229,7 @@ pub struct KafkaConfigProperties {
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
     log_dirs: ConfigDef<String>,
     log_segment_bytes: ConfigDef<usize>,
-    broker_id_generation_enable: ConfigDef<bool>,
-    reserved_broker_max_id: ConfigDef<i32>,
-    broker_id: ConfigDef<i32>,
     zk_max_in_flight_requests: ConfigDef<u32>,
-    port: ConfigDef<i32>,
-    host_name: ConfigDef<String>,
-    listeners: ConfigDef<String>,
-    advertised_host_name: ConfigDef<String>,
-    advertised_port: ConfigDef<i32>,
-    advertised_listeners: ConfigDef<String>,
     consumer_quota_bytes_per_second_default: ConfigDef<i64>,
     producer_quota_bytes_per_second_default: ConfigDef<i64>,
     quota_window_size_seconds: ConfigDef<i32>,
@@ -240,63 +249,8 @@ pub struct KafkaConfigProperties {
 
 impl Default for KafkaConfigProperties {
     fn default() -> Self {
+        let topic_config = TopicConfig::default();
         Self {
-            zk_connect: ConfigDef::default()
-                .with_key(ZOOKEEPER_CONNECT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(r#"
-                    Specifies the ZooKeeper connection string in the form <code>hostname:port</code> where host and port are the
-                    host and port of a ZooKeeper server. To allow connecting through other ZooKeeper nodes when that ZooKeeper machine is
-                    down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.
-                    The server can also have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data under some path in the global ZooKeeper namespace.
-                    For example to give a chroot path of `/chroot/path` you would give the connection string as `hostname1:port1,hostname2:port2,hostname3:port3/chroot/path`.
-                    "#
-                )),
-            zk_session_timeout_ms: ConfigDef::default()
-                .with_key(ZOOKEEPER_SESSION_TIMEOUT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("Zookeeper session timeout"))
-                .with_default(18000),
-            zk_connection_timeout_ms: ConfigDef::default()
-                .with_key(ZOOKEEPER_CONNECTION_TIMEOUT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The max time that the client waits to establish a connection to zookeeper. If \
-                     not set, the value in {} is used", ZOOKEEPER_SESSION_TIMEOUT_PROP) // REQ-01
-                ),
-            zk_max_in_flight_requests: ConfigDef::default()
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The maximum number of unacknowledged requests the client will send to Zookeeper before blocking."
-                ))
-                .with_default(10)
-                .with_validator(Box::new(|data| {
-                    // RAFKA TODO: This doesn't make much sense if it's u32...
-                    ConfigDef::at_least(data, &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
-                    })),
-            log_dir: ConfigDef::default()
-                .with_key(LOG_DIR_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The directory in which the log data is kept (supplemental for {} property)", LOG_DIRS_PROP),
-                )
-                .with_default(String::from("/tmp/kafka-logs")),
-            log_dirs: ConfigDef::default()
-                .with_key(LOG_DIRS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The directories in which the log data is kept. If not set, the value in {} \
-                     is used", LOG_DIR_PROP),
-                ),
-            log_segment_bytes: ConfigDef::default()
-                .with_key(LOG_SEGMENT_BYTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("The maximum size of a single log file"))
-                .with_default(1 * 1024 * 1024 * 1024)
-                .with_validator(Box::new(|data| {
-                    // RAFKA TODO: This doesn't make much sense if it's u32...
-                    ConfigDef::at_least(data, &legacy_record::RECORD_OVERHEAD_V0, LOG_SEGMENT_BYTES_PROP)
-                    })),
             broker_id_generation_enable: ConfigDef::default()
                 .with_key(BROKER_ID_GENERATION_ENABLED_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -323,6 +277,17 @@ impl Default for KafkaConfigProperties {
                      broker id's, generated broker ids start from {} + 1.", RESERVED_BROKER_MAX_ID_PROP),
                 )
                 .with_default(-1),
+            message_max_bytes: ConfigDef::default()
+                .with_key(MESSAGE_MAX_BYTES_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_default(1024 * 1024 + records::LOG_OVERHEAD)
+                .with_doc(
+                    format!("{} This can be set per topic with the topic level `{}` config.", topic_config.max_message_bytes.doc, topic_config.max_message_bytes_config.doc)
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, MESSAGE_MAX_BYTES_PROP)
+                })),
             port: ConfigDef::default()
                 .with_key(PORT_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -380,6 +345,62 @@ impl Default for KafkaConfigProperties {
   need to be different from the port to which the broker binds. If this is not set, \
   it will publish the same port that the broker binds to.", ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP
                     )),
+            zk_connect: ConfigDef::default()
+                .with_key(ZOOKEEPER_CONNECT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(r#"
+                    Specifies the ZooKeeper connection string in the form <code>hostname:port</code> where host and port are the
+                    host and port of a ZooKeeper server. To allow connecting through other ZooKeeper nodes when that ZooKeeper machine is
+                    down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.
+                    The server can also have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data under some path in the global ZooKeeper namespace.
+                    For example to give a chroot path of `/chroot/path` you would give the connection string as `hostname1:port1,hostname2:port2,hostname3:port3/chroot/path`.
+                    "#
+                )),
+            zk_session_timeout_ms: ConfigDef::default()
+                .with_key(ZOOKEEPER_SESSION_TIMEOUT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from("Zookeeper session timeout"))
+                .with_default(18000),
+            zk_connection_timeout_ms: ConfigDef::default()
+                .with_key(ZOOKEEPER_CONNECTION_TIMEOUT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(
+                    format!("The max time that the client waits to establish a connection to zookeeper. If \
+                     not set, the value in {} is used", ZOOKEEPER_SESSION_TIMEOUT_PROP) // REQ-01
+                ),
+            zk_max_in_flight_requests: ConfigDef::default()
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "The maximum number of unacknowledged requests the client will send to Zookeeper before blocking."
+                ))
+                .with_default(10)
+                .with_validator(Box::new(|data| {
+                    // RAFKA TODO: This doesn't make much sense if it's u32...
+                    ConfigDef::at_least(data, &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
+                    })),
+            log_dir: ConfigDef::default()
+                .with_key(LOG_DIR_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(
+                    format!("The directory in which the log data is kept (supplemental for {} property)", LOG_DIRS_PROP),
+                )
+                .with_default(String::from("/tmp/kafka-logs")),
+            log_dirs: ConfigDef::default()
+                .with_key(LOG_DIRS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(
+                    format!("The directories in which the log data is kept. If not set, the value in {} \
+                     is used", LOG_DIR_PROP),
+                ),
+            log_segment_bytes: ConfigDef::default()
+                .with_key(LOG_SEGMENT_BYTES_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from("The maximum size of a single log file"))
+                .with_default(1 * 1024 * 1024 * 1024)
+                .with_validator(Box::new(|data| {
+                    // RAFKA TODO: This doesn't make much sense if it's u32...
+                    ConfigDef::at_least(data, &legacy_record::RECORD_OVERHEAD_V0, LOG_SEGMENT_BYTES_PROP)
+                    })),
             consumer_quota_bytes_per_second_default: ConfigDef::default()
                 .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -516,6 +537,13 @@ impl KafkaConfigProperties {
     ) -> Result<(), KafkaConfigError> {
         let kafka_config_key = KafkaConfigKey::from_str(property_name)?;
         match kafka_config_key {
+            KafkaConfigKey::BrokerIdGenerationEnable => {
+                self.broker_id_generation_enable.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::ReservedBrokerMaxId => {
+                self.reserved_broker_max_id.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::BrokerId => self.broker_id.try_set_parsed_value(property_value)?,
             KafkaConfigKey::ZkConnect => self.zk_connect.try_set_parsed_value(property_value)?,
             KafkaConfigKey::ZkSessionTimeoutMs => {
                 self.zk_session_timeout_ms.try_set_parsed_value(property_value)?
@@ -528,13 +556,6 @@ impl KafkaConfigProperties {
             KafkaConfigKey::LogSegmentBytes => {
                 self.log_segment_bytes.try_set_parsed_value(property_value)?
             },
-            KafkaConfigKey::BrokerIdGenerationEnable => {
-                self.broker_id_generation_enable.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::ReservedBrokerMaxId => {
-                self.reserved_broker_max_id.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::BrokerId => self.broker_id.try_set_parsed_value(property_value)?,
             KafkaConfigKey::ConsumerQuotaBytesPerSecondDefault => {
                 self.consumer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
             },
