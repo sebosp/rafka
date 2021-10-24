@@ -6,6 +6,7 @@
 //! ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual listeners
 
 use crate::cluster::end_point::EndPoint;
+use crate::common::config::topic_config;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
 use crate::common::record::records;
@@ -249,7 +250,6 @@ pub struct KafkaConfigProperties {
 
 impl Default for KafkaConfigProperties {
     fn default() -> Self {
-        let topic_config = TopicConfig::default();
         Self {
             broker_id_generation_enable: ConfigDef::default()
                 .with_key(BROKER_ID_GENERATION_ENABLED_PROP)
@@ -282,7 +282,7 @@ impl Default for KafkaConfigProperties {
                 .with_importance(ConfigDefImportance::High)
                 .with_default(1024 * 1024 + records::LOG_OVERHEAD)
                 .with_doc(
-                    format!("{} This can be set per topic with the topic level `{}` config.", topic_config.max_message_bytes.doc, topic_config.max_message_bytes_config.doc)
+                    format!("{} This can be set per topic with the topic level `{}` config.", topic_config::MAX_MESSAGE_BYTES_DOC, topic_config::MAX_MESSAGE_BYTES_CONFIG)
                 )
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -544,6 +544,21 @@ impl KafkaConfigProperties {
                 self.reserved_broker_max_id.try_set_parsed_value(property_value)?
             },
             KafkaConfigKey::BrokerId => self.broker_id.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::MessageMaxBytes => {
+                self.message_max_bytes.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::Port => self.port.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::HostName => self.host_name.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::Listeners => self.listeners.try_set_parsed_value(property_value)?,
+            KafkaConfigKey::AdvertisedHostName => {
+                self.advertised_host_name.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::AdvertisedPort => {
+                self.advertised_port.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::AdvertisedListeners => {
+                self.advertised_listeners.try_set_parsed_value(property_value)?
+            },
             KafkaConfigKey::ZkConnect => self.zk_connect.try_set_parsed_value(property_value)?,
             KafkaConfigKey::ZkSessionTimeoutMs => {
                 self.zk_session_timeout_ms.try_set_parsed_value(property_value)?
@@ -565,18 +580,6 @@ impl KafkaConfigProperties {
             KafkaConfigKey::QuotaWindowSizeSeconds => {
                 self.quota_window_size_seconds.try_set_parsed_value(property_value)?
             },
-            KafkaConfigKey::Port => self.port.try_set_parsed_value(property_value)?,
-            KafkaConfigKey::HostName => self.host_name.try_set_parsed_value(property_value)?,
-            KafkaConfigKey::Listeners => self.listeners.try_set_parsed_value(property_value)?,
-            KafkaConfigKey::AdvertisedHostName => {
-                self.advertised_host_name.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::AdvertisedPort => {
-                self.advertised_port.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::AdvertisedListeners => {
-                self.advertised_listeners.try_set_parsed_value(property_value)?
-            },
             KafkaConfigKey::LogRollTimeMillis => {
                 self.log_roll_time_millis.try_set_parsed_value(property_value)?
             },
@@ -597,6 +600,12 @@ impl KafkaConfigProperties {
             },
             KafkaConfigKey::LogRetentionTimeHours => {
                 self.log_retention_time_hours.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::LogCleanerThreads => {
+                self.log_cleaner_threads.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::LogCleanerDedupeBufferSize => {
+                self.log_cleaner_dedupe_buffer_size.try_set_parsed_value(property_value)?
             },
             KafkaConfigKey::LogFlushSchedulerIntervalMs => {
                 self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
