@@ -43,6 +43,10 @@ pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP: &str = "log.cleaner.io.buf
 pub const LOG_CLEANER_IO_BUFFER_SIZE_PROP: &str = "log.cleaner.io.buffer.size";
 pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms";
 pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms";
+pub const LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
+    "log.flush.offset.checkpoint.interval.ms";
+pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
+    "log.flush.start.offset.checkpoint.interval.ms";
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
 
 // Socket server section
@@ -103,6 +107,8 @@ pub enum KafkaConfigKey {
     LogCleanerIoBufferSize,
     LogFlushSchedulerIntervalMs,
     LogFlushIntervalMs,
+    LogFlushOffsetCheckpointIntervalMs,
+    LogFlushStartOffsetCheckpointIntervalMs,
     NumRecoveryThreadsPerDataDir,
 }
 
@@ -150,6 +156,12 @@ impl FromStr for KafkaConfigKey {
             LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
             LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
             LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
+            LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
+                Ok(Self::LogFlushOffsetCheckpointIntervalMs)
+            },
+            LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
+                Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
+            },
             NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
             _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
         }
@@ -245,6 +257,8 @@ pub struct KafkaConfigProperties {
     log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
     log_flush_scheduler_interval_ms: ConfigDef<i64>,
     log_flush_interval_ms: ConfigDef<i64>,
+    log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
+    log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
 }
 
@@ -514,10 +528,29 @@ impl Default for KafkaConfigProperties {
                 .with_default(i64::MAX),
             log_flush_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_INTERVAL_MS_PROP)
+                .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
                         "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. If not set, the value in {} is used", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP
                 ))
                 .with_default(i64::MAX),
+            log_flush_offset_checkpoint_interval_ms: ConfigDef::default()
+                .with_key(LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from("The frequency with which we update the persistent record of the last flush which acts as the log recovery point"))
+                .with_default(60000)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
+                })),
+            log_flush_start_offset_checkpoint_interval_ms: ConfigDef::default()
+                .with_key(LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from("The frequency with which we update the persistent record of log start offset"))
+                .with_default(60000)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
+                })),
             num_recovery_threads_per_data_dir: ConfigDef::default()
                 .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
                 .with_doc(String::from(
@@ -613,6 +646,12 @@ impl KafkaConfigProperties {
             KafkaConfigKey::LogFlushIntervalMs => {
                 self.log_flush_interval_ms.try_set_parsed_value(property_value)?
             },
+            KafkaConfigKey::LogFlushOffsetCheckpointIntervalMs => {
+                self.log_flush_offset_checkpoint_interval_ms.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::LogFlushStartOffsetCheckpointIntervalMs => self
+                .log_flush_start_offset_checkpoint_interval_ms
+                .try_set_parsed_value(property_value)?,
             KafkaConfigKey::NumRecoveryThreadsPerDataDir => {
                 self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
             },
@@ -780,6 +819,10 @@ impl KafkaConfigProperties {
         let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
         let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
         let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
+        let log_flush_offset_checkpoint_interval_ms =
+            self.log_flush_offset_checkpoint_interval_ms.build()?;
+        let log_flush_start_offset_checkpoint_interval_ms =
+            self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let kafka_config = KafkaConfig {
             zk_connect,
             zk_session_timeout_ms,
@@ -806,26 +849,33 @@ impl KafkaConfigProperties {
             log_cleaner_dedupe_buffer_size,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
+            log_flush_offset_checkpoint_interval_ms,
+            log_flush_start_offset_checkpoint_interval_ms,
         };
         kafka_config.validate_values()
     }
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct KafkaConfig {
+    pub broker_id_generation_enable: bool,
+    pub reserved_broker_max_id: i32,
+    pub broker_id: i32,
+    pub message_max_bytes: usize,
+    pub port: i32,
+    pub host_name: String,
+    pub listeners: String,
+    pub advertised_host_name: String,
+    pub advertised_port: i32,
+    pub advertised_listeners: Vec<EndPoint>,
     pub zk_connect: String,
     pub zk_session_timeout_ms: u32,
-    // pub zk_sync_time_ms: u32,
     pub zk_connection_timeout_ms: u32,
-    pub zk_max_in_flight_requests: u32,
     pub log_dirs: Vec<String>,
     pub log_segment_bytes: usize,
-    pub reserved_broker_max_id: i32,
-    pub broker_id_generation_enable: bool,
-    pub broker_id: i32,
+    pub zk_max_in_flight_requests: u32,
     pub consumer_quota_bytes_per_second_default: i64,
-    pub quota_window_size_seconds: i32,
-    pub advertised_listeners: Vec<EndPoint>,
     pub producer_quota_bytes_per_second_default: i64,
+    pub quota_window_size_seconds: i32,
     pub log_roll_time_millis: i64,
     pub log_roll_time_hours: i32,
     pub log_roll_time_jitter_millis: i64,
@@ -837,6 +887,8 @@ pub struct KafkaConfig {
     pub log_cleaner_dedupe_buffer_size: i64,
     pub log_flush_scheduler_interval_ms: i64,
     pub log_flush_interval_ms: i64,
+    pub log_flush_offset_checkpoint_interval_ms: i32,
+    pub log_flush_start_offset_checkpoint_interval_ms: i32,
     pub num_recovery_threads_per_data_dir: i32,
 }
 
@@ -871,6 +923,16 @@ impl Default for KafkaConfig {
     fn default() -> Self {
         // Somehow this should only be allowed for testing...
         let mut config_properties = KafkaConfigProperties::default();
+        let broker_id_generation_enable =
+            config_properties.broker_id_generation_enable.build().unwrap();
+        let reserved_broker_max_id = config_properties.reserved_broker_max_id.build().unwrap();
+        let broker_id = config_properties.broker_id.build().unwrap();
+        let message_max_bytes = config_properties.message_max_bytes.build().unwrap();
+        let port = config_properties.port.build().unwrap();
+        let host_name = config_properties.host_name.build().unwrap();
+        let listeners = config_properties.listeners.build().unwrap();
+        let advertised_host_name = config_properties.advertised_host_name.build().unwrap();
+        let advertised_port = config_properties.advertised_port.build().unwrap();
         let zk_session_timeout_ms = config_properties.zk_session_timeout_ms.build().unwrap();
         config_properties
             .zk_connection_timeout_ms
@@ -878,10 +940,6 @@ impl Default for KafkaConfig {
         let zk_connection_timeout_ms = config_properties.zk_connection_timeout_ms.build().unwrap();
         let log_dirs = config_properties.resolve_log_dirs().unwrap();
         let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
-        let reserved_broker_max_id = config_properties.reserved_broker_max_id.build().unwrap();
-        let broker_id = config_properties.broker_id.build().unwrap();
-        let broker_id_generation_enable =
-            config_properties.broker_id_generation_enable.build().unwrap();
         let zk_connect = String::from("UNSET");
         let zk_max_in_flight_requests =
             config_properties.zk_max_in_flight_requests.build().unwrap();
@@ -909,22 +967,32 @@ impl Default for KafkaConfig {
         let log_flush_scheduler_interval_ms =
             config_properties.log_flush_scheduler_interval_ms.build().unwrap();
         let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
+        let log_flush_scheduler_interval_ms =
+            config_properties.log_flush_scheduler_interval_ms.build().unwrap();
+        let log_flush_start_offset_checkpoint_interval_ms =
+            config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
         let num_recovery_threads_per_data_dir =
             config_properties.num_recovery_threads_per_data_dir.build().unwrap();
         Self {
+            broker_id_generation_enable,
+            reserved_broker_max_id,
+            broker_id,
+            message_max_bytes,
+            port,
+            host_name,
+            listeners,
+            advertised_host_name,
+            advertised_port,
+            advertised_listeners,
             zk_connect,
             zk_session_timeout_ms,
             zk_connection_timeout_ms,
-            zk_max_in_flight_requests,
             log_dirs,
             log_segment_bytes,
-            reserved_broker_max_id,
-            broker_id_generation_enable,
-            broker_id,
+            zk_max_in_flight_requests,
             consumer_quota_bytes_per_second_default,
-            quota_window_size_seconds,
-            advertised_listeners,
             producer_quota_bytes_per_second_default,
+            quota_window_size_seconds,
             log_roll_time_millis,
             log_roll_time_hours,
             log_roll_time_jitter_millis,
@@ -936,6 +1004,8 @@ impl Default for KafkaConfig {
             log_cleaner_dedupe_buffer_size,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
+            log_flush_scheduler_interval_ms,
+            log_flush_start_offset_checkpoint_interval_ms,
             num_recovery_threads_per_data_dir,
         }
     }
