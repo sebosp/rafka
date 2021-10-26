@@ -4,3 +4,4 @@ pub mod config_def;
 pub mod feature;
 pub mod internals;
 pub mod network;
+pub mod record;
