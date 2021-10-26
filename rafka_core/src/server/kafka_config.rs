@@ -789,6 +789,8 @@ impl KafkaConfigProperties {
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
+        let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
+        let broker_id = self.broker_id.build()?;
         let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
         // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of
         // zk_connection_timeout_ms will be used.
@@ -797,8 +799,6 @@ impl KafkaConfigProperties {
         let log_dirs = self.resolve_log_dirs()?;
         let log_segment_bytes = self.log_segment_bytes.build()?;
         let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
-        let broker_id = self.broker_id.build()?;
-        let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
         let zk_connect = self.zk_connect.build()?;
         let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
         let consumer_quota_bytes_per_second_default =
@@ -824,20 +824,25 @@ impl KafkaConfigProperties {
         let log_flush_start_offset_checkpoint_interval_ms =
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let kafka_config = KafkaConfig {
+            broker_id_generation_enable,
+            reserved_broker_max_id,
+            broker_id,
+            message_max_bytes,
+            port,
+            host_name,
+            listeners,
+            advertised_host_name,
+            advertised_port,
+            advertised_listeners,
             zk_connect,
             zk_session_timeout_ms,
             zk_connection_timeout_ms,
-            zk_max_in_flight_requests,
             log_dirs,
             log_segment_bytes,
-            reserved_broker_max_id,
-            broker_id_generation_enable,
-            broker_id,
+            zk_max_in_flight_requests,
             consumer_quota_bytes_per_second_default,
-            quota_window_size_seconds,
-            num_recovery_threads_per_data_dir,
-            advertised_listeners,
             producer_quota_bytes_per_second_default,
+            quota_window_size_seconds,
             log_roll_time_millis,
             log_roll_time_hours,
             log_roll_time_jitter_millis,
@@ -851,6 +856,7 @@ impl KafkaConfigProperties {
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
+            num_recovery_threads_per_data_dir,
         };
         kafka_config.validate_values()
     }
@@ -1004,7 +1010,6 @@ impl Default for KafkaConfig {
             log_cleaner_dedupe_buffer_size,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
-            log_flush_scheduler_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             num_recovery_threads_per_data_dir,
         }
