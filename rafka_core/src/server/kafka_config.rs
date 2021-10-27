@@ -4,6 +4,10 @@
 //! - No SSL, no SASL
 //! - RAFKA NOTE: Using serde_json doesn't work very well because for example
 //! ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual listeners
+//! TODO:
+//! - The amount of properties is too big to handle sanely, adding, parsing, checking, too error
+//! prone, perhaps splitting them by cathegories is the next step, that would allow us to split
+//! into smaller files and specialize them there.
 
 use crate::cluster::end_point::EndPoint;
 use crate::common::config::topic_config;
@@ -87,10 +91,10 @@ pub enum KafkaConfigKey {
     ZkConnect,
     ZkSessionTimeoutMs,
     ZkConnectionTimeoutMs,
+    ZkMaxInFlightRequests,
     LogDir,
     LogDirs,
     LogSegmentBytes,
-    ZkMaxInFlightRequests,
     ConsumerQuotaBytesPerSecondDefault,
     ProducerQuotaBytesPerSecondDefault,
     QuotaWindowSizeSeconds,
@@ -130,10 +134,10 @@ impl FromStr for KafkaConfigKey {
             ZOOKEEPER_CONNECT_PROP => Ok(Self::ZkConnect),
             ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
+            ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
             LOG_DIR_PROP => Ok(Self::LogDir),
             LOG_DIRS_PROP => Ok(Self::LogDirs),
             LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
-            ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
             CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
                 Ok(Self::ConsumerQuotaBytesPerSecondDefault)
             },
@@ -237,12 +241,12 @@ pub struct KafkaConfigProperties {
     zk_connect: ConfigDef<String>,
     zk_session_timeout_ms: ConfigDef<u32>,
     zk_connection_timeout_ms: ConfigDef<u32>,
+    zk_max_in_flight_requests: ConfigDef<u32>,
     // Singular log.dir
     log_dir: ConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
     log_dirs: ConfigDef<String>,
     log_segment_bytes: ConfigDef<usize>,
-    zk_max_in_flight_requests: ConfigDef<u32>,
     consumer_quota_bytes_per_second_default: ConfigDef<i64>,
     producer_quota_bytes_per_second_default: ConfigDef<i64>,
     quota_window_size_seconds: ConfigDef<i32>,
@@ -790,22 +794,30 @@ impl KafkaConfigProperties {
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
         let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
+        let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
         let broker_id = self.broker_id.build()?;
+        let message_max_bytes = self.message_max_bytes.build()?;
+        let port = self.port.build()?;
+        let host_name = self.host_name.build()?;
+        let listeners = self.listeners.build()?;
+        let advertised_host_name = self.advertised_host_name.build()?;
+        let advertised_port = self.advertised_port.build()?;
+        let advertised_listeners = self.resolve_advertised_listeners()?;
+        let zk_connect = self.zk_connect.build()?;
         let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
         // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of
         // zk_connection_timeout_ms will be used.
+        // RAFKA NOTE: somehow the zk_session_timeout_ms build needs to be called before this,
+        // maybe resolve can do it?
         self.zk_connection_timeout_ms.resolve(&self.zk_session_timeout_ms);
         let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
+        let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
         let log_dirs = self.resolve_log_dirs()?;
         let log_segment_bytes = self.log_segment_bytes.build()?;
-        let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
-        let zk_connect = self.zk_connect.build()?;
-        let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
         let consumer_quota_bytes_per_second_default =
             self.consumer_quota_bytes_per_second_default.build()?;
         let quota_window_size_seconds = self.quota_window_size_seconds.build()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
-        let advertised_listeners = self.resolve_advertised_listeners()?;
         let producer_quota_bytes_per_second_default =
             self.producer_quota_bytes_per_second_default.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
@@ -876,9 +888,9 @@ pub struct KafkaConfig {
     pub zk_connect: String,
     pub zk_session_timeout_ms: u32,
     pub zk_connection_timeout_ms: u32,
+    pub zk_max_in_flight_requests: u32,
     pub log_dirs: Vec<String>,
     pub log_segment_bytes: usize,
-    pub zk_max_in_flight_requests: u32,
     pub consumer_quota_bytes_per_second_default: i64,
     pub producer_quota_bytes_per_second_default: i64,
     pub quota_window_size_seconds: i32,
@@ -939,23 +951,23 @@ impl Default for KafkaConfig {
         let listeners = config_properties.listeners.build().unwrap();
         let advertised_host_name = config_properties.advertised_host_name.build().unwrap();
         let advertised_port = config_properties.advertised_port.build().unwrap();
+        let advertised_listeners = config_properties.resolve_advertised_listeners().unwrap();
+        let zk_connect = String::from("UNSET");
         let zk_session_timeout_ms = config_properties.zk_session_timeout_ms.build().unwrap();
         config_properties
             .zk_connection_timeout_ms
             .resolve(&config_properties.zk_session_timeout_ms);
         let zk_connection_timeout_ms = config_properties.zk_connection_timeout_ms.build().unwrap();
-        let log_dirs = config_properties.resolve_log_dirs().unwrap();
-        let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
-        let zk_connect = String::from("UNSET");
         let zk_max_in_flight_requests =
             config_properties.zk_max_in_flight_requests.build().unwrap();
+        let log_dirs = config_properties.resolve_log_dirs().unwrap();
+        let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
         let consumer_quota_bytes_per_second_default =
             config_properties.consumer_quota_bytes_per_second_default.build().unwrap();
-        let quota_window_size_seconds =
-            config_properties.quota_window_size_seconds.build().unwrap();
-        let advertised_listeners = config_properties.resolve_advertised_listeners().unwrap();
         let producer_quota_bytes_per_second_default =
             config_properties.producer_quota_bytes_per_second_default.build().unwrap();
+        let quota_window_size_seconds =
+            config_properties.quota_window_size_seconds.build().unwrap();
         let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
         let log_roll_time_hours = config_properties.log_roll_time_hours.build().unwrap();
         let log_roll_time_jitter_millis =
@@ -973,8 +985,8 @@ impl Default for KafkaConfig {
         let log_flush_scheduler_interval_ms =
             config_properties.log_flush_scheduler_interval_ms.build().unwrap();
         let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
-        let log_flush_scheduler_interval_ms =
-            config_properties.log_flush_scheduler_interval_ms.build().unwrap();
+        let log_flush_offset_checkpoint_interval_ms =
+            config_properties.log_flush_offset_checkpoint_interval_ms.build().unwrap();
         let log_flush_start_offset_checkpoint_interval_ms =
             config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
         let num_recovery_threads_per_data_dir =
@@ -993,9 +1005,9 @@ impl Default for KafkaConfig {
             zk_connect,
             zk_session_timeout_ms,
             zk_connection_timeout_ms,
+            zk_max_in_flight_requests,
             log_dirs,
             log_segment_bytes,
-            zk_max_in_flight_requests,
             consumer_quota_bytes_per_second_default,
             producer_quota_bytes_per_second_default,
             quota_window_size_seconds,
