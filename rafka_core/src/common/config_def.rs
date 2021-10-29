@@ -196,7 +196,7 @@ where
         }
     }
 
-    pub fn build(&self) -> Result<T, KafkaConfigError> {
+    pub fn build(self) -> Result<T, KafkaConfigError> {
         self.validate()?;
         match self.value {
             Some(value) => Ok(value),
