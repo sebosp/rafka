@@ -3,6 +3,7 @@
 //! with the fewer logs. Once a log is created, it won't be automatically balanced either for I/O
 //! speed reasons or disk space exhausted.
 
+use crate::log::cleaner_config::CleanerConfig;
 use crate::server::log_failure_channel::LogDirFailureChannel;
 use std::collections::HashMap;
 use std::fmt;
@@ -43,8 +44,8 @@ pub struct LogManager {
     cleaner_config: CleanerConfig,
     recovery_threads_per_data_dir: i32,
     flush_check_ms: i64,
-    flush_recovery_offset_checkpoint_ms: i64,
-    flush_start_offset_checkpoint_ms: i64,
+    flush_recovery_offset_checkpoint_ms: i32,
+    flush_start_offset_checkpoint_ms: i32,
     retention_check_ms: i64,
     max_pid_expiration_ms: i32,
     scheduler: Scheduler,
@@ -85,7 +86,7 @@ impl LogManager {
         // RAFKA NOTE:
         // - broker_topic_stats is unused for now.
         // - log_dirs was a String of absolute/canonicalized paths before.
-        let default_log_config: LogConfig = LogConfig::try_from(config)?;
+        let default_log_config: LogConfig = LogConfig::try_from(config.clone())?;
 
         let majordomo_tx_cp = majordomo_tx.clone();
         // read the log configurations from zookeeper
@@ -99,7 +100,7 @@ impl LogManager {
             return Err(AsyncTaskError::LogManager(LogManagerError::FailedLogConfigs(failed)));
         }
 
-        let cleaner_config = LogCleaner::cleaner_config(config);
+        let cleaner_config = LogCleaner::cleaner_config(&config);
 
         Ok(Self {
             log_dirs: config.log_dirs.iter().map(|path| PathBuf::from(path)).collect(),
