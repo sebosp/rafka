@@ -91,7 +91,7 @@ pub enum KafkaConfigKey {
     ZkConnect,
     ZkSessionTimeoutMs,
     ZkConnectionTimeoutMs,
-    ZkMaxInFlightRequests,
+    // ZkMaxInFlightRequests,
     LogDir,
     LogDirs,
     LogSegmentBytes,
@@ -107,8 +107,8 @@ pub enum KafkaConfigKey {
     LogRetentionTimeHours,
     LogCleanerThreads,
     LogCleanerDedupeBufferSize,
-    LogCleanerDedupeBufferLoadFactor,
     LogCleanerIoBufferSize,
+    LogCleanerDedupeBufferLoadFactor,
     LogFlushSchedulerIntervalMs,
     LogFlushIntervalMs,
     LogFlushOffsetCheckpointIntervalMs,
@@ -134,7 +134,7 @@ impl FromStr for KafkaConfigKey {
             ZOOKEEPER_CONNECT_PROP => Ok(Self::ZkConnect),
             ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
-            ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
+            // ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
             LOG_DIR_PROP => Ok(Self::LogDir),
             LOG_DIRS_PROP => Ok(Self::LogDirs),
             LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
@@ -154,10 +154,10 @@ impl FromStr for KafkaConfigKey {
             LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
             LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
             LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
+            LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
             LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP => {
                 Ok(Self::LogCleanerDedupeBufferLoadFactor)
             },
-            LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
             LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
             LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
             LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
@@ -182,6 +182,8 @@ pub enum KafkaConfigError {
     Property(#[from] java_properties::PropertiesError),
     #[error("ParseInt error: {0}")]
     ParseInt(#[from] num::ParseIntError),
+    #[error("ParseFloat error: {0}")]
+    ParseFloat(#[from] num::ParseFloatError),
     #[error("ParseBool error: {0}")]
     ParseBool(#[from] std::str::ParseBoolError),
     // We try to call parse::<T> on everything, even String -> String, which doesn't make sense.
@@ -212,6 +214,7 @@ impl PartialEq for KafkaConfigError {
                 matches!(rhs, Self::Property(rhs) if lhs.line_number() == rhs.line_number())
             },
             Self::ParseInt(lhs) => matches!(rhs, Self::ParseInt(rhs) if lhs == rhs),
+            Self::ParseFloat(lhs) => matches!(rhs, Self::ParseFloat(rhs) if lhs == rhs),
             Self::ParseBool(lhs) => matches!(rhs, Self::ParseBool(rhs) if lhs == rhs),
             Self::Infallible(lhs) => matches!(rhs, Self::Infallible(rhs) if lhs == rhs),
             Self::MissingKey(lhs) => matches!(rhs, Self::MissingKey(rhs) if lhs == rhs),
@@ -259,6 +262,8 @@ pub struct KafkaConfigProperties {
     log_retention_time_hours: ConfigDef<i32>,
     log_cleaner_threads: ConfigDef<i32>,
     log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
+    log_cleaner_io_buffer_size: ConfigDef<i32>,
+    log_cleaner_dedupe_buffer_load_factor: ConfigDef<f64>,
     log_flush_scheduler_interval_ms: ConfigDef<i64>,
     log_flush_interval_ms: ConfigDef<i64>,
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
@@ -525,6 +530,16 @@ impl Default for KafkaConfigProperties {
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(String::from("The total memory used for log deduplication across all cleaner threads"))
                 .with_default(128 * 1024 * 1024),
+            log_cleaner_io_buffer_size: ConfigDef::default()
+                .with_key(LOG_CLEANER_IO_BUFFER_SIZE_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from("The total memory used for log cleaner I/O buffers across all cleaner threads"))
+                .with_default(512 * 1024),
+            log_cleaner_dedupe_buffer_load_factor: ConfigDef::default()
+                .with_key(LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from("Log cleaner dedupe buffer load factor. The percentage full the dedupe buffer can become. A higher value will allow more log to be cleaned at once but will lead to more hash collisions"))
+                .with_default(0.9),// Contained a 0.9d before, double check
             log_flush_scheduler_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -643,6 +658,12 @@ impl KafkaConfigProperties {
             },
             KafkaConfigKey::LogCleanerDedupeBufferSize => {
                 self.log_cleaner_dedupe_buffer_size.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::LogCleanerIoBufferSize => {
+                self.log_cleaner_io_buffer_size.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::LogCleanerDedupeBufferLoadFactor => {
+                self.log_cleaner_dedupe_buffer_load_factor.try_set_parsed_value(property_value)?
             },
             KafkaConfigKey::LogFlushSchedulerIntervalMs => {
                 self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
@@ -829,6 +850,9 @@ impl KafkaConfigProperties {
         let log_retention_time_hours = self.log_retention_time_hours.build()?;
         let log_cleaner_threads = self.log_cleaner_threads.build()?;
         let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
+        let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
+        let log_cleaner_dedupe_buffer_load_factor =
+            self.log_cleaner_dedupe_buffer_load_factor.build()?;
         let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
         let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
         let log_flush_offset_checkpoint_interval_ms =
@@ -864,6 +888,8 @@ impl KafkaConfigProperties {
             log_retention_time_hours,
             log_cleaner_threads,
             log_cleaner_dedupe_buffer_size,
+            log_cleaner_io_buffer_size,
+            log_cleaner_dedupe_buffer_load_factor,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
@@ -903,6 +929,8 @@ pub struct KafkaConfig {
     pub log_retention_time_hours: i32,
     pub log_cleaner_threads: i32,
     pub log_cleaner_dedupe_buffer_size: i64,
+    pub log_cleaner_io_buffer_size: i32,
+    pub log_cleaner_dedupe_buffer_load_factor: f64,
     pub log_flush_scheduler_interval_ms: i64,
     pub log_flush_interval_ms: i64,
     pub log_flush_offset_checkpoint_interval_ms: i32,
@@ -982,6 +1010,10 @@ impl Default for KafkaConfig {
         let log_cleaner_threads = config_properties.log_cleaner_threads.build().unwrap();
         let log_cleaner_dedupe_buffer_size =
             config_properties.log_cleaner_dedupe_buffer_size.build().unwrap();
+        let log_cleaner_io_buffer_size =
+            config_properties.log_cleaner_io_buffer_size.build().unwrap();
+        let log_cleaner_dedupe_buffer_load_factor =
+            config_properties.log_cleaner_dedupe_buffer_load_factor.build().unwrap();
         let log_flush_scheduler_interval_ms =
             config_properties.log_flush_scheduler_interval_ms.build().unwrap();
         let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
@@ -1020,8 +1052,11 @@ impl Default for KafkaConfig {
             log_retention_time_hours,
             log_cleaner_threads,
             log_cleaner_dedupe_buffer_size,
+            log_cleaner_io_buffer_size,
+            log_cleaner_dedupe_buffer_load_factor,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
+            log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             num_recovery_threads_per_data_dir,
         }
