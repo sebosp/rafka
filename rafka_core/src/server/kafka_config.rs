@@ -41,6 +41,7 @@ pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours";
 pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms";
 pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
 pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
+pub const LOG_CLEANUP_INTERVAL_MS_PROP: &str = "log.retention.check.interval.ms";
 pub const LOG_CLEANER_THREADS_PROP: &str = "log.cleaner.threads";
 pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP: &str = "log.cleaner.dedupe.buffer.size";
 pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP: &str = "log.cleaner.io.buffer.load.factor";
@@ -105,6 +106,7 @@ pub enum KafkaConfigKey {
     LogRetentionTimeMillis,
     LogRetentionTimeMinutes,
     LogRetentionTimeHours,
+    LogCleanupIntervalMs,
     LogCleanerThreads,
     LogCleanerDedupeBufferSize,
     LogCleanerIoBufferSize,
@@ -152,6 +154,7 @@ impl FromStr for KafkaConfigKey {
             LOG_RETENTION_TIME_MILLIS_PROP => Ok(Self::LogRetentionTimeMillis),
             LOG_RETENTION_TIME_MINUTES_PROP => Ok(Self::LogRetentionTimeMinutes),
             LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
+            LOG_CLEANUP_INTERVAL_MS_PROP => Ok(Self::LogCleanupIntervalMs),
             LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
             LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
             LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
@@ -260,6 +263,7 @@ pub struct KafkaConfigProperties {
     log_retention_time_millis: ConfigDef<i64>,
     log_retention_time_minutes: ConfigDef<i32>,
     log_retention_time_hours: ConfigDef<i32>,
+    log_cleanup_interval_ms: ConfigDef<i64>,
     log_cleaner_threads: ConfigDef<i32>,
     log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
     log_cleaner_io_buffer_size: ConfigDef<i32>,
@@ -515,7 +519,16 @@ impl Default for KafkaConfigProperties {
                 .with_doc(format!(
                     "The number of hours to keep a log file before deleting it (in hours), tertiary to {} property", LOG_RETENTION_TIME_MILLIS_PROP
                     ))
-                .with_default(24 * 7),
+                .with_default(24 * 7)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, LOG_CLEANER_THREADS_PROP)
+                })),
+            log_cleanup_interval_ms: ConfigDef::default()
+                .with_key(LOG_CLEANUP_INTERVAL_MS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from("The frequency in milliseconds that the log cleaner checks whether any log is eligible for deletion"))
+                .with_default(5 * 60 * 1000),
             log_cleaner_threads: ConfigDef::default()
                 .with_key(LOG_CLEANER_THREADS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -652,6 +665,9 @@ impl KafkaConfigProperties {
             },
             KafkaConfigKey::LogRetentionTimeHours => {
                 self.log_retention_time_hours.try_set_parsed_value(property_value)?
+            },
+            KafkaConfigKey::LogCleanupIntervalMs => {
+                self.log_cleanup_interval_ms.try_set_parsed_value(property_value)?
             },
             KafkaConfigKey::LogCleanerThreads => {
                 self.log_cleaner_threads.try_set_parsed_value(property_value)?
@@ -848,6 +864,7 @@ impl KafkaConfigProperties {
         let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
         let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
         let log_retention_time_hours = self.log_retention_time_hours.build()?;
+        let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
         let log_cleaner_threads = self.log_cleaner_threads.build()?;
         let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
         let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
@@ -886,6 +903,7 @@ impl KafkaConfigProperties {
             log_retention_time_millis,
             log_retention_time_minutes,
             log_retention_time_hours,
+            log_cleanup_interval_ms,
             log_cleaner_threads,
             log_cleaner_dedupe_buffer_size,
             log_cleaner_io_buffer_size,
@@ -927,6 +945,7 @@ pub struct KafkaConfig {
     pub log_retention_time_millis: i64,
     pub log_retention_time_minutes: i32,
     pub log_retention_time_hours: i32,
+    pub log_cleanup_interval_ms: i64,
     pub log_cleaner_threads: i32,
     pub log_cleaner_dedupe_buffer_size: i64,
     pub log_cleaner_io_buffer_size: i32,
@@ -1007,6 +1026,7 @@ impl Default for KafkaConfig {
         let log_retention_time_minutes =
             config_properties.log_retention_time_minutes.build().unwrap();
         let log_retention_time_hours = config_properties.log_retention_time_hours.build().unwrap();
+        let log_cleanup_interval_ms = config_properties.log_cleanup_interval_ms.build().unwrap();
         let log_cleaner_threads = config_properties.log_cleaner_threads.build().unwrap();
         let log_cleaner_dedupe_buffer_size =
             config_properties.log_cleaner_dedupe_buffer_size.build().unwrap();
@@ -1050,6 +1070,7 @@ impl Default for KafkaConfig {
             log_retention_time_millis,
             log_retention_time_minutes,
             log_retention_time_hours,
+            log_cleanup_interval_ms,
             log_cleaner_threads,
             log_cleaner_dedupe_buffer_size,
             log_cleaner_io_buffer_size,
