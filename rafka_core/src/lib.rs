@@ -8,6 +8,7 @@ extern crate serde_derive;
 
 pub mod cluster;
 pub mod common;
+pub mod coordinator;
 pub mod log;
 pub mod majordomo;
 pub mod server;
