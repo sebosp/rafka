@@ -2,18 +2,23 @@
 //! core/src/main/scala/kafka/server/KafkaConfig.scala
 //! Changes:
 //! - No SSL, no SASL
-//! - RAFKA NOTE: Using serde_json doesn't work very well because for example
-//! ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual listeners
+//! - RAFKA NOTE: ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual
+//!   listeners Thus using serde_json need to be tweaked properly
 //! TODO:
 //! - The amount of properties is too big to handle sanely, adding, parsing, checking, too error
 //! prone, perhaps splitting them by cathegories is the next step, that would allow us to split
 //! into smaller files and specialize them there.
 
+pub mod general;
+
+use self::general::{
+    GeneralConfig, GeneralConfigKey, GeneralConfigProperties, BROKER_ID_GENERATION_ENABLED_PROP,
+    BROKER_ID_PROP, MESSAGE_MAX_BYTES_PROP, RESERVED_BROKER_MAX_ID_PROP,
+};
 use crate::cluster::end_point::EndPoint;
-use crate::common::config::topic_config;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
-use crate::common::record::records;
+use crate::coordinator::transaction::transaction_state_manager::TransactionStateManager;
 use crate::server::client_quota_manager;
 use crate::utils::core_utils;
 use fs_err::File;
@@ -23,12 +28,6 @@ use std::num;
 use std::str::FromStr;
 use thiserror::Error;
 use tracing::{debug, warn};
-
-// General section
-pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
-pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
-pub const BROKER_ID_PROP: &str = "broker.id";
-pub const MESSAGE_MAX_BYTES_PROP: &str = "message.max.bytes";
 
 // Log section
 pub const LOG_DIRS_PROP: &str = "log.dirs";
@@ -68,21 +67,18 @@ pub const ZOOKEEPER_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
 pub const ZOOKEEPER_CONNECTION_TIMEOUT_PROP: &str = "zookeeper.connection.timeout.ms";
 pub const ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS: &str = "zookeeper.max.in.flight.requests";
 
-// Quota section
-pub const CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.consumer.default";
-pub const PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.producer.default";
-pub const QUOTA_WINDOW_SIZE_SECONDS_PROP: &str = "quota.window.size.seconds";
+// Transaction management section
+pub const TRANSACTIONAL_ID_EXPIRATION_MS_PROP: &str = "transactional.id.expiration.ms";
 
-// RAFKA TODO: Since ConfigDef was moved, maybe this ConfigError should be moved there and be
-// generalized?
+// Quota section
+pub const PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.producer.default";
+pub const CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.consumer.default";
+pub const QUOTA_WINDOW_SIZE_SECONDS_PROP: &str = "quota.window.size.seconds";
 
 // A Helper Enum to aid with the miriad of properties that could be forgotten to be matched.
 #[derive(Debug)]
 pub enum KafkaConfigKey {
-    BrokerIdGenerationEnable,
-    ReservedBrokerMaxId,
-    BrokerId,
-    MessageMaxBytes,
+    General(GeneralConfigKey),
     Port,
     HostName,
     Listeners,
@@ -96,9 +92,6 @@ pub enum KafkaConfigKey {
     LogDir,
     LogDirs,
     LogSegmentBytes,
-    ConsumerQuotaBytesPerSecondDefault,
-    ProducerQuotaBytesPerSecondDefault,
-    QuotaWindowSizeSeconds,
     LogRollTimeMillis,
     LogRollTimeHours,
     LogRollTimeJitterMillis,
@@ -116,17 +109,20 @@ pub enum KafkaConfigKey {
     LogFlushOffsetCheckpointIntervalMs,
     LogFlushStartOffsetCheckpointIntervalMs,
     NumRecoveryThreadsPerDataDir,
+    TransactionalIdExpirationMs,
+    ConsumerQuotaBytesPerSecondDefault,
+    ProducerQuotaBytesPerSecondDefault,
+    QuotaWindowSizeSeconds,
 }
 
 impl FromStr for KafkaConfigKey {
     type Err = KafkaConfigError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
+        if let Ok(val) = GeneralConfigKey::from_str(input) {
+            return Ok(Self::General(val));
+        }
         match input {
-            BROKER_ID_GENERATION_ENABLE_PROP => Ok(Self::BrokerIdGenerationEnable),
-            RESERVED_BROKER_MAX_ID_PROP => Ok(Self::ReservedBrokerMaxId),
-            BROKER_ID_PROP => Ok(Self::BrokerId),
-            MESSAGE_MAX_BYTES_PROP => Ok(Self::MessageMaxBytes),
             PORT_PROP => Ok(Self::Port),
             HOST_NAME_PROP => Ok(Self::HostName),
             LISTENERS_PROP => Ok(Self::Listeners),
@@ -140,13 +136,6 @@ impl FromStr for KafkaConfigKey {
             LOG_DIR_PROP => Ok(Self::LogDir),
             LOG_DIRS_PROP => Ok(Self::LogDirs),
             LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
-            CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
-                Ok(Self::ConsumerQuotaBytesPerSecondDefault)
-            },
-            PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
-                Ok(Self::ProducerQuotaBytesPerSecondDefault)
-            },
-            QUOTA_WINDOW_SIZE_SECONDS_PROP => Ok(Self::QuotaWindowSizeSeconds),
             LOG_ROLL_TIME_MILLIS_PROP => Ok(Self::LogRollTimeMillis),
             LOG_ROLL_TIME_HOURS_PROP => Ok(Self::LogRollTimeHours),
             LOG_ROLL_TIME_JITTER_MILLIS_PROP => Ok(Self::LogRollTimeJitterMillis),
@@ -170,6 +159,14 @@ impl FromStr for KafkaConfigKey {
                 Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
             },
             NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
+            TRANSACTIONAL_ID_EXPIRATION_MS_PROP => Ok(Self::TransactionalIdExpirationMs),
+            PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+                Ok(Self::ProducerQuotaBytesPerSecondDefault)
+            },
+            CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
+                Ok(Self::ConsumerQuotaBytesPerSecondDefault)
+            },
+            QUOTA_WINDOW_SIZE_SECONDS_PROP => Ok(Self::QuotaWindowSizeSeconds),
             _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
         }
     }
@@ -234,10 +231,7 @@ impl PartialEq for KafkaConfigError {
 
 #[derive(Debug)]
 pub struct KafkaConfigProperties {
-    broker_id_generation_enable: ConfigDef<bool>,
-    reserved_broker_max_id: ConfigDef<i32>,
-    broker_id: ConfigDef<i32>,
-    message_max_bytes: ConfigDef<usize>,
+    general: GeneralConfigProperties,
     port: ConfigDef<i32>,
     host_name: ConfigDef<String>,
     listeners: ConfigDef<String>,
@@ -253,9 +247,6 @@ pub struct KafkaConfigProperties {
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
     log_dirs: ConfigDef<String>,
     log_segment_bytes: ConfigDef<usize>,
-    consumer_quota_bytes_per_second_default: ConfigDef<i64>,
-    producer_quota_bytes_per_second_default: ConfigDef<i64>,
-    quota_window_size_seconds: ConfigDef<i32>,
     log_roll_time_millis: ConfigDef<i64>,
     log_roll_time_hours: ConfigDef<i32>,
     log_roll_time_jitter_millis: ConfigDef<i64>,
@@ -272,49 +263,17 @@ pub struct KafkaConfigProperties {
     log_flush_interval_ms: ConfigDef<i64>,
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
+    transactional_id_expiration_ms: ConfigDef<i64>,
+    producer_quota_bytes_per_second_default: ConfigDef<i64>,
+    consumer_quota_bytes_per_second_default: ConfigDef<i64>,
+    quota_window_size_seconds: ConfigDef<i32>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
 }
 
 impl Default for KafkaConfigProperties {
     fn default() -> Self {
         Self {
-            broker_id_generation_enable: ConfigDef::default()
-                .with_key(BROKER_ID_GENERATION_ENABLED_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(
-                    format!("Enable automatic broker id generation on the server. When enabled the value \
-                     configured for {} should be reviewed.", RESERVED_BROKER_MAX_ID_PROP)
-                )
-                .with_default(true),
-            reserved_broker_max_id: ConfigDef::default()
-                .with_key(RESERVED_BROKER_MAX_ID_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
-                .with_default(1000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, RESERVED_BROKER_MAX_ID_PROP)
-                })),
-            broker_id: ConfigDef::default()
-                .with_key(BROKER_ID_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The broker id for this server. If unset, a unique broker id will be generated. \
-                     To avoid conflicts between zookeeper generated broker id's and user configured \
-                     broker id's, generated broker ids start from {} + 1.", RESERVED_BROKER_MAX_ID_PROP),
-                )
-                .with_default(-1),
-            message_max_bytes: ConfigDef::default()
-                .with_key(MESSAGE_MAX_BYTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_default(1024 * 1024 + records::LOG_OVERHEAD)
-                .with_doc(
-                    format!("{} This can be set per topic with the topic level `{}` config.", topic_config::MAX_MESSAGE_BYTES_DOC, topic_config::MAX_MESSAGE_BYTES_CONFIG)
-                )
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, MESSAGE_MAX_BYTES_PROP)
-                })),
+            general: GeneralConfigProperties::default(),
             port: ConfigDef::default()
                 .with_key(PORT_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -355,22 +314,22 @@ impl Default for KafkaConfigProperties {
                 .with_key(ADVERTISED_HOST_NAME_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
-  "DEPRECATED: only used when `{}` or `{}` are not set. \
-  Use `{}` instead. \
-  Hostname to publish to ZooKeeper for clients to use. In IaaS environments, this may \
-  need to be different from the interface to which the broker binds. If this is not set, \
-  it will use the value for `{}` if configured. Otherwise \
-  it will use the value returned from gethostname", ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP, HOST_NAME_PROP
+                    "DEPRECATED: only used when `{}` or `{}` are not set. \
+                    Use `{}` instead. \
+                    Hostname to publish to ZooKeeper for clients to use. In IaaS environments, this may \
+                    need to be different from the interface to which the broker binds. If this is not set, \
+                    it will use the value for `{}` if configured. Otherwise \
+                    it will use the value returned from gethostname", ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP, HOST_NAME_PROP
                    )),
             advertised_port: ConfigDef::default()
                 .with_key(ADVERTISED_PORT_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
-  "DEPRECATED: only used when `{}` or `{}` are not set. \
-  Use `{}` instead. \
-  The port to publish to ZooKeeper for clients to use. In IaaS environments, this may \
-  need to be different from the port to which the broker binds. If this is not set, \
-  it will publish the same port that the broker binds to.", ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP
+                    "DEPRECATED: only used when `{}` or `{}` are not set. \
+                    Use `{}` instead. \
+                    The port to publish to ZooKeeper for clients to use. In IaaS environments, this may \
+                    need to be different from the port to which the broker binds. If this is not set, \
+                    it will publish the same port that the broker binds to.", ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP
                     )),
             zk_connect: ConfigDef::default()
                 .with_key(ZOOKEEPER_CONNECT_PROP)
@@ -428,41 +387,6 @@ impl Default for KafkaConfigProperties {
                     // RAFKA TODO: This doesn't make much sense if it's u32...
                     ConfigDef::at_least(data, &legacy_record::RECORD_OVERHEAD_V0, LOG_SEGMENT_BYTES_PROP)
                     })),
-            consumer_quota_bytes_per_second_default: ConfigDef::default()
-                .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
-                    Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
-                ))
-                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
-                })),
-            producer_quota_bytes_per_second_default: ConfigDef::default()
-                .with_key(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
-                    Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
-                ))
-                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
-                })),
-            quota_window_size_seconds: ConfigDef::default()
-                .with_key(QUOTA_WINDOW_SIZE_SECONDS_PROP)
-                .with_importance(ConfigDefImportance::Low)
-                .with_doc(String::from(
-                    "The time span of each sample for client quotas"
-                ))
-                .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
-                })),
             log_roll_time_millis: ConfigDef::default()
                 .with_key(LOG_ROLL_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -585,10 +509,59 @@ impl Default for KafkaConfigProperties {
                 })),
             num_recovery_threads_per_data_dir: ConfigDef::default()
                 .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
+                .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from(
                         "The number of threads per data directory to be used for log recovery at startup and flushing at shutdown"
                 ))
                 .with_default(1),
+            transactional_id_expiration_ms: ConfigDef::default()
+                .with_key(TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "The time in ms that the transaction coordinator will wait without receiving any transaction status updates \
+                    for the current transaction before expiring its transactional id. This setting also influences producer id expiration - producer ids are expired \
+                    once this time has elapsed after the last write with the given producer id. Note that producer ids may expire sooner if the last write from the producer id is deleted due to the topic's retention settings."
+                ))
+                .with_default(TransactionStateManager::default().default_transactional_id_expiration_ms)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
+                })),
+            producer_quota_bytes_per_second_default: ConfigDef::default()
+                .with_key(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
+                    Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
+                ))
+                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                })),
+            consumer_quota_bytes_per_second_default: ConfigDef::default()
+                .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
+                    Any consumer distinguished by clientId/consumer group will get throttled if it fetches more bytes than this value per-second"
+                ))
+                .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                })),
+            quota_window_size_seconds: ConfigDef::default()
+                .with_key(QUOTA_WINDOW_SIZE_SECONDS_PROP)
+                .with_importance(ConfigDefImportance::Low)
+                .with_doc(String::from(
+                    "The time span of each sample for client quotas"
+                ))
+                .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, QUOTA_WINDOW_SIZE_SECONDS_PROP)
+                })),
         }
     }
 }
@@ -602,15 +575,8 @@ impl KafkaConfigProperties {
     ) -> Result<(), KafkaConfigError> {
         let kafka_config_key = KafkaConfigKey::from_str(property_name)?;
         match kafka_config_key {
-            KafkaConfigKey::BrokerIdGenerationEnable => {
-                self.broker_id_generation_enable.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::ReservedBrokerMaxId => {
-                self.reserved_broker_max_id.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::BrokerId => self.broker_id.try_set_parsed_value(property_value)?,
-            KafkaConfigKey::MessageMaxBytes => {
-                self.message_max_bytes.try_set_parsed_value(property_value)?
+            KafkaConfigKey::General(val) => {
+                self.general.try_set_property(property_name, property_value)?
             },
             KafkaConfigKey::Port => self.port.try_set_parsed_value(property_value)?,
             KafkaConfigKey::HostName => self.host_name.try_set_parsed_value(property_value)?,
@@ -830,10 +796,7 @@ impl KafkaConfigProperties {
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
-        let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
-        let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
-        let broker_id = self.broker_id.build()?;
-        let message_max_bytes = self.message_max_bytes.build()?;
+        let general = self.general.build()?;
         let port = self.port.build()?;
         let host_name = self.host_name.build()?;
         let listeners = self.listeners.build()?;
@@ -851,12 +814,6 @@ impl KafkaConfigProperties {
         let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
         let log_dirs = self.resolve_log_dirs()?;
         let log_segment_bytes = self.log_segment_bytes.build()?;
-        let consumer_quota_bytes_per_second_default =
-            self.consumer_quota_bytes_per_second_default.build()?;
-        let quota_window_size_seconds = self.quota_window_size_seconds.build()?;
-        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
-        let producer_quota_bytes_per_second_default =
-            self.producer_quota_bytes_per_second_default.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
         let log_roll_time_hours = self.log_roll_time_hours.build()?;
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
@@ -876,11 +833,15 @@ impl KafkaConfigProperties {
             self.log_flush_offset_checkpoint_interval_ms.build()?;
         let log_flush_start_offset_checkpoint_interval_ms =
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
+        let transactional_id_expiration_ms = self.transactional_id_expiration_ms.build()?;
+        let consumer_quota_bytes_per_second_default =
+            self.consumer_quota_bytes_per_second_default.build()?;
+        let producer_quota_bytes_per_second_default =
+            self.producer_quota_bytes_per_second_default.build()?;
+        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
+        let quota_window_size_seconds = self.quota_window_size_seconds.build()?;
         let kafka_config = KafkaConfig {
-            broker_id_generation_enable,
-            reserved_broker_max_id,
-            broker_id,
-            message_max_bytes,
+            general,
             port,
             host_name,
             listeners,
@@ -893,9 +854,6 @@ impl KafkaConfigProperties {
             log_dirs,
             log_segment_bytes,
             zk_max_in_flight_requests,
-            consumer_quota_bytes_per_second_default,
-            producer_quota_bytes_per_second_default,
-            quota_window_size_seconds,
             log_roll_time_millis,
             log_roll_time_hours,
             log_roll_time_jitter_millis,
@@ -913,16 +871,17 @@ impl KafkaConfigProperties {
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             num_recovery_threads_per_data_dir,
+            transactional_id_expiration_ms,
+            consumer_quota_bytes_per_second_default,
+            producer_quota_bytes_per_second_default,
+            quota_window_size_seconds,
         };
         kafka_config.validate_values()
     }
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct KafkaConfig {
-    pub broker_id_generation_enable: bool,
-    pub reserved_broker_max_id: i32,
-    pub broker_id: i32,
-    pub message_max_bytes: usize,
+    pub general: GeneralConfig,
     pub port: i32,
     pub host_name: String,
     pub listeners: String,
@@ -935,9 +894,6 @@ pub struct KafkaConfig {
     pub zk_max_in_flight_requests: u32,
     pub log_dirs: Vec<String>,
     pub log_segment_bytes: usize,
-    pub consumer_quota_bytes_per_second_default: i64,
-    pub producer_quota_bytes_per_second_default: i64,
-    pub quota_window_size_seconds: i32,
     pub log_roll_time_millis: i64,
     pub log_roll_time_hours: i32,
     pub log_roll_time_jitter_millis: i64,
@@ -955,6 +911,10 @@ pub struct KafkaConfig {
     pub log_flush_offset_checkpoint_interval_ms: i32,
     pub log_flush_start_offset_checkpoint_interval_ms: i32,
     pub num_recovery_threads_per_data_dir: i32,
+    pub transactional_id_expiration_ms: i64,
+    pub consumer_quota_bytes_per_second_default: i64,
+    pub producer_quota_bytes_per_second_default: i64,
+    pub quota_window_size_seconds: i32,
 }
 
 impl KafkaConfig {
@@ -967,19 +927,7 @@ impl KafkaConfig {
     }
 
     pub fn validate_values(self) -> Result<Self, KafkaConfigError> {
-        if self.broker_id_generation_enable {
-            if self.broker_id < -1 || self.broker_id > self.reserved_broker_max_id {
-                return Err(KafkaConfigError::InvalidValue(format!(
-                    "{}: '{}' must be equal or greater than -1 and not greater than {}",
-                    BROKER_ID_PROP, self.broker_id, RESERVED_BROKER_MAX_ID_PROP
-                )));
-            }
-        } else if self.broker_id < 0 {
-            return Err(KafkaConfigError::InvalidValue(format!(
-                "{}: '{}' must be equal or greater than 0",
-                BROKER_ID_PROP, self.broker_id
-            )));
-        }
+        self.general.validate_values()?;
         Ok(self)
     }
 }
@@ -988,11 +936,6 @@ impl Default for KafkaConfig {
     fn default() -> Self {
         // Somehow this should only be allowed for testing...
         let mut config_properties = KafkaConfigProperties::default();
-        let broker_id_generation_enable =
-            config_properties.broker_id_generation_enable.build().unwrap();
-        let reserved_broker_max_id = config_properties.reserved_broker_max_id.build().unwrap();
-        let broker_id = config_properties.broker_id.build().unwrap();
-        let message_max_bytes = config_properties.message_max_bytes.build().unwrap();
         let port = config_properties.port.build().unwrap();
         let host_name = config_properties.host_name.build().unwrap();
         let listeners = config_properties.listeners.build().unwrap();
@@ -1009,12 +952,6 @@ impl Default for KafkaConfig {
             config_properties.zk_max_in_flight_requests.build().unwrap();
         let log_dirs = config_properties.resolve_log_dirs().unwrap();
         let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
-        let consumer_quota_bytes_per_second_default =
-            config_properties.consumer_quota_bytes_per_second_default.build().unwrap();
-        let producer_quota_bytes_per_second_default =
-            config_properties.producer_quota_bytes_per_second_default.build().unwrap();
-        let quota_window_size_seconds =
-            config_properties.quota_window_size_seconds.build().unwrap();
         let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
         let log_roll_time_hours = config_properties.log_roll_time_hours.build().unwrap();
         let log_roll_time_jitter_millis =
@@ -1043,11 +980,16 @@ impl Default for KafkaConfig {
             config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
         let num_recovery_threads_per_data_dir =
             config_properties.num_recovery_threads_per_data_dir.build().unwrap();
+        let transactional_id_expiration_ms =
+            config_properties.transactional_id_expiration_ms.build().unwrap();
+        let consumer_quota_bytes_per_second_default =
+            config_properties.consumer_quota_bytes_per_second_default.build().unwrap();
+        let producer_quota_bytes_per_second_default =
+            config_properties.producer_quota_bytes_per_second_default.build().unwrap();
+        let quota_window_size_seconds =
+            config_properties.quota_window_size_seconds.build().unwrap();
         Self {
-            broker_id_generation_enable,
-            reserved_broker_max_id,
-            broker_id,
-            message_max_bytes,
+            general: GeneralConfig::default(),
             port,
             host_name,
             listeners,
@@ -1060,9 +1002,6 @@ impl Default for KafkaConfig {
             zk_max_in_flight_requests,
             log_dirs,
             log_segment_bytes,
-            consumer_quota_bytes_per_second_default,
-            producer_quota_bytes_per_second_default,
-            quota_window_size_seconds,
             log_roll_time_millis,
             log_roll_time_hours,
             log_roll_time_jitter_millis,
@@ -1080,6 +1019,10 @@ impl Default for KafkaConfig {
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             num_recovery_threads_per_data_dir,
+            transactional_id_expiration_ms,
+            producer_quota_bytes_per_second_default,
+            consumer_quota_bytes_per_second_default,
+            quota_window_size_seconds,
         }
     }
 }
