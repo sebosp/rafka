@@ -10,48 +10,32 @@
 //! into smaller files and specialize them there.
 
 pub mod general;
+pub mod log;
+pub mod quota;
 
 use self::general::{
     GeneralConfig, GeneralConfigKey, GeneralConfigProperties, BROKER_ID_GENERATION_ENABLED_PROP,
     BROKER_ID_PROP, MESSAGE_MAX_BYTES_PROP, RESERVED_BROKER_MAX_ID_PROP,
 };
+use self::log::{LogConfigKey, LogConfigProperties, LOG_DIRS_PROP, LOG_DIR_PROP};
+use self::quota::{
+    CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP,
+    QUOTA_WINDOW_SIZE_SECONDS_PROP,
+};
 use crate::cluster::end_point::EndPoint;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
-use crate::common::record::legacy_record;
 use crate::coordinator::transaction::transaction_state_manager::TransactionStateManager;
 use crate::server::client_quota_manager;
 use crate::utils::core_utils;
+use enum_iterator::IntoEnumIterator;
 use fs_err::File;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::io::{self, BufReader};
 use std::num;
 use std::str::FromStr;
 use thiserror::Error;
 use tracing::{debug, warn};
-
-// Log section
-pub const LOG_DIRS_PROP: &str = "log.dirs";
-pub const LOG_DIR_PROP: &str = "log.dir";
-pub const LOG_SEGMENT_BYTES_PROP: &str = "log.segment.bytes";
-pub const LOG_ROLL_TIME_MILLIS_PROP: &str = "log.roll.ms";
-pub const LOG_ROLL_TIME_HOURS_PROP: &str = "log.roll.hours";
-pub const LOG_ROLL_TIME_JITTER_MILLIS_PROP: &str = "log.roll.jitter.ms";
-pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours";
-pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms";
-pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
-pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
-pub const LOG_CLEANUP_INTERVAL_MS_PROP: &str = "log.retention.check.interval.ms";
-pub const LOG_CLEANER_THREADS_PROP: &str = "log.cleaner.threads";
-pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP: &str = "log.cleaner.dedupe.buffer.size";
-pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP: &str = "log.cleaner.io.buffer.load.factor";
-pub const LOG_CLEANER_IO_BUFFER_SIZE_PROP: &str = "log.cleaner.io.buffer.size";
-pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms";
-pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms";
-pub const LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
-    "log.flush.offset.checkpoint.interval.ms";
-pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
-    "log.flush.start.offset.checkpoint.interval.ms";
-pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
 
 // Socket server section
 pub const PORT_PROP: &str = "port";
@@ -70,13 +54,8 @@ pub const ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS: &str = "zookeeper.max.in.flight.requ
 // Transaction management section
 pub const TRANSACTIONAL_ID_EXPIRATION_MS_PROP: &str = "transactional.id.expiration.ms";
 
-// Quota section
-pub const PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.producer.default";
-pub const CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.consumer.default";
-pub const QUOTA_WINDOW_SIZE_SECONDS_PROP: &str = "quota.window.size.seconds";
-
 // A Helper Enum to aid with the miriad of properties that could be forgotten to be matched.
-#[derive(Debug)]
+#[derive(Debug, IntoEnumIterator)]
 pub enum KafkaConfigKey {
     General(GeneralConfigKey),
     Port,
@@ -89,26 +68,7 @@ pub enum KafkaConfigKey {
     ZkSessionTimeoutMs,
     ZkConnectionTimeoutMs,
     // ZkMaxInFlightRequests,
-    LogDir,
-    LogDirs,
-    LogSegmentBytes,
-    LogRollTimeMillis,
-    LogRollTimeHours,
-    LogRollTimeJitterMillis,
-    LogRollTimeJitterHours,
-    LogRetentionTimeMillis,
-    LogRetentionTimeMinutes,
-    LogRetentionTimeHours,
-    LogCleanupIntervalMs,
-    LogCleanerThreads,
-    LogCleanerDedupeBufferSize,
-    LogCleanerIoBufferSize,
-    LogCleanerDedupeBufferLoadFactor,
-    LogFlushSchedulerIntervalMs,
-    LogFlushIntervalMs,
-    LogFlushOffsetCheckpointIntervalMs,
-    LogFlushStartOffsetCheckpointIntervalMs,
-    NumRecoveryThreadsPerDataDir,
+    Log(LogConfigKey),
     TransactionalIdExpirationMs,
     ConsumerQuotaBytesPerSecondDefault,
     ProducerQuotaBytesPerSecondDefault,
@@ -122,6 +82,9 @@ impl FromStr for KafkaConfigKey {
         if let Ok(val) = GeneralConfigKey::from_str(input) {
             return Ok(Self::General(val));
         }
+        if let Ok(val) = LogConfigKey::from_str(input) {
+            return Ok(Self::Log(val));
+        }
         match input {
             PORT_PROP => Ok(Self::Port),
             HOST_NAME_PROP => Ok(Self::HostName),
@@ -133,32 +96,6 @@ impl FromStr for KafkaConfigKey {
             ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
             // ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
-            LOG_DIR_PROP => Ok(Self::LogDir),
-            LOG_DIRS_PROP => Ok(Self::LogDirs),
-            LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
-            LOG_ROLL_TIME_MILLIS_PROP => Ok(Self::LogRollTimeMillis),
-            LOG_ROLL_TIME_HOURS_PROP => Ok(Self::LogRollTimeHours),
-            LOG_ROLL_TIME_JITTER_MILLIS_PROP => Ok(Self::LogRollTimeJitterMillis),
-            LOG_ROLL_TIME_JITTER_HOURS_PROP => Ok(Self::LogRollTimeJitterHours),
-            LOG_RETENTION_TIME_MILLIS_PROP => Ok(Self::LogRetentionTimeMillis),
-            LOG_RETENTION_TIME_MINUTES_PROP => Ok(Self::LogRetentionTimeMinutes),
-            LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
-            LOG_CLEANUP_INTERVAL_MS_PROP => Ok(Self::LogCleanupIntervalMs),
-            LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
-            LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
-            LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
-            LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP => {
-                Ok(Self::LogCleanerDedupeBufferLoadFactor)
-            },
-            LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
-            LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
-            LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
-                Ok(Self::LogFlushOffsetCheckpointIntervalMs)
-            },
-            LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
-                Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
-            },
-            NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
             TRANSACTIONAL_ID_EXPIRATION_MS_PROP => Ok(Self::TransactionalIdExpirationMs),
             PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => {
                 Ok(Self::ProducerQuotaBytesPerSecondDefault)
@@ -229,6 +166,30 @@ impl PartialEq for KafkaConfigError {
     }
 }
 
+/// A set of functions that the different configuration sets must implement, including building,
+/// parsing, returning keys, etc.
+pub trait ConfigSet {
+    type ConfigKey;
+    type ConfigType;
+    /// `try_from_config_property` transforms a string value from the config into our actual types
+    fn try_set_property(
+        &mut self,
+        property_name: &str,
+        property_value: &str,
+    ) -> Result<(), KafkaConfigError>;
+    /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
+    /// KafkaConfig. NOTE: This doesn't consume self, as a ConfigKey may be re-updated on-the-fly
+    /// without the need to restart, for example via zookeeper
+    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError>;
+    /// `config_names` returns a list of config keys used
+    fn config_names() -> Vec<String>
+    where
+        Self::ConfigKey: IntoEnumIterator + Display,
+    {
+        Self::ConfigKey::into_enum_iter().map(|val| val.to_string()).collect()
+    }
+}
+
 #[derive(Debug)]
 pub struct KafkaConfigProperties {
     general: GeneralConfigProperties,
@@ -242,32 +203,11 @@ pub struct KafkaConfigProperties {
     zk_session_timeout_ms: ConfigDef<u32>,
     zk_connection_timeout_ms: ConfigDef<u32>,
     zk_max_in_flight_requests: ConfigDef<u32>,
-    // Singular log.dir
-    log_dir: ConfigDef<String>,
-    // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
-    log_dirs: ConfigDef<String>,
-    log_segment_bytes: ConfigDef<usize>,
-    log_roll_time_millis: ConfigDef<i64>,
-    log_roll_time_hours: ConfigDef<i32>,
-    log_roll_time_jitter_millis: ConfigDef<i64>,
-    log_roll_time_jitter_hours: ConfigDef<i32>,
-    log_retention_time_millis: ConfigDef<i64>,
-    log_retention_time_minutes: ConfigDef<i32>,
-    log_retention_time_hours: ConfigDef<i32>,
-    log_cleanup_interval_ms: ConfigDef<i64>,
-    log_cleaner_threads: ConfigDef<i32>,
-    log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
-    log_cleaner_io_buffer_size: ConfigDef<i32>,
-    log_cleaner_dedupe_buffer_load_factor: ConfigDef<f64>,
-    log_flush_scheduler_interval_ms: ConfigDef<i64>,
-    log_flush_interval_ms: ConfigDef<i64>,
-    log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
-    log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
+    log: LogConfigProperties,
     transactional_id_expiration_ms: ConfigDef<i64>,
     producer_quota_bytes_per_second_default: ConfigDef<i64>,
     consumer_quota_bytes_per_second_default: ConfigDef<i64>,
     quota_window_size_seconds: ConfigDef<i32>,
-    num_recovery_threads_per_data_dir: ConfigDef<i32>,
 }
 
 impl Default for KafkaConfigProperties {
@@ -364,156 +304,7 @@ impl Default for KafkaConfigProperties {
                     // RAFKA TODO: This doesn't make much sense if it's u32...
                     ConfigDef::at_least(data, &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
                     })),
-            log_dir: ConfigDef::default()
-                .with_key(LOG_DIR_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The directory in which the log data is kept (supplemental for {} property)", LOG_DIRS_PROP),
-                )
-                .with_default(String::from("/tmp/kafka-logs")),
-            log_dirs: ConfigDef::default()
-                .with_key(LOG_DIRS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The directories in which the log data is kept. If not set, the value in {} \
-                     is used", LOG_DIR_PROP),
-                ),
-            log_segment_bytes: ConfigDef::default()
-                .with_key(LOG_SEGMENT_BYTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("The maximum size of a single log file"))
-                .with_default(1 * 1024 * 1024 * 1024)
-                .with_validator(Box::new(|data| {
-                    // RAFKA TODO: This doesn't make much sense if it's u32...
-                    ConfigDef::at_least(data, &legacy_record::RECORD_OVERHEAD_V0, LOG_SEGMENT_BYTES_PROP)
-                    })),
-            log_roll_time_millis: ConfigDef::default()
-                .with_key(LOG_ROLL_TIME_MILLIS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
-                }))
-                .with_doc(format!(
-                        "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_HOURS_PROP
-                )),
-            log_roll_time_hours: ConfigDef::default()
-                .with_key(LOG_ROLL_TIME_HOURS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                        "The maximum time before a new log segment is rolled out (in hours), secondary to {} property", LOG_ROLL_TIME_MILLIS_PROP
-                ))
-                .with_default(24 * 7)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, LOG_ROLL_TIME_HOURS_PROP)
-                })),
-            log_roll_time_jitter_millis: ConfigDef::default()
-                .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                        "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If not set, the value in {} is used", LOG_ROLL_TIME_JITTER_HOURS_PROP
-                )),
-            log_roll_time_jitter_hours: ConfigDef::default()
-                .with_key(LOG_ROLL_TIME_JITTER_HOURS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                         "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary to {} property", LOG_ROLL_TIME_JITTER_MILLIS_PROP
-                ))
-                .with_default(0)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_ROLL_TIME_JITTER_HOURS_PROP)
-                })),
-            log_retention_time_millis: ConfigDef::default()
-                .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                        "The number of milliseconds to keep a log file before deleting it (in milliseconds), If not set, the value in {} is used. If set to -1, no time limit is applied.", LOG_RETENTION_TIME_MINUTES_PROP
-                )),
-            log_retention_time_minutes: ConfigDef::default()
-                .with_key(LOG_RETENTION_TIME_MINUTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                        "The number of minutes to keep a log file before deleting it (in minutes), secondary to {} property. If not set, the value in {} is used", LOG_RETENTION_TIME_MILLIS_PROP, LOG_RETENTION_TIME_HOURS_PROP
-                )),
-            log_retention_time_hours: ConfigDef::default()
-                .with_key(LOG_RETENTION_TIME_HOURS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The number of hours to keep a log file before deleting it (in hours), tertiary to {} property", LOG_RETENTION_TIME_MILLIS_PROP
-                    ))
-                .with_default(24 * 7)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, LOG_CLEANER_THREADS_PROP)
-                })),
-            log_cleanup_interval_ms: ConfigDef::default()
-                .with_key(LOG_CLEANUP_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("The frequency in milliseconds that the log cleaner checks whether any log is eligible for deletion"))
-                .with_default(5 * 60 * 1000),
-            log_cleaner_threads: ConfigDef::default()
-                .with_key(LOG_CLEANER_THREADS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("The number of background threads to use for log cleaning"))
-                .with_default(1)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
-                })),
-            log_cleaner_dedupe_buffer_size: ConfigDef::default()
-                .with_key(LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("The total memory used for log deduplication across all cleaner threads"))
-                .with_default(128 * 1024 * 1024),
-            log_cleaner_io_buffer_size: ConfigDef::default()
-                .with_key(LOG_CLEANER_IO_BUFFER_SIZE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("The total memory used for log cleaner I/O buffers across all cleaner threads"))
-                .with_default(512 * 1024),
-            log_cleaner_dedupe_buffer_load_factor: ConfigDef::default()
-                .with_key(LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("Log cleaner dedupe buffer load factor. The percentage full the dedupe buffer can become. A higher value will allow more log to be cleaned at once but will lead to more hash collisions"))
-                .with_default(0.9),// Contained a 0.9d before, double check
-            log_flush_scheduler_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("The frequency in ms that the log flusher checks whether any log needs to be flushed to disk"))
-                .with_default(i64::MAX),
-            log_flush_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                        "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. If not set, the value in {} is used", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP
-                ))
-                .with_default(i64::MAX),
-            log_flush_offset_checkpoint_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("The frequency with which we update the persistent record of the last flush which acts as the log recovery point"))
-                .with_default(60000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
-                })),
-            log_flush_start_offset_checkpoint_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("The frequency with which we update the persistent record of log start offset"))
-                .with_default(60000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
-                })),
-            num_recovery_threads_per_data_dir: ConfigDef::default()
-                .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                        "The number of threads per data directory to be used for log recovery at startup and flushing at shutdown"
-                ))
-                .with_default(1),
+            log: LogConfigProperties::default(),
             transactional_id_expiration_ms: ConfigDef::default()
                 .with_key(TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -540,7 +331,7 @@ impl Default for KafkaConfigProperties {
                     ConfigDef::at_least(data, &1, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 })),
             consumer_quota_bytes_per_second_default: ConfigDef::default()
-                .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                .with_key(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from(
                     "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> or <user, client-id> in Zookeeper. \
@@ -566,9 +357,12 @@ impl Default for KafkaConfigProperties {
     }
 }
 
-impl KafkaConfigProperties {
+impl ConfigSet for KafkaConfigProperties {
+    type ConfigKey = KafkaConfigKey;
+    type ConfigType = KafkaConfig;
+
     /// `try_from_config_property` transforms a string value from the config into our actual types
-    pub fn try_set_property(
+    fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
@@ -597,79 +391,17 @@ impl KafkaConfigProperties {
             KafkaConfigKey::ZkConnectionTimeoutMs => {
                 self.zk_connection_timeout_ms.try_set_parsed_value(property_value)?
             },
-            KafkaConfigKey::LogDir => self.log_dir.try_set_parsed_value(property_value)?,
-            KafkaConfigKey::LogDirs => self.log_dirs.try_set_parsed_value(property_value)?,
-            KafkaConfigKey::LogSegmentBytes => {
-                self.log_segment_bytes.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::ConsumerQuotaBytesPerSecondDefault => {
-                self.consumer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::ProducerQuotaBytesPerSecondDefault => {
-                self.producer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::QuotaWindowSizeSeconds => {
-                self.quota_window_size_seconds.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogRollTimeMillis => {
-                self.log_roll_time_millis.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogRollTimeHours => {
-                self.log_roll_time_hours.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogRollTimeJitterMillis => {
-                self.log_roll_time_jitter_millis.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogRollTimeJitterHours => {
-                self.log_roll_time_jitter_hours.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogRetentionTimeMillis => {
-                self.log_retention_time_millis.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogRetentionTimeMinutes => {
-                self.log_retention_time_minutes.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogRetentionTimeHours => {
-                self.log_retention_time_hours.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogCleanupIntervalMs => {
-                self.log_cleanup_interval_ms.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogCleanerThreads => {
-                self.log_cleaner_threads.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogCleanerDedupeBufferSize => {
-                self.log_cleaner_dedupe_buffer_size.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogCleanerIoBufferSize => {
-                self.log_cleaner_io_buffer_size.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogCleanerDedupeBufferLoadFactor => {
-                self.log_cleaner_dedupe_buffer_load_factor.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogFlushSchedulerIntervalMs => {
-                self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogFlushIntervalMs => {
-                self.log_flush_interval_ms.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogFlushOffsetCheckpointIntervalMs => {
-                self.log_flush_offset_checkpoint_interval_ms.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::LogFlushStartOffsetCheckpointIntervalMs => self
-                .log_flush_start_offset_checkpoint_interval_ms
-                .try_set_parsed_value(property_value)?,
-            KafkaConfigKey::NumRecoveryThreadsPerDataDir => {
-                self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
-            },
         };
         Ok(())
     }
 
     /// `config_names` returns a list of config keys used by KafkaConfigProperties
-    pub fn config_names() -> Vec<String> {
+    fn config_names() -> Vec<String> {
+        let res = vec![];
+        res.append(GeneralConfigProperties::config_names());
+        res.append(&mut LogConfigProperties::config_names());
         // TODO: This should be derivable somehow too.
-        vec![
+        res.append(vec![
             ZOOKEEPER_CONNECT_PROP.to_string(),
             ZOOKEEPER_SESSION_TIMEOUT_PROP.to_string(),
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP.to_string(),
@@ -681,10 +413,98 @@ impl KafkaConfigProperties {
             CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP.to_string(),
             PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP.to_string(),
             QUOTA_WINDOW_SIZE_SECONDS_PROP.to_string(),
-            LOG_ROLL_TIME_MILLIS_PROP.to_string(),
-        ]
+        ]);
+        res
     }
 
+    /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
+    /// KafkaConfig
+    fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
+        let general = self.general.build()?;
+        let port = self.port.build()?;
+        let host_name = self.host_name.build()?;
+        let listeners = self.listeners.build()?;
+        let advertised_host_name = self.advertised_host_name.build()?;
+        let advertised_port = self.advertised_port.build()?;
+        let advertised_listeners = self.resolve_advertised_listeners()?;
+        let zk_connect = self.zk_connect.build()?;
+        let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
+        // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of
+        // zk_connection_timeout_ms will be used.
+        // RAFKA NOTE: somehow the zk_session_timeout_ms build needs to be called before this,
+        // maybe resolve can do it?
+        self.zk_connection_timeout_ms.resolve(&self.zk_session_timeout_ms);
+        let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
+        let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
+        let log_dirs = self.resolve_log_dirs()?;
+        let log_segment_bytes = self.log_segment_bytes.build()?;
+        let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
+        let log_roll_time_hours = self.log_roll_time_hours.build()?;
+        let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
+        let log_roll_time_jitter_hours = self.log_roll_time_jitter_hours.build()?;
+        let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
+        let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
+        let log_retention_time_hours = self.log_retention_time_hours.build()?;
+        let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
+        let log_cleaner_threads = self.log_cleaner_threads.build()?;
+        let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
+        let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
+        let log_cleaner_dedupe_buffer_load_factor =
+            self.log_cleaner_dedupe_buffer_load_factor.build()?;
+        let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
+        let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
+        let log_flush_offset_checkpoint_interval_ms =
+            self.log_flush_offset_checkpoint_interval_ms.build()?;
+        let log_flush_start_offset_checkpoint_interval_ms =
+            self.log_flush_start_offset_checkpoint_interval_ms.build()?;
+        let transactional_id_expiration_ms = self.transactional_id_expiration_ms.build()?;
+        let consumer_quota_bytes_per_second_default =
+            self.consumer_quota_bytes_per_second_default.build()?;
+        let producer_quota_bytes_per_second_default =
+            self.producer_quota_bytes_per_second_default.build()?;
+        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
+        let quota_window_size_seconds = self.quota_window_size_seconds.build()?;
+        let kafka_config = KafkaConfig {
+            general,
+            port,
+            host_name,
+            listeners,
+            advertised_host_name,
+            advertised_port,
+            advertised_listeners,
+            zk_connect,
+            zk_session_timeout_ms,
+            zk_connection_timeout_ms,
+            log_dirs,
+            log_segment_bytes,
+            zk_max_in_flight_requests,
+            log_roll_time_millis,
+            log_roll_time_hours,
+            log_roll_time_jitter_millis,
+            log_roll_time_jitter_hours,
+            log_retention_time_millis,
+            log_retention_time_minutes,
+            log_retention_time_hours,
+            log_cleanup_interval_ms,
+            log_cleaner_threads,
+            log_cleaner_dedupe_buffer_size,
+            log_cleaner_io_buffer_size,
+            log_cleaner_dedupe_buffer_load_factor,
+            log_flush_scheduler_interval_ms,
+            log_flush_interval_ms,
+            log_flush_offset_checkpoint_interval_ms,
+            log_flush_start_offset_checkpoint_interval_ms,
+            num_recovery_threads_per_data_dir,
+            transactional_id_expiration_ms,
+            consumer_quota_bytes_per_second_default,
+            producer_quota_bytes_per_second_default,
+            quota_window_size_seconds,
+        };
+        kafka_config.validate_values()
+    }
+}
+
+impl KafkaConfigProperties {
     /// Transforms from a HashMap of configs into a KafkaConfigProperties object
     /// This may return KafkaConfigError::UnknownKey errors
     pub fn from_properties_hashmap(
@@ -791,92 +611,6 @@ impl KafkaConfigProperties {
             )));
         }
         Ok(millis)
-    }
-
-    /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
-    /// KafkaConfig
-    pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
-        let general = self.general.build()?;
-        let port = self.port.build()?;
-        let host_name = self.host_name.build()?;
-        let listeners = self.listeners.build()?;
-        let advertised_host_name = self.advertised_host_name.build()?;
-        let advertised_port = self.advertised_port.build()?;
-        let advertised_listeners = self.resolve_advertised_listeners()?;
-        let zk_connect = self.zk_connect.build()?;
-        let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
-        // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of
-        // zk_connection_timeout_ms will be used.
-        // RAFKA NOTE: somehow the zk_session_timeout_ms build needs to be called before this,
-        // maybe resolve can do it?
-        self.zk_connection_timeout_ms.resolve(&self.zk_session_timeout_ms);
-        let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
-        let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
-        let log_dirs = self.resolve_log_dirs()?;
-        let log_segment_bytes = self.log_segment_bytes.build()?;
-        let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
-        let log_roll_time_hours = self.log_roll_time_hours.build()?;
-        let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
-        let log_roll_time_jitter_hours = self.log_roll_time_jitter_hours.build()?;
-        let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
-        let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
-        let log_retention_time_hours = self.log_retention_time_hours.build()?;
-        let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
-        let log_cleaner_threads = self.log_cleaner_threads.build()?;
-        let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
-        let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
-        let log_cleaner_dedupe_buffer_load_factor =
-            self.log_cleaner_dedupe_buffer_load_factor.build()?;
-        let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
-        let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
-        let log_flush_offset_checkpoint_interval_ms =
-            self.log_flush_offset_checkpoint_interval_ms.build()?;
-        let log_flush_start_offset_checkpoint_interval_ms =
-            self.log_flush_start_offset_checkpoint_interval_ms.build()?;
-        let transactional_id_expiration_ms = self.transactional_id_expiration_ms.build()?;
-        let consumer_quota_bytes_per_second_default =
-            self.consumer_quota_bytes_per_second_default.build()?;
-        let producer_quota_bytes_per_second_default =
-            self.producer_quota_bytes_per_second_default.build()?;
-        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
-        let quota_window_size_seconds = self.quota_window_size_seconds.build()?;
-        let kafka_config = KafkaConfig {
-            general,
-            port,
-            host_name,
-            listeners,
-            advertised_host_name,
-            advertised_port,
-            advertised_listeners,
-            zk_connect,
-            zk_session_timeout_ms,
-            zk_connection_timeout_ms,
-            log_dirs,
-            log_segment_bytes,
-            zk_max_in_flight_requests,
-            log_roll_time_millis,
-            log_roll_time_hours,
-            log_roll_time_jitter_millis,
-            log_roll_time_jitter_hours,
-            log_retention_time_millis,
-            log_retention_time_minutes,
-            log_retention_time_hours,
-            log_cleanup_interval_ms,
-            log_cleaner_threads,
-            log_cleaner_dedupe_buffer_size,
-            log_cleaner_io_buffer_size,
-            log_cleaner_dedupe_buffer_load_factor,
-            log_flush_scheduler_interval_ms,
-            log_flush_interval_ms,
-            log_flush_offset_checkpoint_interval_ms,
-            log_flush_start_offset_checkpoint_interval_ms,
-            num_recovery_threads_per_data_dir,
-            transactional_id_expiration_ms,
-            consumer_quota_bytes_per_second_default,
-            producer_quota_bytes_per_second_default,
-            quota_window_size_seconds,
-        };
-        kafka_config.validate_values()
     }
 }
 #[derive(Debug, PartialEq, Clone)]
