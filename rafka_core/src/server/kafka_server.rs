@@ -57,7 +57,7 @@ pub struct KafkaController;
 pub struct MetadataCache;
 /// `BrokerTopicStats` contains metrics per topic, bytes in, bytes out, messages in, etc.
 #[derive(Debug)]
-struct BrokerTopicStats;
+pub struct BrokerTopicStats;
 
 #[derive(Debug)]
 pub enum KafkaServerAsyncTask {
@@ -114,7 +114,7 @@ pub struct KafkaServer {
     pub broker_meta_props_file: String,
     pub broker_metadata_checkpoints: HashMap<String, BrokerMetadataCheckpoint>,
     _cluster_id: Option<String>, // was null, changed to Option<>
-    broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>$
+    broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>
 
     feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
                                                                       * Option<> */
@@ -258,24 +258,28 @@ impl KafkaServer {
             }
         }
         self.cluster_id = Some(cluster_id);
-        self.dynamic_broker_config.kafka_config.broker_id =
+        self.dynamic_broker_config.kafka_config.general.broker_id =
             self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint).await?;
-        debug!("KafkaServer id = {}", self.dynamic_broker_config.kafka_config.broker_id);
+        debug!("KafkaServer id = {}", self.dynamic_broker_config.kafka_config.general.broker_id);
 
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after DynamicConfigManager starts.
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
         self.notify_cluster_listeners().await?;
 
-        self.log_manager = LogManager::new(
-            self.config.clone(),
-            initial_offline_dirs.clone(),
-            self.broker_state,
-            self.kafka_scheduler.clone(),
-            self.init_time, // should this be re-calculated?
-            self.broker_topic_stats,
-            self.async_task_tx.clone(), /* log_dir_failure_channel needs to be acquaired through
-                                         * the async_task_tx */
+        self.log_manager = Some(
+            LogManager::new(
+                self.config.clone(),
+                initial_offline_dirs.clone(),
+                &self.broker_state,
+                self.kafka_scheduler.clone(),
+                self.init_time, // should this be re-calculated?
+                &self.broker_topic_stats,
+                self.async_task_tx.clone(), /* log_dir_failure_channel needs to be acquaired
+                                             * through
+                                             * the async_task_tx */
+            )
+            .await?,
         );
 
         Ok(())
@@ -384,7 +388,7 @@ impl KafkaServer {
         self.async_task_tx
             .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GenerateBrokerId(tx)))
             .await?;
-        Ok(rx.await? + self.dynamic_broker_config.kafka_config.reserved_broker_max_id)
+        Ok(rx.await? + self.dynamic_broker_config.kafka_config.general.reserved_broker_max_id)
     }
 
     /// Generates new broker_id if enabled or reads from meta.properties based on following
@@ -401,7 +405,7 @@ impl KafkaServer {
         &mut self,
         broker_metadata: BrokerMetadata,
     ) -> Result<i32, AsyncTaskError> {
-        let broker_id = self.dynamic_broker_config.kafka_config.broker_id;
+        let broker_id = self.dynamic_broker_config.kafka_config.general.broker_id;
 
         if broker_id >= 0
             && broker_metadata.broker_id >= 0
@@ -413,7 +417,7 @@ impl KafkaServer {
             )))
         } else if broker_metadata.broker_id < 0
             && broker_id < 0
-            && self.dynamic_broker_config.kafka_config.broker_id_generation_enable
+            && self.dynamic_broker_config.kafka_config.general.broker_id_generation_enable
         {
             // generate a new brokerId from Zookeeper
             self.generate_broker_id().await
@@ -454,6 +458,8 @@ pub enum KafkaServerError {
 
 #[cfg(test)]
 mod tests {
+    use crate::server::kafka_config::general::GeneralConfig;
+
     use super::*;
     // #[test_env_log::test]
     #[test]
@@ -513,8 +519,8 @@ mod tests {
         let bm_b_unset = BrokerMetadata::new(-1, None);
         let ks_b1 = KafkaServer {
             dynamic_broker_config: DynamicBrokerConfig::new(KafkaConfig {
-                broker_id: 1,
-                ..KafkaConfig::default()
+                general: GeneralConfig { broker_id: 1, ..GeneralConfig::default() }
+                    ..KafkaConfig::default(),
             }),
             ..KafkaServer::default()
         };
