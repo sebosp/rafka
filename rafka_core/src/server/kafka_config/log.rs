@@ -7,6 +7,7 @@ use crate::common::record::legacy_record;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
+use tracing::warn;
 pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_DIRS_PROP: &str = "log.dirs";
 pub const LOG_SEGMENT_BYTES_PROP: &str = "log.segment.bytes";
@@ -424,8 +425,190 @@ impl ConfigSet for LogConfigProperties {
         };
         Ok(())
     }
+
+    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        let log_segment_bytes = self.log_segment_bytes.build()?;
+        let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
+        let log_roll_time_hours = self.log_roll_time_hours.build()?;
+        let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
+        let log_roll_time_jitter_hours = self.log_roll_time_jitter_hours.build()?;
+        let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
+        let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
+        let log_retention_time_hours = self.log_retention_time_hours.build()?;
+        let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
+        let log_cleaner_threads = self.log_cleaner_threads.build()?;
+        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
+        let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
+        let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
+        let log_cleaner_dedupe_buffer_load_factor =
+            self.log_cleaner_dedupe_buffer_load_factor.build()?;
+        let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
+        let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
+        let log_flush_offset_checkpoint_interval_ms =
+            self.log_flush_offset_checkpoint_interval_ms.build()?;
+        let log_flush_start_offset_checkpoint_interval_ms =
+            self.log_flush_start_offset_checkpoint_interval_ms.build()?;
+        let log_dirs = self.resolve_log_dirs()?;
+        Ok(Self::ConfigType {
+            log_dirs,
+            log_segment_bytes,
+            log_roll_time_millis,
+            log_roll_time_hours,
+            log_roll_time_jitter_millis,
+            log_roll_time_jitter_hours,
+            log_retention_time_millis,
+            log_retention_time_minutes,
+            log_retention_time_hours,
+            log_cleanup_interval_ms,
+            log_cleaner_threads,
+            num_recovery_threads_per_data_dir,
+            log_cleaner_dedupe_buffer_size,
+            log_cleaner_io_buffer_size,
+            log_cleaner_dedupe_buffer_load_factor,
+            log_flush_scheduler_interval_ms,
+            log_flush_interval_ms,
+            log_flush_offset_checkpoint_interval_ms,
+            log_flush_start_offset_checkpoint_interval_ms,
+        })
+    }
+}
+impl LogConfigProperties {
+    /// `resolve_log_dirs` validates the log.dirs and log.dir combination. Note that the end value
+    /// in KafkaConfig has a default, so even if they are un-set, they will be marked as provided
+    fn resolve_log_dirs(&mut self) -> Result<Vec<String>, KafkaConfigError> {
+        // TODO: Consider checking for valid Paths and return KafkaConfigError for them
+        // NOTE: When the directories do not exist, KafkaServer simply gets a list of offline_dirs
+        if let Some(log_dirs) = &self.log_dirs.get_value() {
+            Ok((*log_dirs).clone().split(',').map(|x| x.trim_start().to_string()).collect())
+        } else if let Some(log_dir) = &self.log_dir.get_value() {
+            Ok(vec![log_dir.to_string()])
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    /// The `resolve()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
+    /// be currently performed by the resolver.
+    pub fn resolve_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
+            Ok(*log_roll_time_millis)
+        } else {
+            Ok(i64::from(self.log_roll_time_hours.build()?) * 60 * 60 * 1000)
+        }
+    }
+
+    /// The `resolve()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
+    /// be currently performed by the resolver.
+    pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
+            Ok(*log_roll_time_jitter_millis)
+        } else {
+            Ok(i64::from(self.log_roll_time_jitter_hours.build()?) * 60 * 60 * 1000)
+        }
+    }
+
+    pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        let millis_in_minute = 60 * 1000;
+        let millis_in_hour = 60 * millis_in_minute;
+
+        let millis: i64 = match self.log_retention_time_millis.get_value() {
+            Some(millis) => *millis,
+            None => match self.log_retention_time_minutes.get_value() {
+                Some(mins) => i64::from(millis_in_minute) * i64::from(*mins),
+                None => {
+                    i64::from(*self.log_retention_time_hours.get_value().unwrap()) * millis_in_hour
+                },
+            },
+        };
+        if millis < 0 {
+            warn!(
+                "Resolved Log Retention Time millis is below zero: '{}' Setting to -1 (unlimited)",
+                millis
+            );
+            millis = -1;
+        } else if millis == 0 {
+            return Err(KafkaConfigError::InvalidValue(String::from(
+                "log.retention.ms must be unlimited (-1) or, equal or greater than 1",
+            )));
+        }
+        Ok(millis)
+    }
 }
 #[derive(Debug, PartialEq, Clone)]
-pub struct LogConfig {}
-impl Default for LogConfig {}
-impl LogConfig {}
+pub struct LogConfig {
+    pub log_dirs: Vec<String>,
+    pub log_segment_bytes: usize,
+    pub log_roll_time_millis: i64,
+    pub log_roll_time_hours: i32,
+    pub log_roll_time_jitter_millis: i64,
+    pub log_roll_time_jitter_hours: i32,
+    pub log_retention_time_millis: i64,
+    pub log_retention_time_minutes: i32,
+    pub log_retention_time_hours: i32,
+    pub log_cleanup_interval_ms: i64,
+    pub log_cleaner_threads: i32,
+    pub num_recovery_threads_per_data_dir: i32,
+    pub log_cleaner_dedupe_buffer_size: i64,
+    pub log_cleaner_io_buffer_size: i32,
+    pub log_cleaner_dedupe_buffer_load_factor: f64,
+    pub log_flush_scheduler_interval_ms: i64,
+    pub log_flush_interval_ms: i64,
+    pub log_flush_offset_checkpoint_interval_ms: i32,
+    pub log_flush_start_offset_checkpoint_interval_ms: i32,
+}
+impl Default for LogConfig {
+    fn default() -> Self {
+        let mut config_properties = LogConfigProperties::default();
+        let log_dirs = config_properties.resolve_log_dirs().unwrap();
+        let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
+        let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
+        let log_roll_time_hours = config_properties.log_roll_time_hours.build().unwrap();
+        let log_roll_time_jitter_millis =
+            config_properties.resolve_log_roll_time_jitter_millis().unwrap();
+        let log_roll_time_jitter_hours =
+            config_properties.log_roll_time_jitter_hours.build().unwrap();
+        let log_retention_time_millis =
+            config_properties.resolve_log_retention_time_millis().unwrap();
+        let log_retention_time_minutes =
+            config_properties.log_retention_time_minutes.build().unwrap();
+        let log_retention_time_hours = config_properties.log_retention_time_hours.build().unwrap();
+        let log_cleanup_interval_ms = config_properties.log_cleanup_interval_ms.build().unwrap();
+        let log_cleaner_threads = config_properties.log_cleaner_threads.build().unwrap();
+        let log_cleaner_dedupe_buffer_size =
+            config_properties.log_cleaner_dedupe_buffer_size.build().unwrap();
+        let log_cleaner_io_buffer_size =
+            config_properties.log_cleaner_io_buffer_size.build().unwrap();
+        let log_cleaner_dedupe_buffer_load_factor =
+            config_properties.log_cleaner_dedupe_buffer_load_factor.build().unwrap();
+        let log_flush_scheduler_interval_ms =
+            config_properties.log_flush_scheduler_interval_ms.build().unwrap();
+        let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
+        let log_flush_offset_checkpoint_interval_ms =
+            config_properties.log_flush_offset_checkpoint_interval_ms.build().unwrap();
+        let log_flush_start_offset_checkpoint_interval_ms =
+            config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
+        let num_recovery_threads_per_data_dir =
+            config_properties.num_recovery_threads_per_data_dir.build().unwrap();
+        Self {
+            log_dirs,
+            log_segment_bytes,
+            log_roll_time_millis,
+            log_roll_time_hours,
+            log_roll_time_jitter_millis,
+            log_roll_time_jitter_hours,
+            log_retention_time_millis,
+            log_retention_time_minutes,
+            log_retention_time_hours,
+            log_cleanup_interval_ms,
+            log_cleaner_threads,
+            log_cleaner_dedupe_buffer_size,
+            log_cleaner_io_buffer_size,
+            log_cleaner_dedupe_buffer_load_factor,
+            log_flush_scheduler_interval_ms,
+            log_flush_interval_ms,
+            log_flush_offset_checkpoint_interval_ms,
+            log_flush_start_offset_checkpoint_interval_ms,
+            num_recovery_threads_per_data_dir,
+        }
+    }
+}
