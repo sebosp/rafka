@@ -4,7 +4,7 @@
 
 #[derive(Debug)]
 pub struct TransactionStateManager {
-    default_transactional_id_expiration_ms: i64,
+    pub default_transactional_id_expiration_ms: i64,
 }
 
 impl Default for TransactionStateManager {

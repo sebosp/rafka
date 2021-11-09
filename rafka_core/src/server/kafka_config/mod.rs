@@ -13,12 +13,15 @@ pub mod general;
 pub mod log;
 pub mod quota;
 pub mod socket_server;
+pub mod transaction_management;
 
 use self::general::{GeneralConfig, GeneralConfigKey, GeneralConfigProperties};
 use self::log::{LogConfig, LogConfigKey, LogConfigProperties};
 use self::quota::{QuotaConfig, QuotaConfigKey, QuotaConfigProperties};
+use self::transaction_management::{
+    TransactionConfig, TransactionConfigKey, TransactionConfigProperties,
+};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
-use crate::coordinator::transaction::transaction_state_manager::TransactionStateManager;
 use enum_iterator::IntoEnumIterator;
 use fs_err::File;
 use std::collections::HashMap;
@@ -50,7 +53,7 @@ pub enum KafkaConfigKey {
     ZkConnectionTimeoutMs,
     // ZkMaxInFlightRequests,
     Log(LogConfigKey),
-    TransactionalIdExpirationMs,
+    Transaction(TransactionConfigKey),
     Quota(QuotaConfigKey),
 }
 
@@ -74,6 +77,9 @@ impl FromStr for KafkaConfigKey {
         if let Ok(val) = SocketConfigKey::from_str(input) {
             return Ok(Self::Socket(val));
         }
+        if let Ok(val) = TransactionConfigKey::from_str(input) {
+            return Ok(Self::Transaction(val));
+        }
         // vim from enum to match: /^    \(.*\),/\= "         " . Uppercase(submatch(1)) . "_PROP =>
         // Ok(Self::" .submatch(1) . "),"/
         match input {
@@ -81,7 +87,6 @@ impl FromStr for KafkaConfigKey {
             ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
             ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
             // ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
-            TRANSACTIONAL_ID_EXPIRATION_MS_PROP => Ok(Self::TransactionalIdExpirationMs),
             _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
         }
     }
@@ -177,7 +182,7 @@ pub struct KafkaConfigProperties {
     zk_connection_timeout_ms: ConfigDef<u32>,
     zk_max_in_flight_requests: ConfigDef<u32>,
     log: LogConfigProperties,
-    transactional_id_expiration_ms: ConfigDef<i64>,
+    transaction: TransactionConfigProperties,
     quota: QuotaConfigProperties,
 }
 
@@ -220,19 +225,7 @@ impl Default for KafkaConfigProperties {
                     ConfigDef::at_least(data, &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
                     })),
             log: LogConfigProperties::default(),
-            transactional_id_expiration_ms: ConfigDef::default()
-                .with_key(TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The time in ms that the transaction coordinator will wait without receiving any transaction status updates \
-                    for the current transaction before expiring its transactional id. This setting also influences producer id expiration - producer ids are expired \
-                    once this time has elapsed after the last write with the given producer id. Note that producer ids may expire sooner if the last write from the producer id is deleted due to the topic's retention settings."
-                ))
-                .with_default(TransactionStateManager::default().default_transactional_id_expiration_ms)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
-                })),
+            transaction: TransactionConfigProperties::default(),
             quota: QuotaConfigProperties::default(),
         }
     }
@@ -264,10 +257,10 @@ impl ConfigSet for KafkaConfigProperties {
             KafkaConfigKey::ZkConnectionTimeoutMs => {
                 self.zk_connection_timeout_ms.try_set_parsed_value(property_value)?
             },
-            KafkaConfigKey::TransactionalIdExpirationMs => self
-                .transactional_id_expiration_ms
-                .try_set_property(property_name, property_value)?,
             KafkaConfigKey::Log(val) => self.log.try_set_property(property_name, property_value)?,
+            KafkaConfigKey::Transaction(val) => {
+                self.transaction.try_set_property(property_name, property_value)?
+            },
             KafkaConfigKey::Quota(val) => {
                 self.quota.try_set_property(property_name, property_value)?
             },
@@ -282,6 +275,7 @@ impl ConfigSet for KafkaConfigProperties {
         res.append(&mut SocketConfigProperties::config_names());
         res.append(&mut LogConfigProperties::config_names());
         res.append(&mut QuotaConfigProperties::config_names());
+        res.append(&mut TransactionConfigProperties::config_names());
         // TODO: This should be derivable somehow too.
         res.append(&mut vec![
             ZOOKEEPER_CONNECT_PROP.to_string(),
@@ -306,7 +300,7 @@ impl ConfigSet for KafkaConfigProperties {
         self.zk_connection_timeout_ms.resolve(&self.zk_session_timeout_ms);
         let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
         let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
-        let transactional_id_expiration_ms = self.transactional_id_expiration_ms.build()?;
+        let transaction = self.transaction.build()?;
         let quota = self.quota.build()?;
         let kafka_config = Self::ConfigType {
             general,
@@ -316,7 +310,7 @@ impl ConfigSet for KafkaConfigProperties {
             zk_connection_timeout_ms,
             zk_max_in_flight_requests,
             log,
-            transactional_id_expiration_ms,
+            transaction,
             quota,
         };
         kafka_config.validate_values()
@@ -346,7 +340,7 @@ pub struct KafkaConfig {
     pub zk_connection_timeout_ms: u32,
     pub zk_max_in_flight_requests: u32,
     pub log: LogConfig,
-    pub transactional_id_expiration_ms: i64,
+    pub transaction: TransactionConfig,
     pub quota: QuotaConfig,
 }
 
@@ -377,8 +371,7 @@ impl Default for KafkaConfig {
         let zk_connection_timeout_ms = config_properties.zk_connection_timeout_ms.build().unwrap();
         let zk_max_in_flight_requests =
             config_properties.zk_max_in_flight_requests.build().unwrap();
-        let transactional_id_expiration_ms =
-            config_properties.transactional_id_expiration_ms.build().unwrap();
+        let transaction = config_properties.transaction.build().unwrap();
         Self {
             general: GeneralConfig::default(),
             socket: SocketConfig::default(),
@@ -387,7 +380,7 @@ impl Default for KafkaConfig {
             zk_connection_timeout_ms,
             zk_max_in_flight_requests,
             log: LogConfig::default(),
-            transactional_id_expiration_ms,
+            transaction,
             quota: QuotaConfig::default(),
         }
     }
