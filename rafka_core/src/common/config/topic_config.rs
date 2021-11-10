@@ -3,6 +3,8 @@
 //! KafkaZKClientAdmin Ideally the keys here should be prepend with `log.`, for example
 //! `log.cleanup.policy` but this pattern is not followed in practice.
 
+use const_format::concatcp;
+
 pub const SEGMENT_BYTES_CONFIG: &str = "segment.bytes";
 pub const SEGMENT_BYTES_DOC: &str = "This configuration controls the segment file size for the \
                                      log. Retention and cleaning is always done a file at a time \
@@ -65,13 +67,11 @@ pub const MAX_MESSAGE_BYTES_DOC: &str =
      limit only applies to a single record in that case.";
 
 pub const INDEX_INTERVAL_BYTES_CONFIG: &str = "index.interval.bytes";
-pub const INDEX_INTERVAL_BYTES_DOCS: &str = &format!(
-    "{}{}{}{}",
-    "This setting controls how frequently ",
-    "Kafka adds an index entry to its offset index. The default setting ensures that we index a ",
-    "message roughly every 4096 bytes. More indexing allows reads to jump closer to the exact ",
-    "position in the log but makes the index larger. You probably don't need to change this."
-);
+pub const INDEX_INTERVAL_BYTES_DOCS: &str =
+    "This setting controls how frequently Kafka adds an index entry to its offset index. The \
+     default setting ensures that we index a  message roughly every 4096 bytes. More indexing \
+     allows reads to jump closer to the exact  position in the log but makes the index larger. \
+     You probably don't need to change this.";
 
 pub const FILE_DELETE_DELAY_MS_CONFIG: &str = "file.delete.delay.ms";
 pub const FILE_DELETE_DELAY_MS_DOC: &str =
@@ -95,8 +95,7 @@ pub const MAX_COMPACTION_LAG_MS_DOC: &str = "The maximum time a message will rem
                                              that are being compacted.";
 
 pub const MIN_CLEANABLE_DIRTY_RATIO_CONFIG: &str = "min.cleanable.dirty.ratio";
-pub const MIN_CLEANABLE_DIRTY_RATIO_DOC: &str = &format!(
-    "{}{}{}{}{}{}{}{}{}",
+pub const MIN_CLEANABLE_DIRTY_RATIO_DOC: &str = concatcp!(
     "This configuration controls how frequently the log compactor will attempt to clean the log \
      (assuming `log compaction` is enabled). By default we will avoid cleaning a log where more \
      than 50% of the log has been compacted. This ratio bounds the maximum space wasted in the \
@@ -117,8 +116,7 @@ pub const MIN_CLEANABLE_DIRTY_RATIO_DOC: &str = &format!(
 pub const CLEANUP_POLICY_CONFIG: &str = "cleanup.policy";
 pub const CLEANUP_POLICY_COMPACT: &str = "compact";
 pub const CLEANUP_POLICY_DELETE: &str = "delete";
-pub const CLEANUP_POLICY_DOC: &str = &format!(
-    "{}{}{}{}{}",
+pub const CLEANUP_POLICY_DOC: &str = concatcp!(
     "A string that is either \"",
     CLEANUP_POLICY_DELETE,
     "\" or \"",
