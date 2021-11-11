@@ -3,7 +3,7 @@
 use crate::server::kafka_config::KafkaConfigError;
 use std::fmt;
 use std::str::FromStr;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// `ConfigDefImportance` provides the levels of importance that different java_properties
 /// have.
@@ -103,18 +103,25 @@ where
         self
     }
 
-    pub fn with_default(mut self, default: T) -> Self {
-        self.value = Some(default);
+    pub fn with_default(mut self, default: T) -> Self
+    where
+        T: Clone,
+    {
+        self.value = Some(default.clone());
         self.default = Some(default);
         self
     }
 
-    pub fn with_parseable_default(mut self, default: String) -> Self {
+    pub fn with_parseable_default(mut self, default: String) -> Self
+    where
+        T: Clone,
+    {
         // Pre-fill the value with the default, if it doesn't parse we should panic as that means
         // a bug in our code, not the config params
+        // DEPRECATED: This is no longer used as we no longer take String'ed numbers/etc
         match default.parse::<T>() {
             Ok(val) => {
-                self.value = Some(val);
+                self.value = Some(val.clone());
                 self.default = Some(val);
             },
             Err(err) => {
@@ -190,16 +197,19 @@ where
     }
 
     pub fn validate(&self) -> Result<(), KafkaConfigError> {
-        match self.validator {
+        match &self.validator {
             Some(validator) => (validator)(self.value.as_ref()),
             None => Ok(()),
         }
     }
 
-    pub fn build(self) -> Result<T, KafkaConfigError> {
+    pub fn build(&mut self) -> Result<T, KafkaConfigError>
+    where
+        T: Clone,
+    {
         self.validate()?;
-        match self.value {
-            Some(value) => Ok(value),
+        match &self.value {
+            Some(value) => Ok(value.clone()),
             None => Err(KafkaConfigError::MissingKey(self.key.to_string())),
         }
     }
@@ -207,17 +217,20 @@ where
     /// `resolve` attempts to resolve the current value, if the current value is None it tries to
     /// find the value from a fallback property. If the fallback property is None, a
     /// KafkaConfigError is returned.
-    pub fn resolve(&mut self, fallback: &Self) -> Result<(), KafkaConfigError> {
-        if let Some(val) = self.value {
+    pub fn resolve(&mut self, fallback: &Self) -> Result<(), KafkaConfigError>
+    where
+        T: Clone,
+    {
+        if let Some(_) = &self.value {
             Ok(())
         } else {
             info!(
                 "Unspecified property {}: attempting to use fallback property {} as value",
                 self.key, fallback.key
             );
-            match fallback.value {
-                Some(val) => {
-                    self.value = fallback.value;
+            match &fallback.value {
+                Some(_) => {
+                    self.value = fallback.value.clone();
                     Ok(())
                 },
                 None => {
