@@ -14,6 +14,7 @@ pub mod log;
 pub mod quota;
 pub mod socket_server;
 pub mod transaction_management;
+pub mod zookeeper;
 
 use self::general::{GeneralConfig, GeneralConfigKey, GeneralConfigProperties};
 use self::log::{LogConfig, LogConfigKey, LogConfigProperties};
@@ -21,11 +22,11 @@ use self::quota::{QuotaConfig, QuotaConfigKey, QuotaConfigProperties};
 use self::transaction_management::{
     TransactionConfig, TransactionConfigKey, TransactionConfigProperties,
 };
-use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use self::zookeeper::{ZookeeperConfig, ZookeeperConfigKey, ZookeeperConfigProperties};
 use enum_iterator::IntoEnumIterator;
 use fs_err::File;
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt;
 use std::io::{self, BufReader};
 use std::num;
 use std::str::FromStr;
@@ -34,24 +35,12 @@ use tracing::debug;
 
 use self::socket_server::{SocketConfig, SocketConfigKey, SocketConfigProperties};
 
-// Zookeeper section
-pub const ZOOKEEPER_CONNECT_PROP: &str = "zookeeper.connect";
-pub const ZOOKEEPER_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
-pub const ZOOKEEPER_CONNECTION_TIMEOUT_PROP: &str = "zookeeper.connection.timeout.ms";
-pub const ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS: &str = "zookeeper.max.in.flight.requests";
-
-// Transaction management section
-pub const TRANSACTIONAL_ID_EXPIRATION_MS_PROP: &str = "transactional.id.expiration.ms";
-
 // A Helper Enum to aid with the miriad of properties that could be forgotten to be matched.
 #[derive(Debug)]
 pub enum KafkaConfigKey {
+    Zookeeper(ZookeeperConfigKey),
     General(GeneralConfigKey),
     Socket(SocketConfigKey),
-    ZkConnect,
-    ZkSessionTimeoutMs,
-    ZkConnectionTimeoutMs,
-    // ZkMaxInFlightRequests,
     Log(LogConfigKey),
     Transaction(TransactionConfigKey),
     Quota(QuotaConfigKey),
@@ -61,10 +50,27 @@ pub enum KafkaConfigKey {
 // vim from enum to match: /^    \(.*\),/\= "Self::" . submatch(1) . "=> write!(f, \"{}\","
 // . Uppercase(submatch(1)) . "_PROP),"/
 //}
+
+impl fmt::Display for KafkaConfigKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Zookeeper(val) => write!(f, "{}", val.to_string()),
+            Self::General(val) => write!(f, "{}", val.to_string()),
+            Self::Socket(val) => write!(f, "{}", val.to_string()),
+            Self::Log(val) => write!(f, "{}", val.to_string()),
+            Self::Transaction(val) => write!(f, "{}", val.to_string()),
+            Self::Quota(val) => write!(f, "{}", val.to_string()),
+        }
+    }
+}
+
 impl FromStr for KafkaConfigKey {
     type Err = KafkaConfigError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
+        if let Ok(val) = ZookeeperConfigKey::from_str(input) {
+            return Ok(Self::Zookeeper(val));
+        }
         if let Ok(val) = GeneralConfigKey::from_str(input) {
             return Ok(Self::General(val));
         }
@@ -82,13 +88,7 @@ impl FromStr for KafkaConfigKey {
         }
         // vim from enum to match: /^    \(.*\),/\= "         " . Uppercase(submatch(1)) . "_PROP =>
         // Ok(Self::" .submatch(1) . "),"/
-        match input {
-            ZOOKEEPER_CONNECT_PROP => Ok(Self::ZkConnect),
-            ZOOKEEPER_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
-            ZOOKEEPER_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
-            // ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
-            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
-        }
+        Err(KafkaConfigError::UnknownKey(input.to_string()))
     }
 }
 
@@ -167,7 +167,7 @@ pub trait ConfigSet {
     /// `config_names` returns a list of config keys used
     fn config_names() -> Vec<String>
     where
-        Self::ConfigKey: IntoEnumIterator + Display,
+        Self::ConfigKey: IntoEnumIterator + fmt::Display,
     {
         Self::ConfigKey::into_enum_iter().map(|val| val.to_string()).collect()
     }
@@ -175,12 +175,9 @@ pub trait ConfigSet {
 
 #[derive(Debug)]
 pub struct KafkaConfigProperties {
+    zookeeper: ZookeeperConfigProperties,
     general: GeneralConfigProperties,
     socket: SocketConfigProperties,
-    zk_connect: ConfigDef<String>,
-    zk_session_timeout_ms: ConfigDef<u32>,
-    zk_connection_timeout_ms: ConfigDef<u32>,
-    zk_max_in_flight_requests: ConfigDef<u32>,
     log: LogConfigProperties,
     transaction: TransactionConfigProperties,
     quota: QuotaConfigProperties,
@@ -189,41 +186,9 @@ pub struct KafkaConfigProperties {
 impl Default for KafkaConfigProperties {
     fn default() -> Self {
         Self {
+            zookeeper: ZookeeperConfigProperties::default(),
             general: GeneralConfigProperties::default(),
             socket: SocketConfigProperties::default(),
-            zk_connect: ConfigDef::default()
-                .with_key(ZOOKEEPER_CONNECT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(r#"
-                    Specifies the ZooKeeper connection string in the form <code>hostname:port</code> where host and port are the
-                    host and port of a ZooKeeper server. To allow connecting through other ZooKeeper nodes when that ZooKeeper machine is
-                    down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.
-                    The server can also have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data under some path in the global ZooKeeper namespace.
-                    For example to give a chroot path of `/chroot/path` you would give the connection string as `hostname1:port1,hostname2:port2,hostname3:port3/chroot/path`.
-                    "#
-                )),
-            zk_session_timeout_ms: ConfigDef::default()
-                .with_key(ZOOKEEPER_SESSION_TIMEOUT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("Zookeeper session timeout"))
-                .with_default(18000),
-            zk_connection_timeout_ms: ConfigDef::default()
-                .with_key(ZOOKEEPER_CONNECTION_TIMEOUT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The max time that the client waits to establish a connection to zookeeper. If \
-                     not set, the value in {} is used", ZOOKEEPER_SESSION_TIMEOUT_PROP) // REQ-01
-                ),
-            zk_max_in_flight_requests: ConfigDef::default()
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The maximum number of unacknowledged requests the client will send to Zookeeper before blocking."
-                ))
-                .with_default(10)
-                .with_validator(Box::new(|data| {
-                    // RAFKA TODO: This doesn't make much sense if it's u32...
-                    ConfigDef::at_least(data, &1, ZOOKEEPER_MAX_IN_FLIGHT_REQUESTS)
-                    })),
             log: LogConfigProperties::default(),
             transaction: TransactionConfigProperties::default(),
             quota: QuotaConfigProperties::default(),
@@ -231,37 +196,30 @@ impl Default for KafkaConfigProperties {
     }
 }
 
-impl ConfigSet for KafkaConfigProperties {
-    type ConfigKey = KafkaConfigKey;
-    type ConfigType = KafkaConfig;
-
-    fn try_set_property(
+impl KafkaConfigProperties {
+    pub fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+        let kafka_config_key = KafkaConfigKey::from_str(property_name)?;
         // vim from enum to match: s/^    \(.*\),/\= "            Self::ConfigKey::" . submatch(1) .
         // " => self." . Snakecase(submatch(1)). ".try_set_parsed_value(property_value)?,"/
         match kafka_config_key {
-            KafkaConfigKey::General(val) => {
+            KafkaConfigKey::Zookeeper(_) => {
+                self.zookeeper.try_set_property(property_name, property_value)?
+            },
+            KafkaConfigKey::General(_) => {
                 self.general.try_set_property(property_name, property_value)?
             },
-            KafkaConfigKey::Socket(val) => {
+            KafkaConfigKey::Socket(_) => {
                 self.socket.try_set_property(property_name, property_value)?
             },
-            KafkaConfigKey::ZkConnect => self.zk_connect.try_set_parsed_value(property_value)?,
-            KafkaConfigKey::ZkSessionTimeoutMs => {
-                self.zk_session_timeout_ms.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::ZkConnectionTimeoutMs => {
-                self.zk_connection_timeout_ms.try_set_parsed_value(property_value)?
-            },
-            KafkaConfigKey::Log(val) => self.log.try_set_property(property_name, property_value)?,
-            KafkaConfigKey::Transaction(val) => {
+            KafkaConfigKey::Log(_) => self.log.try_set_property(property_name, property_value)?,
+            KafkaConfigKey::Transaction(_) => {
                 self.transaction.try_set_property(property_name, property_value)?
             },
-            KafkaConfigKey::Quota(val) => {
+            KafkaConfigKey::Quota(_) => {
                 self.quota.try_set_property(property_name, property_value)?
             },
         };
@@ -269,55 +227,31 @@ impl ConfigSet for KafkaConfigProperties {
     }
 
     /// `config_names` returns a list of config keys used by KafkaConfigProperties
-    fn config_names() -> Vec<String> {
-        let res = vec![];
+    pub fn config_names() -> Vec<String> {
+        let mut res = vec![];
+        res.append(&mut ZookeeperConfigProperties::config_names());
         res.append(&mut GeneralConfigProperties::config_names());
         res.append(&mut SocketConfigProperties::config_names());
         res.append(&mut LogConfigProperties::config_names());
         res.append(&mut QuotaConfigProperties::config_names());
         res.append(&mut TransactionConfigProperties::config_names());
-        // TODO: This should be derivable somehow too.
-        res.append(&mut vec![
-            ZOOKEEPER_CONNECT_PROP.to_string(),
-            ZOOKEEPER_SESSION_TIMEOUT_PROP.to_string(),
-            ZOOKEEPER_CONNECTION_TIMEOUT_PROP.to_string(),
-        ]);
         res
     }
 
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+    pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
+        let zookeeper = self.zookeeper.build()?;
         let general = self.general.build()?;
         let socket = self.socket.build()?;
         let log = self.log.build()?;
-        let zk_connect = self.zk_connect.build()?;
-        let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
-        // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of
-        // zk_connection_timeout_ms will be used.
-        // RAFKA NOTE: somehow the zk_session_timeout_ms build needs to be called before this,
-        // maybe resolve can do it?
-        self.zk_connection_timeout_ms.resolve(&self.zk_session_timeout_ms);
-        let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
-        let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
         let transaction = self.transaction.build()?;
         let quota = self.quota.build()?;
-        let kafka_config = Self::ConfigType {
-            general,
-            socket,
-            zk_connect,
-            zk_session_timeout_ms,
-            zk_connection_timeout_ms,
-            zk_max_in_flight_requests,
-            log,
-            transaction,
-            quota,
-        };
-        kafka_config.validate_values()
+        let kafka_config = KafkaConfig { zookeeper, general, socket, log, transaction, quota };
+        kafka_config.validate_values()?;
+        Ok(kafka_config)
     }
-}
 
-impl KafkaConfigProperties {
     /// Transforms from a HashMap of configs into a KafkaConfigProperties object
     /// This may return KafkaConfigError::UnknownKey errors
     pub fn from_properties_hashmap(
@@ -333,12 +267,9 @@ impl KafkaConfigProperties {
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct KafkaConfig {
+    pub zookeeper: ZookeeperConfig,
     pub general: GeneralConfig,
     pub socket: SocketConfig,
-    pub zk_connect: String,
-    pub zk_session_timeout_ms: u32,
-    pub zk_connection_timeout_ms: u32,
-    pub zk_max_in_flight_requests: u32,
     pub log: LogConfig,
     pub transaction: TransactionConfig,
     pub quota: QuotaConfig,
@@ -353,34 +284,21 @@ impl KafkaConfig {
         KafkaConfigProperties::from_properties_hashmap(input_config)?.build()
     }
 
-    pub fn validate_values(self) -> Result<Self, KafkaConfigError> {
+    pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
         self.general.validate_values()?;
-        Ok(self)
+        Ok(())
     }
 }
 
 impl Default for KafkaConfig {
     fn default() -> Self {
         // Somehow this should only be allowed for testing...
-        let mut config_properties = KafkaConfigProperties::default();
-        let zk_connect = String::from("UNSET");
-        let zk_session_timeout_ms = config_properties.zk_session_timeout_ms.build().unwrap();
-        config_properties
-            .zk_connection_timeout_ms
-            .resolve(&config_properties.zk_session_timeout_ms);
-        let zk_connection_timeout_ms = config_properties.zk_connection_timeout_ms.build().unwrap();
-        let zk_max_in_flight_requests =
-            config_properties.zk_max_in_flight_requests.build().unwrap();
-        let transaction = config_properties.transaction.build().unwrap();
         Self {
+            zookeeper: ZookeeperConfig::default(),
             general: GeneralConfig::default(),
             socket: SocketConfig::default(),
-            zk_connect,
-            zk_session_timeout_ms,
-            zk_connection_timeout_ms,
-            zk_max_in_flight_requests,
             log: LogConfig::default(),
-            transaction,
+            transaction: TransactionConfig::default(),
             quota: QuotaConfig::default(),
         }
     }
