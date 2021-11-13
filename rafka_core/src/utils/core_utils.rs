@@ -30,7 +30,7 @@ pub fn validate_endpoint(
     let mut distinct_ports = ports_excluding_zero.clone();
     distinct_ports.sort();
     let mut distinct_listener_names: Vec<ListenerName> =
-        end_points.iter().map(|x| x.listener_name).collect();
+        end_points.iter().map(|x| x.listener_name.clone()).collect();
     distinct_listener_names.sort();
     distinct_listener_names.dedup();
 
@@ -55,11 +55,11 @@ pub fn listener_list_to_end_points(listeners: &str) -> Result<Vec<EndPoint>, Kaf
     for listener in listener_list {
         match EndPoint::create_end_point(&listener) {
             Ok(val) => {
-                debug!("Successfully created endpoint for listener: {}", listener);
+                debug!("Successfully parsed endpoint for listener: {}", listener);
                 end_points.push(val);
             },
             Err(err) => {
-                error!("Error creating broker listeners from '{}': {}", listener, err);
+                error!("Error parsing broker listeners from '{}': {}", listener, err);
                 return Err(err);
             },
         }

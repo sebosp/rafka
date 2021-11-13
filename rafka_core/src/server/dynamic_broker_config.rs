@@ -58,7 +58,8 @@ pub struct DynamicBrokerConfig {
 
 impl DynamicBrokerConfig {
     pub fn new(kafka_config: KafkaConfig) -> Self {
-        let cluster_level_listener_configs = vec![kafka_config::MAX_CONNECTIONS_PROP.to_string()];
+        let cluster_level_listener_configs =
+            vec![kafka_config::socket_server::MAX_CONNECTIONS_PROP.to_string()];
         let (_, per_broker_configs): (Vec<_>, Vec<_>) =
             DynamicListenerConfig::reconfigurable_configs()
                 .into_iter()
@@ -79,9 +80,10 @@ impl DynamicBrokerConfig {
         let admin_zk_client = AdminZkClient::new(tx.clone());
         let default_broker_config = admin_zk_client.fetch_default_broker_config().await?;
         self.update_default_config(default_broker_config)?;
-        let props =
-            admin_zk_client.fetch_specific_broker_config(self.kafka_config.broker_id).await?;
-        self.update_broker_config(self.kafka_config.broker_id, props)?;
+        let props = admin_zk_client
+            .fetch_specific_broker_config(self.kafka_config.general.broker_id)
+            .await?;
+        self.update_broker_config(self.kafka_config.general.broker_id, props)?;
         Ok(())
     }
 
@@ -222,31 +224,30 @@ impl DynamicBrokerConfig {
 
     fn broker_config_synonyms(name: &str, match_listener_override: bool) -> Vec<String> {
         let res = match name {
-            kafka_config::LOG_ROLL_TIME_MILLIS_PROP | kafka_config::LOG_ROLL_TIME_HOURS_PROP => {
-                vec![
-                    kafka_config::LOG_ROLL_TIME_MILLIS_PROP,
-                    kafka_config::LOG_ROLL_TIME_HOURS_PROP,
-                ]
-            },
-            kafka_config::LOG_ROLL_TIME_JITTER_MILLIS_PROP
-            | kafka_config::LOG_ROLL_TIME_JITTER_HOURS_PROP => vec![
-                kafka_config::LOG_ROLL_TIME_JITTER_MILLIS_PROP,
-                kafka_config::LOG_ROLL_TIME_JITTER_HOURS_PROP,
+            kafka_config::log::LOG_ROLL_TIME_MILLIS_PROP
+            | kafka_config::log::LOG_ROLL_TIME_HOURS_PROP => vec![
+                kafka_config::log::LOG_ROLL_TIME_MILLIS_PROP,
+                kafka_config::log::LOG_ROLL_TIME_HOURS_PROP,
             ],
-            kafka_config::LOG_FLUSH_INTERVAL_MS_PROP =>
+            kafka_config::log::LOG_ROLL_TIME_JITTER_MILLIS_PROP
+            | kafka_config::log::LOG_ROLL_TIME_JITTER_HOURS_PROP => vec![
+                kafka_config::log::LOG_ROLL_TIME_JITTER_MILLIS_PROP,
+                kafka_config::log::LOG_ROLL_TIME_JITTER_HOURS_PROP,
+            ],
+            kafka_config::log::LOG_FLUSH_INTERVAL_MS_PROP =>
             // LogFlushSchedulerIntervalMsProp is used as default
             {
                 vec![
-                    kafka_config::LOG_FLUSH_INTERVAL_MS_PROP,
-                    kafka_config::LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP,
+                    kafka_config::log::LOG_FLUSH_INTERVAL_MS_PROP,
+                    kafka_config::log::LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP,
                 ]
             },
-            kafka_config::LOG_RETENTION_TIME_MILLIS_PROP
-            | kafka_config::LOG_RETENTION_TIME_MINUTES_PROP
-            | kafka_config::LOG_RETENTION_TIME_HOURS_PROP => vec![
-                kafka_config::LOG_RETENTION_TIME_MILLIS_PROP,
-                kafka_config::LOG_RETENTION_TIME_MINUTES_PROP,
-                kafka_config::LOG_RETENTION_TIME_HOURS_PROP,
+            kafka_config::log::LOG_RETENTION_TIME_MILLIS_PROP
+            | kafka_config::log::LOG_RETENTION_TIME_MINUTES_PROP
+            | kafka_config::log::LOG_RETENTION_TIME_HOURS_PROP => vec![
+                kafka_config::log::LOG_RETENTION_TIME_MILLIS_PROP,
+                kafka_config::log::LOG_RETENTION_TIME_MINUTES_PROP,
+                kafka_config::log::LOG_RETENTION_TIME_HOURS_PROP,
             ],
             _ => {
                 if match_listener_override {
@@ -388,11 +389,11 @@ impl DynamicListenerConfig {
     pub fn reconfigurable_configs() -> Vec<String> {
         vec![
             // Listener configs
-            kafka_config::ADVERTISED_LISTENERS_PROP.to_string(),
-            kafka_config::LISTENERS_PROP.to_string(),
+            kafka_config::socket_server::ADVERTISED_LISTENERS_PROP.to_string(),
+            kafka_config::socket_server::LISTENERS_PROP.to_string(),
             // RAFKA NOTE: No SSL, No SASL
             // Connection limit
-            kafka_config::MAX_CONNECTIONS_PROP.to_string(),
+            kafka_config::socket_server::MAX_CONNECTIONS_PROP.to_string(),
         ]
     }
 }

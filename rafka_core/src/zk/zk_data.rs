@@ -1,8 +1,8 @@
 //! This file contains objects for encoding/decoding data stored in ZooKeeper nodes (znodes).
 //! core/src/main/scala/kafka/zk/ZkData.scala
 
+use crate::common::feature::features::Features;
 use crate::common::feature::features::FeaturesError;
-use crate::common::feature::features::{Features, VersionRangeType};
 use crate::server::dynamic_config_manager::ConfigType;
 use rafka_derive::{SubZNodeHandle, ZNodeHandle};
 use serde_json::json;
@@ -611,6 +611,7 @@ impl Default for ZkData {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::common::feature::features::VersionRangeType;
     use crate::common::feature::finalized_version_range::FinalizedVersionRange;
     use tracing::info;
     // From core/src/test/scala/kafka/zk/FeatureZNodeTest.scala
