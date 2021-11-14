@@ -228,6 +228,7 @@ impl KafkaConfigProperties {
 
     /// `config_names` returns a list of config keys used by KafkaConfigProperties
     pub fn config_names() -> Vec<String> {
+        // RAFKA TODO: Add unit tests to make sure all configs are returned here
         let mut res = vec![];
         res.append(&mut ZookeeperConfigProperties::config_names());
         res.append(&mut GeneralConfigProperties::config_names());
@@ -265,6 +266,7 @@ impl KafkaConfigProperties {
         Ok(config_builder)
     }
 }
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct KafkaConfig {
     pub zookeeper: ZookeeperConfig,

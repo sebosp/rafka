@@ -16,6 +16,7 @@ pub enum QuotaConfigKey {
     ConsumerQuotaBytesPerSecondDefault,
     QuotaWindowSizeSeconds,
 }
+
 impl fmt::Display for QuotaConfigKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -29,6 +30,7 @@ impl fmt::Display for QuotaConfigKey {
         }
     }
 }
+
 impl FromStr for QuotaConfigKey {
     type Err = KafkaConfigError;
 
@@ -52,6 +54,7 @@ pub struct QuotaConfigProperties {
     consumer_quota_bytes_per_second_default: ConfigDef<i64>,
     quota_window_size_seconds: ConfigDef<i32>,
 }
+
 impl Default for QuotaConfigProperties {
     fn default() -> Self {
         Self {
@@ -95,11 +98,11 @@ impl Default for QuotaConfigProperties {
         }
     }
 }
+
 impl ConfigSet for QuotaConfigProperties {
     type ConfigKey = QuotaConfigKey;
     type ConfigType = QuotaConfig;
 
-    /// `try_from_config_property` transforms a string value from the config into our actual types
     fn try_set_property(
         &mut self,
         property_name: &str,
@@ -133,6 +136,7 @@ impl ConfigSet for QuotaConfigProperties {
         })
     }
 }
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct QuotaConfig {
     pub consumer_quota_bytes_per_second_default: i64,

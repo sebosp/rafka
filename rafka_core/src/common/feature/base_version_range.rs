@@ -8,7 +8,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use tracing::debug;
 // RAFKA NOTE: This does not seem to be Serde-derivable because the jsons have different keys for
 // Supported vs Finalized Version Ranges.
 #[derive(Debug, Clone, PartialEq)]
