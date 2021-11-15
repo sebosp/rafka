@@ -5,9 +5,10 @@ use crate::common::config::topic_config;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::records;
 use enum_iterator::IntoEnumIterator;
+use std::fmt;
 use std::str::FromStr;
 
-pub const BROKER_ID_GENERATION_ENABLED_PROP: &str = "broker.id.generation.enable";
+pub const BROKER_ID_GENERATION_ENABLE_PROP: &str = "broker.id.generation.enable";
 pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
 pub const BROKER_ID_PROP: &str = "broker.id";
 pub const MESSAGE_MAX_BYTES_PROP: &str = "message.max.bytes";
@@ -20,6 +21,16 @@ pub enum GeneralConfigKey {
     MessageMaxBytes,
 }
 
+impl fmt::Display for GeneralConfigKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BrokerIdGenerationEnable => write!(f, "{}", BROKER_ID_GENERATION_ENABLE_PROP),
+            Self::ReservedBrokerMaxId => write!(f, "{}", RESERVED_BROKER_MAX_ID_PROP),
+            Self::BrokerId => write!(f, "{}", BROKER_ID_PROP),
+            Self::MessageMaxBytes => write!(f, "{}", MESSAGE_MAX_BYTES_PROP),
+        }
+    }
+}
 impl FromStr for GeneralConfigKey {
     type Err = KafkaConfigError;
 
@@ -45,7 +56,7 @@ impl Default for GeneralConfigProperties {
     fn default() -> Self {
         Self {
             broker_id_generation_enable: ConfigDef::default()
-                .with_key(BROKER_ID_GENERATION_ENABLED_PROP)
+                .with_key(BROKER_ID_GENERATION_ENABLE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(format!(
                     "Enable automatic broker id generation on the server. When enabled the value \
@@ -149,7 +160,7 @@ impl Default for GeneralConfig {
 }
 
 impl GeneralConfig {
-    pub fn validate_values(self) -> Result<Self, KafkaConfigError> {
+    pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
         if self.broker_id_generation_enable {
             if self.broker_id < -1 || self.broker_id > self.reserved_broker_max_id {
                 return Err(KafkaConfigError::InvalidValue(format!(
@@ -163,6 +174,6 @@ impl GeneralConfig {
                 BROKER_ID_PROP, self.broker_id
             )));
         }
-        Ok(self)
+        Ok(())
     }
 }
