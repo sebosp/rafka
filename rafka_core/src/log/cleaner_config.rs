@@ -8,16 +8,16 @@ pub struct CleanerConfig {
     /// The number of cleaner threads to run
     num_threads: i32,
     /// The total memory used for log deduplication
-    dedupe_buffer_size: u64,
+    dedupe_buffer_size: i64,
     /// The maximum percent full for the deduplication buffer
     dedupe_buffer_load_factor: f64,
     io_buffer_size: i32,
     /// The maximum size of a message that can appear in the log
-    max_message_size: i32,
+    max_message_size: usize,
     /// The maximum read and write I/O that all cleaner threads are allowed to do
     max_io_bytes_per_second: f64,
     /// The amount of time to wait before rechecking if no logs are eligible for cleaning
-    back_off_ms: u64,
+    back_off_ms: i64,
     /// Allows completely disabling the log cleaner
     enable_cleaner: bool,
     /// The hash algorithm to use in key comparison.
@@ -43,14 +43,14 @@ impl Default for CleanerConfig {
 impl From<&KafkaConfig> for CleanerConfig {
     fn from(config: &KafkaConfig) -> Self {
         CleanerConfig {
-            num_threads: config.log_cleaner_threads,
-            dedupe_buffer_size: config.log_cleaner_dedupe_buffer_size,
-            dedupe_buffer_load_factor: config.log_cleaner_dedupe_buffer_load_factor,
-            io_buffer_size: config.log_cleaner_io_buffer_size,
-            max_message_size: config.message_max_bytes,
-            max_io_bytes_per_second: config.log_cleaner_io_max_bytes_per_second,
-            back_off_ms: config.log_cleaner_backoff_ms,
-            enable_cleaner: config.log_cleaner_enable,
+            num_threads: config.log.log_cleaner_threads,
+            dedupe_buffer_size: config.log.log_cleaner_dedupe_buffer_size,
+            dedupe_buffer_load_factor: config.log.log_cleaner_dedupe_buffer_load_factor,
+            io_buffer_size: config.log.log_cleaner_io_buffer_size,
+            max_message_size: config.general.message_max_bytes,
+            max_io_bytes_per_second: config.log.log_cleaner_io_max_bytes_per_second,
+            back_off_ms: config.log.log_cleaner_backoff_ms,
+            enable_cleaner: config.log.log_cleaner_enable,
             ..CleanerConfig::default()
         }
     }
