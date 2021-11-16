@@ -15,6 +15,7 @@ use crate::log::log_config::LogConfig;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
+use crate::zk::zk_data::ZNodeDecodeError;
 use crate::zk::zk_data::ZNodeHandle;
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
@@ -45,6 +46,8 @@ pub enum KafkaZkClientError {
     ClusterIdDeserialize(#[from] serde_json::Error),
     #[error("Failed to generate broker.id due to {0:?}")]
     BrokerIdGenerate(String),
+    #[error("Failed to Decode ZNode")]
+    ZNodeDecodeError(#[from] ZNodeDecodeError),
 }
 
 #[derive(Debug)]
@@ -73,7 +76,7 @@ impl Default for KafkaZkClient {
 
 impl KafkaZkClient {
     pub fn new(zoo_keeper_client: ZooKeeperClient, time: Instant) -> Self {
-        KafkaZkClient {
+        Self {
             zoo_keeper_client,
             time,
             current_zookeeper_session_id: -1i32,
@@ -92,14 +95,14 @@ impl KafkaZkClient {
     ) -> Self {
         let zoo_keeper_client = ZooKeeperClient::new(
             zk_connect.to_string(),
-            kafka_config.zk_session_timeout_ms,
-            kafka_config.zk_connection_timeout_ms,
-            kafka_config.zk_max_in_flight_requests,
+            kafka_config.zookeeper.zk_session_timeout_ms,
+            kafka_config.zookeeper.zk_connection_timeout_ms,
+            kafka_config.zookeeper.zk_max_in_flight_requests,
             // time,
             // name,
             zk_client_config,
         );
-        KafkaZkClient::new(zoo_keeper_client, time)
+        Self::new(zoo_keeper_client, time)
     }
 
     /// `parent_path` returns the path from the start until the last slash.
@@ -206,8 +209,8 @@ impl KafkaZkClient {
                         return Err(err);
                     },
                     Ok(()) => {
-                        // We try to create the path at location `path` in zookeeper
-                        // `path may not exist and we may attempt to create the
+                        // We try to create the path at location `path` in zookeeper.
+                        // `path` may not exist and we may attempt to create the
                         // hierarchy from here. It is possible that another server
                         // started the same operation, thus creating the path for us.
                         // For example, another server may have been successful
@@ -273,7 +276,7 @@ impl KafkaZkClient {
             Some(chroot_index) => {
                 let (zk_connect_host_port, zk_chroot) = zk_connect.split_at(chroot_index);
                 debug!("Zookeeper host:port list: {}, chroot: {}", zk_connect_host_port, zk_chroot);
-                let mut temp_kafka_zk_client = KafkaZkClient::build(
+                let mut temp_kafka_zk_client = Self::build(
                     &zk_connect_host_port.to_string(),
                     kafka_config,
                     Some(String::from("Chroot Path Handler")),
@@ -313,7 +316,7 @@ impl KafkaZkClient {
     /// zookeeper location.
     #[instrument]
     pub async fn init(&mut self, kafka_config: &KafkaConfig) -> Result<(), AsyncTaskError> {
-        self.create_chroot_path_if_set(&kafka_config.zk_connect, &kafka_config).await?;
+        self.create_chroot_path_if_set(&kafka_config.zookeeper.zk_connect, &kafka_config).await?;
         self.connect().await?;
         self.create_top_level_paths().await
     }
@@ -388,7 +391,6 @@ impl KafkaZkClient {
                                 return match self.get_cluster_id().await? {
                                     Some(val) => Ok(val),
                                     None => {
-                                        // To get to this point we must- have
                                         // This can happen if /cluster/id is deleted from
                                         // Zookeeper while in the process of reading it.
                                         Err(AsyncTaskError::KafkaZkClient(
@@ -478,6 +480,38 @@ impl KafkaZkClient {
             .await?)
     }
 
+    /// `get_children` for a given zk path, the version is equivalent to the Zookeeper Stat
+    /// if the Stat from get_data is None, then ZkVersion::UnknownVersion (-2) is returned
+    #[instrument]
+    pub async fn get_children(&self, path: &str) -> Result<Vec<String>, AsyncTaskError> {
+        match self.zoo_keeper_client.get_children_request(path).await {
+            Err(err) => {
+                if err.is_zookeeper_async_no_node() {
+                    // If there is no such znode, return empty list
+                    Ok(vec![])
+                } else {
+                    Err(err)
+                }
+            },
+            Ok(val) => Ok(val),
+        }
+    }
+
+    /// Wrapper to request a Majordomo Request for GetDataAndVersion on a given path.
+    /// This function helps encapsulate logic to prevent leaking too many implementation details to
+    /// other functions.
+    #[instrument]
+    pub async fn req_get_children(
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+        res_tx: oneshot::Sender<Vec<String>>,
+        path: String,
+    ) -> Result<(), AsyncTaskError> {
+        trace!("Requesting GetChildren on ZK node at path: {}", path);
+        Ok(majordomo_tx
+            .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GetChildren(res_tx, path)))
+            .await?)
+    }
+
     /// Read the entity (topic, broker, client, user or <user, client>) config (if any) from zk
     /// sanitizedEntityName is <topic>, <broker>, <client-id>, <user> or <user>/clients/<client-id>.
     #[instrument]
@@ -495,26 +529,75 @@ impl KafkaZkClient {
         )
         .path()
         .to_string();
-        KafkaZkClient::req_get_data_and_version(majordomo_tx, tx, root_entity_zk_node_path).await?;
+        Self::req_get_data_and_version(majordomo_tx, tx, root_entity_zk_node_path).await?;
         Ok(rx.await.unwrap().data)
     }
 
-    /// `get_log_configs` TODO
+    /// `get_topic_configs` Gets the zookeeper per-topic config from the list of topics passed as
+    /// parameter, for every topic, returns the data stored in zookeeper or an error regarding its
+    /// data
     #[instrument]
-    pub async fn get_log_configs(
+    pub async fn get_topic_configs(
         majordomo_tx: mpsc::Sender<AsyncTask>,
-        _topic_list: Vec<String>,
-        _log_config: &LogConfig,
-    ) -> Result<(HashMap<String, LogConfig>, Vec<String>), AsyncTaskError> {
+        topics: Vec<String>,
+    ) -> Vec<(String, Result<Option<Vec<u8>>, AsyncTaskError>)> {
         unimplemented!()
     }
 
-    /// `get_all_topics_in_cluster` TODO
+    /// `get_log_configs` Get the log configs merging the general kafka config with the zookeeper
+    /// per-topic specific topic config
+    #[instrument]
+    pub async fn get_log_configs(
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+        topics: Vec<String>,
+        default_config: &LogConfig,
+    ) -> (HashMap<String, LogConfig>, HashMap<String, AsyncTaskError>) {
+        let mut log_configs: HashMap<String, LogConfig> = HashMap::new();
+        let mut failed: HashMap<String, AsyncTaskError> = HashMap::new();
+        for config_response in Self::get_topic_configs(majordomo_tx.clone(), topics).await {
+            let topic_name = config_response.0;
+            let topic_response = config_response.1;
+            match topic_response {
+                Err(err) => {
+                    if err.is_zookeeper_async_no_node() {
+                        log_configs.insert(topic_name, LogConfig::default());
+                    } else {
+                        failed.insert(topic_name.to_string(), err);
+                    }
+                },
+                Ok(config_data) => {
+                    debug!("Topic {} has config_data: {:?}", topic_name, config_data);
+                    match zk_data::ConfigEntityZNode::decode(config_data) {
+                        Ok(topic_config_data) => {
+                            let log_config =
+                                LogConfig::from_props(default_config, topic_config_data);
+                            log_configs.insert(topic_name, log_config);
+                        },
+                        Err(err) => {
+                            failed.insert(
+                                topic_name,
+                                AsyncTaskError::KafkaZkClient(
+                                    KafkaZkClientError::ZNodeDecodeError(err),
+                                ),
+                            );
+                        },
+                    };
+                },
+            };
+        }
+        (log_configs, failed)
+    }
+
+    /// `get_all_topics_in_cluster` Gets all the topics in the cluster
     #[instrument]
     pub async fn get_all_topics_in_cluster(
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<Vec<String>, AsyncTaskError> {
-        unimplemented!()
+        let (tx, rx) = oneshot::channel();
+        let brokers_znode = zk_data::BrokersZNode::build();
+        let topics_zk_node_path = zk_data::TopicsZNode::build(&brokers_znode).path().to_string();
+        Self::req_get_children(majordomo_tx, tx, topics_zk_node_path).await?;
+        Ok(rx.await.unwrap())
     }
 }
 
@@ -534,6 +617,7 @@ pub struct GetDataAndVersionResponse {
 pub enum KafkaZkClientAsyncTask {
     EnsurePersistentPathExists(String),
     GetDataAndVersion(oneshot::Sender<GetDataAndVersionResponse>, String),
+    GetChildren(oneshot::Sender<Vec<String>>, String),
     RegisterFeatureChange(mpsc::Sender<AsyncTask>),
     Shutdown,
     GetOrGenerateClusterId(oneshot::Sender<String>),
@@ -554,7 +638,7 @@ impl KafkaZkClientCoordinator {
         let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
         let init_time = Instant::now();
         let mut kafka_zk_client = KafkaZkClient::build(
-            &kafka_config.zk_connect,
+            &kafka_config.zookeeper.zk_connect,
             &kafka_config,
             Some(String::from("Async Coordinator")),
             init_time,
@@ -576,9 +660,16 @@ impl KafkaZkClientCoordinator {
             info!("KafkaZkClient coordinator {:?}", task);
             match task {
                 KafkaZkClientAsyncTask::GetDataAndVersion(tx, znode_path) => {
-                    debug!("KafkaZkClientAsyncTask calling get_data_and_version");
+                    debug!(
+                        "KafkaZkClientAsyncTask calling get_data_and_version for path: {}",
+                        znode_path
+                    );
                     let result = self.kafka_zk_client.get_data_and_version(&znode_path).await?;
-                    debug!("KafkaZkClientAsyncTask got response from get_data_and_version");
+                    debug!(
+                        "KafkaZkClientAsyncTask got response from get_data_and_version for path: \
+                         {}",
+                        znode_path
+                    );
                     if let Err(err) = tx.send(result) {
                         // RAFKA TODO: should the process die here?
                         error!("Unable to send back GetDataAndVersionResponse: {:?}", err);
@@ -603,6 +694,13 @@ impl KafkaZkClientCoordinator {
                     if let Err(err) = tx.send(result) {
                         // RAFKA TODO: should the process die here?
                         error!("Unable to send back GenerateBrokerId response: {:?}", err);
+                    }
+                },
+                KafkaZkClientAsyncTask::GetChildren(tx, znode_path) => {
+                    let result = self.kafka_zk_client.get_children(&znode_path).await.unwrap();
+                    if let Err(err) = tx.send(result) {
+                        // RAFKA TODO: should the process die here?
+                        error!("Unable to send back GetChildren response: {:?}", err);
                     }
                 },
                 _ => unimplemented!("Task not implemented"),
