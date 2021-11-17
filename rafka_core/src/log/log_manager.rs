@@ -1,41 +1,37 @@
 //! From core/src/main/scala/kafka/log/LogManager.scala
-//! The LogManager stores log files in the `log.dirs`, new logs are stored in the in the directory
+//! The LogManager stores log files in the `log.dirs`, new logs are stored in the data directory
 //! with the fewer logs. Once a log is created, it won't be automatically balanced either for I/O
 //! speed reasons or disk space exhausted.
 
 use crate::log::cleaner_config::CleanerConfig;
-use crate::server::log_failure_channel::LogDirFailureChannel;
-use std::collections::HashMap;
-use std::fmt;
-use std::path::PathBuf;
-use tokio::sync::mpsc;
-
 use crate::log::log_config::LogConfig;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
-use std::convert::TryFrom;
-use std::time::Instant;
-use thiserror::Error;
-
 use crate::server::broker_states::BrokerState;
 use crate::server::kafka_config::KafkaConfig;
-use crate::server::kafka_server::BrokerTopicStats;
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
+use std::collections::HashMap;
+use std::convert::TryFrom;
+use std::fmt;
+use std::path::PathBuf;
+use std::time::Instant;
+use thiserror::Error;
+use tokio::sync::mpsc;
 
 use super::log_cleaner::LogCleaner;
 
+pub const RECOVERY_POINT_CHECKPOINT_FILE: &str = "recovery-point-offset-checkpoint";
+pub const LOG_START_OFFSET_CHECKPOINT_FILE: &str = "log-start-offset-checkpoint";
 #[derive(Debug)]
 pub struct Scheduler;
 
 #[derive(Debug, Error)]
 pub enum LogManagerError {
-    FailedLogConfigs(Vec<String>),
+    FailedLogConfigs(HashMap<std::string::String, AsyncTaskError>),
 }
 
 #[derive(Debug)]
 pub struct LogManager {
-    pub recovery_point_checkpoint_file: String,
-    pub log_start_offset_checkpoint_file: String,
     pub producer_id_expiration_check_interval_ms: u64,
     log_dirs: Vec<PathBuf>,
     initial_offline_dirs: Vec<PathBuf>,
@@ -47,13 +43,14 @@ pub struct LogManager {
     flush_recovery_offset_checkpoint_ms: i32,
     flush_start_offset_checkpoint_ms: i32,
     retention_check_ms: i64,
-    max_pid_expiration_ms: i32,
-    scheduler: Scheduler,
+    max_pid_expiration_ms: i64,
+    // RAFKA TODO: scheduler used to be a Trait Schedule, double check
+    scheduler: KafkaScheduler,
     broker_state: BrokerState,
-    broker_topic_stats: BrokerTopicStats,
-    log_dir_failure_channel: LogDirFailureChannel,
+    // log_dir_failure_channel: LogDirFailureChannel, This may work with just the Majordomo tx.
+    majordomo_tx: mpsc::Sender<AsyncTask>,
     time: Instant,
-    log_cleaner: LogCleaner,
+    lock_file: String,
 }
 
 impl fmt::Display for LogManagerError {
@@ -64,11 +61,30 @@ impl fmt::Display for LogManagerError {
 
 impl Default for LogManager {
     fn default() -> Self {
+        let kafka_config = KafkaConfig::default();
+        let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
         Self {
-            recovery_point_checkpoint_file: String::from("recovery-point-offset-checkpoint"),
-            log_start_offset_checkpoint_file: String::from("log-start-offset-checkpoint"),
             producer_id_expiration_check_interval_ms: 10 * 60 * 1000,
             log_dirs: vec![],
+            initial_offline_dirs: vec![],
+            topic_configs: HashMap::new(),
+            initial_default_config: LogConfig::default(),
+            cleaner_config: CleanerConfig::default(),
+            recovery_threads_per_data_dir: kafka_config.log.num_recovery_threads_per_data_dir,
+            flush_check_ms: kafka_config.log.log_flush_scheduler_interval_ms,
+            flush_recovery_offset_checkpoint_ms: kafka_config
+                .log
+                .log_flush_offset_checkpoint_interval_ms,
+            flush_start_offset_checkpoint_ms: kafka_config
+                .log
+                .log_flush_start_offset_checkpoint_interval_ms,
+            retention_check_ms: kafka_config.log.log_cleanup_interval_ms,
+            max_pid_expiration_ms: kafka_config.transaction.transactional_id_expiration_ms,
+            scheduler: KafkaScheduler::default(),
+            broker_state: BrokerState::default(),
+            majordomo_tx,
+            time: Instant::now(),
+            lock_file: String::from(".lock"),
         }
     }
 }
@@ -80,13 +96,12 @@ impl LogManager {
         broker_state: &BrokerState,
         kafka_scheduler: KafkaScheduler,
         time: Instant,
-        broker_topic_stats: &Option<BrokerTopicStats>,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
         // RAFKA NOTE:
-        // - broker_topic_stats is unused for now.
+        // - broker_topic_stats has been removed for now.
         // - log_dirs was a String of absolute/canonicalized paths before.
-        let default_log_config: LogConfig = LogConfig::try_from(config.clone())?;
+        let default_log_config: LogConfig = LogConfig::try_from(config.log.clone())?;
 
         let majordomo_tx_cp = majordomo_tx.clone();
         // read the log configurations from zookeeper
@@ -95,7 +110,7 @@ impl LogManager {
             KafkaZkClient::get_all_topics_in_cluster(majordomo_tx_cp).await?,
             &default_log_config,
         )
-        .await?;
+        .await;
         if !failed.is_empty() {
             return Err(AsyncTaskError::LogManager(LogManagerError::FailedLogConfigs(failed)));
         }
@@ -103,7 +118,7 @@ impl LogManager {
         let cleaner_config = LogCleaner::cleaner_config(&config);
 
         Ok(Self {
-            log_dirs: config.log_dirs.iter().map(|path| PathBuf::from(path)).collect(),
+            log_dirs: config.log.log_dirs.iter().map(|path| PathBuf::from(path)).collect(),
             initial_offline_dirs: initial_offline_dirs
                 .iter()
                 .map(|path| PathBuf::from(path))
@@ -111,17 +126,19 @@ impl LogManager {
             topic_configs,
             initial_default_config: default_log_config,
             cleaner_config,
-            recovery_threads_per_data_dir: config.num_recovery_threads_per_data_dir,
-            flush_check_ms: config.log_flush_scheduler_interval_ms,
-            flush_recovery_offset_checkpoint_ms: config.log_flush_offset_checkpoint_interval_ms,
-            flush_start_offset_checkpoint_ms: config.log_flush_start_offset_checkpoint_interval_ms,
-            retention_check_ms: config.log_cleanup_interval_ms,
-            kax_pid_expiration_ms: config.transactional_id_expiration_ms,
+            recovery_threads_per_data_dir: config.log.num_recovery_threads_per_data_dir,
+            flush_check_ms: config.log.log_flush_scheduler_interval_ms,
+            flush_recovery_offset_checkpoint_ms: config.log.log_flush_offset_checkpoint_interval_ms,
+            flush_start_offset_checkpoint_ms: config
+                .log
+                .log_flush_start_offset_checkpoint_interval_ms,
+            retention_check_ms: config.log.log_cleanup_interval_ms,
+            max_pid_expiration_ms: config.transaction.transactional_id_expiration_ms,
             scheduler: kafka_scheduler,
-            broker_state,
-            broker_topic_stats,
+            broker_state: broker_state.clone(),
             majordomo_tx: majordomo_tx.clone(),
             time,
+            ..Default::default()
         })
     }
 }
