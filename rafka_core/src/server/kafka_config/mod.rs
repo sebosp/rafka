@@ -17,7 +17,7 @@ pub mod transaction_management;
 pub mod zookeeper;
 
 use self::general::{GeneralConfig, GeneralConfigKey, GeneralConfigProperties};
-use self::log::{LogConfig, LogConfigKey, LogConfigProperties};
+use self::log::{DefaultLogConfig, DefaultLogConfigKey, DefaultLogConfigProperties};
 use self::quota::{QuotaConfig, QuotaConfigKey, QuotaConfigProperties};
 use self::transaction_management::{
     TransactionConfig, TransactionConfigKey, TransactionConfigProperties,
@@ -41,7 +41,7 @@ pub enum KafkaConfigKey {
     Zookeeper(ZookeeperConfigKey),
     General(GeneralConfigKey),
     Socket(SocketConfigKey),
-    Log(LogConfigKey),
+    Log(DefaultLogConfigKey),
     Transaction(TransactionConfigKey),
     Quota(QuotaConfigKey),
 }
@@ -74,7 +74,7 @@ impl FromStr for KafkaConfigKey {
         if let Ok(val) = GeneralConfigKey::from_str(input) {
             return Ok(Self::General(val));
         }
-        if let Ok(val) = LogConfigKey::from_str(input) {
+        if let Ok(val) = DefaultLogConfigKey::from_str(input) {
             return Ok(Self::Log(val));
         }
         if let Ok(val) = QuotaConfigKey::from_str(input) {
@@ -122,6 +122,8 @@ pub enum KafkaConfigError {
     ComparisonOnNone(String),
     #[error("ListenerMisconfig")]
     ListenerMisconfig(String),
+    #[error("Unknown Cleanup Policy")]
+    UnknownCleanupPolicy(String),
 }
 
 /// This implementation is only for testing, for example any I/O error is considered equal
@@ -144,6 +146,9 @@ impl PartialEq for KafkaConfigError {
             Self::ComparisonOnNone(lhs) => matches!(rhs, Self::ComparisonOnNone(rhs) if lhs == rhs),
             Self::ListenerMisconfig(lhs) => {
                 matches!(rhs, Self::ListenerMisconfig(rhs) if lhs == rhs)
+            },
+            Self::UnknownCleanupPolicy(lhs) => {
+                matches!(rhs, Self::UnknownCleanupPolicy(rhs) if lhs == rhs)
             },
         }
     }
@@ -178,7 +183,7 @@ pub struct KafkaConfigProperties {
     zookeeper: ZookeeperConfigProperties,
     general: GeneralConfigProperties,
     socket: SocketConfigProperties,
-    log: LogConfigProperties,
+    log: DefaultLogConfigProperties,
     transaction: TransactionConfigProperties,
     quota: QuotaConfigProperties,
 }
@@ -189,7 +194,7 @@ impl Default for KafkaConfigProperties {
             zookeeper: ZookeeperConfigProperties::default(),
             general: GeneralConfigProperties::default(),
             socket: SocketConfigProperties::default(),
-            log: LogConfigProperties::default(),
+            log: DefaultLogConfigProperties::default(),
             transaction: TransactionConfigProperties::default(),
             quota: QuotaConfigProperties::default(),
         }
@@ -233,7 +238,7 @@ impl KafkaConfigProperties {
         res.append(&mut ZookeeperConfigProperties::config_names());
         res.append(&mut GeneralConfigProperties::config_names());
         res.append(&mut SocketConfigProperties::config_names());
-        res.append(&mut LogConfigProperties::config_names());
+        res.append(&mut DefaultLogConfigProperties::config_names());
         res.append(&mut QuotaConfigProperties::config_names());
         res.append(&mut TransactionConfigProperties::config_names());
         res
@@ -272,7 +277,7 @@ pub struct KafkaConfig {
     pub zookeeper: ZookeeperConfig,
     pub general: GeneralConfig,
     pub socket: SocketConfig,
-    pub log: LogConfig,
+    pub log: DefaultLogConfig,
     pub transaction: TransactionConfig,
     pub quota: QuotaConfig,
 }
@@ -299,7 +304,7 @@ impl Default for KafkaConfig {
             zookeeper: ZookeeperConfig::default(),
             general: GeneralConfig::default(),
             socket: SocketConfig::default(),
-            log: LogConfig::default(),
+            log: DefaultLogConfig::default(),
             transaction: TransactionConfig::default(),
             quota: QuotaConfig::default(),
         }
