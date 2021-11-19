@@ -11,6 +11,7 @@ pub mod common;
 pub mod coordinator;
 pub mod log;
 pub mod majordomo;
+pub mod message;
 pub mod server;
 mod utils;
 pub mod zk;
