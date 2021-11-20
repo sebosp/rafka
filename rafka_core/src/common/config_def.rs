@@ -158,6 +158,32 @@ where
         }
     }
 
+    pub fn value_in_list(
+        data: Option<&T>,
+        valid_list: Vec<&T>,
+        key: &str,
+    ) -> Result<(), KafkaConfigError>
+    where
+        T: PartialEq + fmt::Display,
+    {
+        match data {
+            Some(val) => {
+                if valid_list.iter().any(|item| val == *item) {
+                    Err(KafkaConfigError::InvalidValue(format!(
+                        "{}: '{}' should be in list {:?}",
+                        key, val, valid_list
+                    )))
+                } else {
+                    Ok(())
+                }
+            },
+            None => {
+                error!("Running value_in_list() with no value provided for ConfigDef {:?}", data);
+                Err(KafkaConfigError::ComparisonOnNone(key.to_string()))
+            },
+        }
+    }
+
     pub fn at_least(data: Option<&T>, rhs: &T, key: &str) -> Result<(), KafkaConfigError>
     where
         T: PartialEq + PartialOrd + fmt::Display,
