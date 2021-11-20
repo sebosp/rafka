@@ -132,7 +132,7 @@ impl MajordomoCoordinator {
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
         let cluster_resource_listeners = ClusterResourceListeners::default();
-        let log_dir_failure_channel = LogDirFailureChannel::new(kafka_config.log_dirs.len());
+        let log_dir_failure_channel = LogDirFailureChannel::new(kafka_config.log.log_dirs.len());
         Ok(MajordomoCoordinator {
             kafka_config,
             tx: main_tx,
@@ -149,7 +149,10 @@ impl MajordomoCoordinator {
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
         debug!("majordomo coordinator: Preparing",);
         self.feature_cache_updater
-            .init_or_throw(self.tx.clone(), self.kafka_config.zk_connection_timeout_ms.into())
+            .init_or_throw(
+                self.tx.clone(),
+                self.kafka_config.zookeeper.zk_connection_timeout_ms.into(),
+            )
             .await?;
         debug!("majordomo coordinator: Main loop starting");
         while let Some(message) = self.rx.recv().await {
