@@ -56,11 +56,9 @@ impl Default for DynamicBrokerConfigDefs {
                      property can be only set dynamically. It is suggested that the limit be kept \
                      above 1MB/s for accurate behaviour.",
                 ))
-                .with_default(String::from(
-                    ReplicationQuotaManagerConfig::default()
-                        .quota_bytes_per_second_default
-                        .to_string(),
-                )),
+                .with_default(
+                    ReplicationQuotaManagerConfig::default().quota_bytes_per_second_default,
+                ),
 
             follower_replication_throttled_rate_prop: ConfigDef::default()
                 .with_importance(ConfigDefImportance::Medium)
