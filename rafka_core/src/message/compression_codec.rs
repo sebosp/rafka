@@ -1,87 +1,106 @@
 //! From core/src/main/scala/kafka/message/CompressionCodec.scala
+
+use crate::server::kafka_config::KafkaConfigError;
 use core::fmt;
+use std::str::FromStr;
+
+pub const GZIP_COMPRESSION_NAME: &str = "gzip";
+pub const SNAPPY_COMPRESSION_NAME: &str = "snappy";
+pub const LZ4_COMPRESSION_NAME: &str = "lz4";
+pub const ZSTD_COMPRESSION_NAME: &str = "zstd";
+pub const NONE_COMPRESSION_NAME: &str = "none";
+pub const UNCOMPRESSED_NAME: &str = "uncompressed";
+pub const PRODUCER_COMPRESSION_NAME: &str = "producer";
+
+pub const GZIP_COMPRESSION_CODEC: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_gzip_compression_codec();
+pub const SNAPPY_COMPRESSION_CODEC: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_snappy_compression_codec();
+pub const LZ4_COMPRESSION_CODEC: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_lz4_compression_codec();
+pub const ZSTD_COMPRESSION_CODEC: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_zstd_compression_codec();
+pub const NONE_COMPRESSION_CODEC: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_none_compression_codec();
+pub const UNCOMPRESSED_CODEC: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_uncompressed_codec();
+pub const PRODUCER_COMPRESSION_CODEC: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_producer_compression_codec();
 
 #[derive(Debug)]
-pub struct CompressionCodec {
+pub struct BrokerCompressionCodec {
     pub codec: Option<i32>,
-    pub name: String,
+    pub name: &'static str,
 }
 
-#[derive(Debug)]
-pub enum BrokerCompressionCodec {
-    NoCompression(CompressionCodec),
-    Uncompressed(CompressionCodec),
-    ZStdCompression(CompressionCodec),
-    LZ4Compression(CompressionCodec),
-    SnappyCompression(CompressionCodec),
-    GZIPCompressio(CompressionCodec),
-    ProducerCompression(CompressionCodec),
+impl FromStr for BrokerCompressionCodec {
+    type Err = KafkaConfigError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            GZIP_COMPRESSION_NAME => Ok(Self::gen_gzip_compression_codec()),
+            SNAPPY_COMPRESSION_NAME => Ok(Self::gen_snappy_compression_codec()),
+            LZ4_COMPRESSION_NAME => Ok(Self::gen_lz4_compression_codec()),
+            ZSTD_COMPRESSION_NAME => Ok(Self::gen_zstd_compression_codec()),
+            NONE_COMPRESSION_NAME => Ok(Self::gen_none_compression_codec()),
+            UNCOMPRESSED_COMPRESSION_NAME => Ok(Self::gen_uncompressed_codec()),
+            PRODUCER_COMPRESSION_NAME => Ok(Self::gen_producer_compression_codec()),
+            _ => Err(KafkaConfigError::InvalidBrokerCompressionCodec(input.to_string())),
+        }
+    }
 }
 
 impl fmt::Display for BrokerCompressionCodec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.name())
+        write!(f, "{}", self.name)
     }
 }
+
 // DefaultCompressionCodec
 impl Default for BrokerCompressionCodec {
     fn default() -> Self {
-        Self::gen_gzip_compression_codec()
+        GZIP_COMPRESSION_CODEC
     }
 }
 
 impl BrokerCompressionCodec {
-    fn codec(&self) -> Option<i32> {
-        match self {
-            Self::NoCompression(val) => val.codec,
-            Self::Uncompressed(val) => val.codec,
-            Self::ZStdCompression(val) => val.codec,
-            Self::LZ4Compression(val) => val.codec,
-            Self::SnappyCompression(val) => val.codec,
-            Self::GZIPCompression(val) => val.codec,
-            Self::ProducerCompression(val) => val.codec,
-        }
+    pub fn broker_compression_options() -> Vec<&'static str> {
+        vec![
+            GZIP_COMPRESSION_CODEC.name,
+            SNAPPY_COMPRESSION_CODEC.name,
+            LZ4_COMPRESSION_CODEC.name,
+            ZSTD_COMPRESSION_CODEC.name,
+            NONE_COMPRESSION_CODEC.name,
+            UNCOMPRESSED_CODEC.name,
+            PRODUCER_COMPRESSION_CODEC.name,
+        ]
     }
 
-    fn name(&self) -> &str {
-        match self {
-            Self::NoCompression(_) => &self.name,
-            Self::Uncompressed(_) => &self.name,
-            Self::ZStdCompression(_) => &self.name,
-            Self::LZ4Compression(_) => &self.name,
-            Self::SnappyCompression(_) => &self.name,
-            Self::GZIPCompression(_) => &self.name,
-            Self::ProducerCompression(_) => &self.name,
-        }
-    }
-}
-
-impl BrokerCompressionCodec {
     pub fn gen_gzip_compression_codec() -> Self {
-        Self::GZIPCompression(CompressionCodec { codec: Some(1), name: String::from("gzip") })
+        Self { codec: Some(1), name: GZIP_COMPRESSION_NAME }
     }
 
     pub fn gen_snappy_compression_codec() -> Self {
-        Self::SnappyCompression(CompressionCodec { codec: Some(2), name: String::from("snappy") })
+        Self { codec: Some(2), name: SNAPPY_COMPRESSION_NAME }
     }
 
     pub fn gen_lz4_compression_codec() -> Self {
-        Self::LZ4Compression(CompressionCodec { codec: Some(3), name: String::from("lz4") })
+        Self { codec: Some(3), name: LZ4_COMPRESSION_NAME }
     }
 
     pub fn gen_zstd_compression_codec() -> Self {
-        Self::ZStdCompression(CompressionCodec { codec: Some(4), name: String::from("zstd") })
+        Self { codec: Some(4), name: ZSTD_COMPRESSION_NAME }
     }
 
-    pub fn gen_no_compression_codec() -> Self {
-        Self::NoCompression(CompressionCodec { codec: Some(0), name: String::from("none") })
+    pub fn gen_none_compression_codec() -> Self {
+        Self { codec: Some(0), name: NONE_COMPRESSION_NAME }
     }
 
     pub fn gen_uncompressed_codec() -> Self {
-        Self::Uncompressed(CompressionCodec { codec: None, name: String::from("uncompressed") })
+        Self { codec: None, name: UNCOMPRESSED_NAME }
     }
 
     pub fn gen_producer_compression_codec() -> Self {
-        Self::ProducerCompression(CompressionCodec { codec: None, name: String::from("producer") })
+        Self { codec: None, name: PRODUCER_COMPRESSION_NAME }
     }
 }
