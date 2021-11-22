@@ -1,4 +1,7 @@
-//! Kafka Config - Log Configuration
+//! Kafka Config - Broker Default Log Configuration
+//! This configuration, read from server.properties, relates to the Default/General Broker-wide
+//! configuration. A topic may be individually configured via zookeeper, see
+//! `crate::log::log_config`
 
 use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
 use super::{ConfigSet, KafkaConfigError};
@@ -19,10 +22,15 @@ pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms";
 pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
 pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
 pub const LOG_CLEANUP_INTERVAL_MS_PROP: &str = "log.retention.check.interval.ms";
+pub const LOG_CLEANUP_POLICY_PROP: &str = "log.cleanup.policy";
 pub const LOG_CLEANER_THREADS_PROP: &str = "log.cleaner.threads";
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
 pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP: &str = "log.cleaner.dedupe.buffer.size";
 pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP: &str = "log.cleaner.io.buffer.load.factor";
+pub const LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP: &str = "log.cleaner.io.max.bytes.per.second";
+pub const LOG_CLEANER_BACKOFF_MS_PROP: &str = "log.cleaner.backoff.ms";
+pub const LOG_CLEANER_ENABLE_PROP: &str = "log.cleaner.enable";
+pub const LOG_CLEANER_DELETE_RETENTION_MS_PROP: &str = "log.cleaner.delete.retention.ms";
 pub const LOG_CLEANER_IO_BUFFER_SIZE_PROP: &str = "log.cleaner.io.buffer.size";
 pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms";
 pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms";
@@ -31,8 +39,36 @@ pub const LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
 pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
     "log.flush.start.offset.checkpoint.interval.ms";
 
+// RAFKA TODO: This is a topic property, should be moved to its proper place
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogCleanupPolicy {
+    Delete,
+    Compact,
+}
+
+impl FromStr for LogCleanupPolicy {
+    type Err = KafkaConfigError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            "delete" => Ok(Self::Delete),
+            "compact" => Ok(Self::Compact),
+            _ => Err(KafkaConfigError::UnknownCleanupPolicy(input.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for LogCleanupPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Delete => write!(f, "delete"),
+            Self::Compact => write!(f, "compact"),
+        }
+    }
+}
+
 #[derive(Debug, IntoEnumIterator)]
-pub enum LogConfigKey {
+pub enum DefaultLogConfigKey {
     LogDir,
     LogDirs,
     LogSegmentBytes,
@@ -44,18 +80,23 @@ pub enum LogConfigKey {
     LogRetentionTimeMinutes,
     LogRetentionTimeHours,
     LogCleanupIntervalMs,
+    LogCleanupPolicy,
     LogCleanerThreads,
     NumRecoveryThreadsPerDataDir,
     LogCleanerDedupeBufferSize,
     LogCleanerIoBufferSize,
     LogCleanerDedupeBufferLoadFactor,
+    LogCleanerIoMaxBytesPerSecond,
+    LogCleanerBackoffMs,
+    LogCleanerEnable,
+    LogCleanerDeleteRetentionMs,
     LogFlushSchedulerIntervalMs,
     LogFlushIntervalMs,
     LogFlushOffsetCheckpointIntervalMs,
     LogFlushStartOffsetCheckpointIntervalMs,
 }
 
-impl fmt::Display for LogConfigKey {
+impl fmt::Display for DefaultLogConfigKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::LogDir => write!(f, "{}", LOG_DIR_PROP),
@@ -69,6 +110,7 @@ impl fmt::Display for LogConfigKey {
             Self::LogRetentionTimeMinutes => write!(f, "{}", LOG_RETENTION_TIME_MINUTES_PROP),
             Self::LogRetentionTimeHours => write!(f, "{}", LOG_RETENTION_TIME_HOURS_PROP),
             Self::LogCleanupIntervalMs => write!(f, "{}", LOG_CLEANUP_INTERVAL_MS_PROP),
+            Self::LogCleanupPolicy => write!(f, "{}", LOG_CLEANUP_POLICY_PROP),
             Self::LogCleanerThreads => write!(f, "{}", LOG_CLEANER_THREADS_PROP),
             Self::NumRecoveryThreadsPerDataDir => {
                 write!(f, "{}", NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
@@ -79,6 +121,16 @@ impl fmt::Display for LogConfigKey {
             Self::LogCleanerIoBufferSize => write!(f, "{}", LOG_CLEANER_IO_BUFFER_SIZE_PROP),
             Self::LogCleanerDedupeBufferLoadFactor => {
                 write!(f, "{}", LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
+            },
+            Self::LogCleanerIoMaxBytesPerSecond => {
+                write!(f, "{}", LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP)
+            },
+            Self::LogCleanerBackoffMs => {
+                write!(f, "{}", LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
+            },
+            Self::LogCleanerEnable => write!(f, "{}", LOG_CLEANER_ENABLE_PROP),
+            Self::LogCleanerDeleteRetentionMs => {
+                write!(f, "{}", LOG_CLEANER_DELETE_RETENTION_MS_PROP)
             },
             Self::LogFlushSchedulerIntervalMs => {
                 write!(f, "{}", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
@@ -94,7 +146,7 @@ impl fmt::Display for LogConfigKey {
     }
 }
 
-impl FromStr for LogConfigKey {
+impl FromStr for DefaultLogConfigKey {
     type Err = KafkaConfigError;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
@@ -110,6 +162,7 @@ impl FromStr for LogConfigKey {
             LOG_RETENTION_TIME_MINUTES_PROP => Ok(Self::LogRetentionTimeMinutes),
             LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
             LOG_CLEANUP_INTERVAL_MS_PROP => Ok(Self::LogCleanupIntervalMs),
+            LOG_CLEANUP_POLICY => Ok(Self::LogCleanupPolicy),
             LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
             NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
             LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
@@ -117,6 +170,10 @@ impl FromStr for LogConfigKey {
             LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP => {
                 Ok(Self::LogCleanerDedupeBufferLoadFactor)
             },
+            LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP => Ok(Self::LogCleanerIoMaxBytesPerSecond),
+            LOG_CLEANER_BACKOFF_MS_PROP => Ok(Self::LogCleanerBackoffMs),
+            LOG_CLEANER_ENABLE_PROP => Ok(Self::LogCleanerEnable),
+            LOG_CLEANER_DELETE_RETENTION_MS_PROP => Ok(Self::LogCleanerDeleteRetentionMs),
             LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
             LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
             LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
@@ -131,7 +188,7 @@ impl FromStr for LogConfigKey {
 }
 
 #[derive(Debug)]
-pub struct LogConfigProperties {
+pub struct DefaultLogConfigProperties {
     // Singular log.dir
     log_dir: ConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
@@ -145,17 +202,23 @@ pub struct LogConfigProperties {
     log_retention_time_minutes: ConfigDef<i32>,
     log_retention_time_hours: ConfigDef<i32>,
     log_cleanup_interval_ms: ConfigDef<i64>,
+    log_cleanup_policy: ConfigDef<String>,
     log_cleaner_threads: ConfigDef<i32>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
     log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
     log_cleaner_io_buffer_size: ConfigDef<i32>,
     log_cleaner_dedupe_buffer_load_factor: ConfigDef<f64>,
+    log_cleaner_io_max_bytes_per_second: ConfigDef<f64>,
+    log_cleaner_backoff_ms: ConfigDef<i64>,
+    log_cleaner_enable: ConfigDef<bool>,
+    log_cleaner_delete_retention_ms: ConfigDef<i64>,
     log_flush_scheduler_interval_ms: ConfigDef<i64>,
     log_flush_interval_ms: ConfigDef<i64>,
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
 }
-impl Default for LogConfigProperties {
+
+impl Default for DefaultLogConfigProperties {
     fn default() -> Self {
         Self {
             log_dir: ConfigDef::default()
@@ -271,6 +334,15 @@ impl Default for LogConfigProperties {
                      eligible for deletion",
                 ))
                 .with_default(5 * 60 * 1000),
+            log_cleanup_policy: ConfigDef::default()
+                .with_key(LOG_CLEANUP_POLICY_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "The default cleanup policy for segments beyond the retention window. A comma \
+                     separated list of valid policies. Valid policies are: \"delete\" and \
+                     \"compact\"",
+                ))
+                .with_default(String::from("delete")),
             log_cleaner_threads: ConfigDef::default()
                 .with_key(LOG_CLEANER_THREADS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -311,6 +383,40 @@ impl Default for LogConfigProperties {
                      will lead to more hash collisions",
                 ))
                 .with_default(0.9), // Contained a 0.9d before, double check
+            log_cleaner_io_max_bytes_per_second: ConfigDef::default()
+                .with_key(LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "The log cleaner will be throttled so that the sum of its read and write i/o \
+                     will be less than this value on average",
+                ))
+                .with_default(f64::MAX),
+            log_cleaner_backoff_ms: ConfigDef::default()
+                .with_key(LOG_CLEANER_BACKOFF_MS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "The amount of time to sleep when there are no logs to clean",
+                ))
+                .with_default(15 * 1000)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, LOG_CLEANER_BACKOFF_MS_PROP)
+                })),
+            log_cleaner_enable: ConfigDef::default()
+                .with_key(LOG_CLEANER_ENABLE_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "Enable the log cleaner process to run on the server. Should be enabled if \
+                     using any topics with a cleanup.policy=compact including the internal \
+                     offsets topic. If disabled those topics will not be compacted and \
+                     continually grow in size.",
+                ))
+                .with_default(true),
+            log_cleaner_delete_retention_ms: ConfigDef::default()
+                .with_key(LOG_CLEANER_DELETE_RETENTION_MS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from("How long are delete records retained?"))
+                .with_default(true),
             log_flush_scheduler_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -354,9 +460,10 @@ impl Default for LogConfigProperties {
         }
     }
 }
-impl ConfigSet for LogConfigProperties {
-    type ConfigKey = LogConfigKey;
-    type ConfigType = LogConfig;
+
+impl ConfigSet for DefaultLogConfigProperties {
+    type ConfigKey = DefaultLogConfigKey;
+    type ConfigType = DefaultLogConfig;
 
     /// `try_from_config_property` transforms a string value from the config into our actual types
     fn try_set_property(
@@ -395,6 +502,9 @@ impl ConfigSet for LogConfigProperties {
             Self::ConfigKey::LogCleanupIntervalMs => {
                 self.log_cleanup_interval_ms.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::LogCleanupPolicy => {
+                self.log_cleanup_policy.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogCleanerThreads => {
                 self.log_cleaner_threads.try_set_parsed_value(property_value)?
             },
@@ -406,6 +516,18 @@ impl ConfigSet for LogConfigProperties {
             },
             Self::ConfigKey::LogCleanerDedupeBufferLoadFactor => {
                 self.log_cleaner_dedupe_buffer_load_factor.try_set_parsed_value(property_value)?
+            },
+            Self::ConfigKey::LogCleanerIoMaxBytesPerSecond => {
+                self.log_cleaner_io_max_bytes_per_second.try_set_parsed_value(property_value)?
+            },
+            Self::ConfigKey::LogCleanerBackoffMs => {
+                self.log_cleaner_backoff_ms.try_set_parsed_value(property_value)?
+            },
+            Self::ConfigKey::LogCleanerEnable => {
+                self.log_cleaner_enable.try_set_parsed_value(property_value)?
+            },
+            Self::ConfigKey::LogCleanerDeleteRetentionMs => {
+                self.log_cleaner_delete_retention_ms.try_set_parsed_value(property_value)?
             },
             Self::ConfigKey::LogFlushSchedulerIntervalMs => {
                 self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
@@ -429,19 +551,21 @@ impl ConfigSet for LogConfigProperties {
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         let log_segment_bytes = self.log_segment_bytes.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
-        let log_roll_time_hours = self.log_roll_time_hours.build()?;
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
-        let log_roll_time_jitter_hours = self.log_roll_time_jitter_hours.build()?;
         let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
-        let log_retention_time_minutes = self.log_retention_time_minutes.build()?;
-        let log_retention_time_hours = self.log_retention_time_hours.build()?;
         let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
+        let log_cleanup_policy = self.resolve_log_cleanup_policy()?;
         let log_cleaner_threads = self.log_cleaner_threads.build()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
         let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
         let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
         let log_cleaner_dedupe_buffer_load_factor =
             self.log_cleaner_dedupe_buffer_load_factor.build()?;
+        let log_cleaner_io_max_bytes_per_second =
+            self.log_cleaner_io_max_bytes_per_second.build()?;
+        let log_cleaner_backoff_ms = self.log_cleaner_backoff_ms.build()?;
+        let log_cleaner_enable = self.log_cleaner_enable.build()?;
+        let log_cleaner_delete_retention_ms = self.log_cleaner_delete_retention_ms.build()?;
         let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
         let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
         let log_flush_offset_checkpoint_interval_ms =
@@ -453,18 +577,18 @@ impl ConfigSet for LogConfigProperties {
             log_dirs,
             log_segment_bytes,
             log_roll_time_millis,
-            log_roll_time_hours,
             log_roll_time_jitter_millis,
-            log_roll_time_jitter_hours,
             log_retention_time_millis,
-            log_retention_time_minutes,
-            log_retention_time_hours,
             log_cleanup_interval_ms,
             log_cleaner_threads,
             num_recovery_threads_per_data_dir,
             log_cleaner_dedupe_buffer_size,
             log_cleaner_io_buffer_size,
             log_cleaner_dedupe_buffer_load_factor,
+            log_cleaner_io_max_bytes_per_second,
+            log_cleaner_backoff_ms,
+            log_cleaner_enable,
+            log_cleaner_delete_retention_ms,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
@@ -472,7 +596,8 @@ impl ConfigSet for LogConfigProperties {
         })
     }
 }
-impl LogConfigProperties {
+
+impl DefaultLogConfigProperties {
     /// `resolve_log_dirs` validates the log.dirs and log.dir combination. Note that the end value
     /// in KafkaConfig has a default, so even if they are un-set, they will be marked as provided
     fn resolve_log_dirs(&mut self) -> Result<Vec<String>, KafkaConfigError> {
@@ -507,11 +632,13 @@ impl LogConfigProperties {
         }
     }
 
+    /// The `resolve()` from `ConfigDef` cannot be used as we need to transform hours to minutes to
+    /// millis
     pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
         let millis_in_minute = 60 * 1000;
         let millis_in_hour = 60 * millis_in_minute;
 
-        let millis: i64 = match self.log_retention_time_millis.get_value() {
+        let mut millis: i64 = match self.log_retention_time_millis.get_value() {
             Some(millis) => *millis,
             None => match self.log_retention_time_minutes.get_value() {
                 Some(mins) => i64::from(millis_in_minute) * i64::from(*mins),
@@ -533,46 +660,63 @@ impl LogConfigProperties {
         }
         Ok(millis)
     }
+
+    pub fn resolve_log_cleanup_policy(
+        &mut self,
+    ) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
+        match self.log_cleanup_policy.get_value() {
+            Some(val) => {
+                let mut res: Vec<LogCleanupPolicy> = vec![];
+                let policies: Vec<&str> = val.split(",").collect();
+                for policy in policies {
+                    res.push(LogCleanupPolicy::from_str(policy)?);
+                }
+                Ok(res)
+            },
+            None => Ok(vec![]),
+        }
+    }
 }
+
 #[derive(Debug, PartialEq, Clone)]
-pub struct LogConfig {
+pub struct DefaultLogConfig {
     pub log_dirs: Vec<String>,
     pub log_segment_bytes: usize,
+    /// The coalesced roll time, resolving hours to its millis
     pub log_roll_time_millis: i64,
-    pub log_roll_time_hours: i32,
+    /// The coalesced roll time jitter, resolving hours to its millis
     pub log_roll_time_jitter_millis: i64,
-    pub log_roll_time_jitter_hours: i32,
+    /// The coalesced time retention, resolving hours or minutes to its millis
     pub log_retention_time_millis: i64,
-    pub log_retention_time_minutes: i32,
-    pub log_retention_time_hours: i32,
     pub log_cleanup_interval_ms: i64,
+    pub log_cleanup_policy: Vec<LogCleanupPolicy>,
     pub log_cleaner_threads: i32,
     pub num_recovery_threads_per_data_dir: i32,
     pub log_cleaner_dedupe_buffer_size: i64,
     pub log_cleaner_io_buffer_size: i32,
     pub log_cleaner_dedupe_buffer_load_factor: f64,
+    pub log_cleaner_io_max_bytes_per_second: f64,
+    pub log_cleaner_backoff_ms: i64,
+    pub log_cleaner_enable: bool,
+    pub log_cleaner_delete_retention_ms: i64,
     pub log_flush_scheduler_interval_ms: i64,
     pub log_flush_interval_ms: i64,
     pub log_flush_offset_checkpoint_interval_ms: i32,
     pub log_flush_start_offset_checkpoint_interval_ms: i32,
 }
-impl Default for LogConfig {
+
+impl Default for DefaultLogConfig {
     fn default() -> Self {
-        let mut config_properties = LogConfigProperties::default();
+        let mut config_properties = DefaultLogConfigProperties::default();
         let log_dirs = config_properties.resolve_log_dirs().unwrap();
         let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
         let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
-        let log_roll_time_hours = config_properties.log_roll_time_hours.build().unwrap();
         let log_roll_time_jitter_millis =
             config_properties.resolve_log_roll_time_jitter_millis().unwrap();
-        let log_roll_time_jitter_hours =
-            config_properties.log_roll_time_jitter_hours.build().unwrap();
         let log_retention_time_millis =
             config_properties.resolve_log_retention_time_millis().unwrap();
-        let log_retention_time_minutes =
-            config_properties.log_retention_time_minutes.build().unwrap();
-        let log_retention_time_hours = config_properties.log_retention_time_hours.build().unwrap();
         let log_cleanup_interval_ms = config_properties.log_cleanup_interval_ms.build().unwrap();
+        let log_cleanup_policy = config_properties.resolve_log_cleanup_policy().unwrap();
         let log_cleaner_threads = config_properties.log_cleaner_threads.build().unwrap();
         let log_cleaner_dedupe_buffer_size =
             config_properties.log_cleaner_dedupe_buffer_size.build().unwrap();
@@ -580,6 +724,12 @@ impl Default for LogConfig {
             config_properties.log_cleaner_io_buffer_size.build().unwrap();
         let log_cleaner_dedupe_buffer_load_factor =
             config_properties.log_cleaner_dedupe_buffer_load_factor.build().unwrap();
+        let log_cleaner_io_max_bytes_per_second =
+            config_properties.log_cleaner_io_max_bytes_per_second.build().unwrap();
+        let log_cleaner_backoff_ms = config_properties.log_cleaner_backoff_ms.build().unwrap();
+        let log_cleaner_enable = config_properties.log_cleaner_enable.build().unwrap();
+        let log_cleaner_delete_retention_ms =
+            config_properties.log_cleaner_delete_retention_ms.build().unwrap();
         let log_flush_scheduler_interval_ms =
             config_properties.log_flush_scheduler_interval_ms.build().unwrap();
         let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
@@ -593,17 +743,18 @@ impl Default for LogConfig {
             log_dirs,
             log_segment_bytes,
             log_roll_time_millis,
-            log_roll_time_hours,
             log_roll_time_jitter_millis,
-            log_roll_time_jitter_hours,
             log_retention_time_millis,
-            log_retention_time_minutes,
-            log_retention_time_hours,
             log_cleanup_interval_ms,
+            log_cleanup_policy,
             log_cleaner_threads,
             log_cleaner_dedupe_buffer_size,
             log_cleaner_io_buffer_size,
             log_cleaner_dedupe_buffer_load_factor,
+            log_cleaner_io_max_bytes_per_second,
+            log_cleaner_backoff_ms,
+            log_cleaner_enable,
+            log_cleaner_delete_retention_ms,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
