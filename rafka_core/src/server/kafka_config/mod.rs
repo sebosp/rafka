@@ -124,6 +124,8 @@ pub enum KafkaConfigError {
     ListenerMisconfig(String),
     #[error("Unknown Cleanup Policy")]
     UnknownCleanupPolicy(String),
+    #[error("Invalid Broker Compression Codec")]
+    InvalidBrokerCompressionCodec(String),
 }
 
 /// This implementation is only for testing, for example any I/O error is considered equal
@@ -149,6 +151,9 @@ impl PartialEq for KafkaConfigError {
             },
             Self::UnknownCleanupPolicy(lhs) => {
                 matches!(rhs, Self::UnknownCleanupPolicy(rhs) if lhs == rhs)
+            },
+            Self::InvalidBrokerCompressionCodec(lhs) => {
+                matches!(rhs, Self::InvalidBrokerCompressionCodec(rhs) if lhs == rhs)
             },
         }
     }
