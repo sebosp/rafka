@@ -163,7 +163,9 @@ impl ConfigSet for SocketConfigProperties {
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         let port = self.port.build()?;
         let host_name = self.host_name.build()?;
-        let listeners = self.listeners.build()?;
+        let listeners = self.resolve_listeners()?;
+        self.advertised_host_name.resolve(&self.host_name)?;
+        self.advertised_port.resolve(&self.port)?;
         let advertised_host_name = self.advertised_host_name.build()?;
         let advertised_port = self.advertised_port.build()?;
         let advertised_listeners = self.resolve_advertised_listeners()?;
@@ -183,12 +185,14 @@ impl SocketConfigProperties {
     pub fn resolve_advertised_listeners(&mut self) -> Result<Vec<EndPoint>, KafkaConfigError> {
         if let Some(advertised_listeners) = self.advertised_listeners.get_value() {
             core_utils::listener_list_to_end_points(&advertised_listeners)
+        } else if let (Some(advertised_host_name), Some(advertised_port)) =
+            (self.advertised_host_name.get_value(), self.advertised_port.get_value())
+        {
+            core_utils::listener_list_to_end_points(&format!(
+                "PLAINTEXT://{}:{}",
+                advertised_host_name, advertised_port
+            ))
         } else {
-            warn!(
-                "The properties for advertised.host.name and advertised.port have been DEPRECATED \
-                 and are not used in this poc, reverting to {}",
-                LISTENERS_PROP
-            );
             self.resolve_listeners()
         }
     }
@@ -203,8 +207,12 @@ impl SocketConfigProperties {
                     "PLAINTEXT://{}:{}",
                     host_name, port
                 )),
-                (Some(host_name), None) => Err(KafkaConfigError::MissingKey(PORT_PROP.to_string())),
-                (None, Some(port)) => Err(KafkaConfigError::MissingKey(HOST_NAME_PROP.to_string())),
+                (Some(_host_name), None) => {
+                    Err(KafkaConfigError::MissingKey(PORT_PROP.to_string()))
+                },
+                (None, Some(_port)) => {
+                    Err(KafkaConfigError::MissingKey(HOST_NAME_PROP.to_string()))
+                },
                 (None, None) => {
                     Err(KafkaConfigError::MissingKey(format!("{}, {}", HOST_NAME_PROP, PORT_PROP)))
                 },
@@ -216,7 +224,7 @@ impl SocketConfigProperties {
 pub struct SocketConfig {
     pub port: i32,
     pub host_name: String,
-    pub listeners: String,
+    pub listeners: Vec<EndPoint>,
     pub advertised_host_name: String,
     pub advertised_port: i32,
     pub advertised_listeners: Vec<EndPoint>,
@@ -226,7 +234,9 @@ impl Default for SocketConfig {
         let mut config_properties = SocketConfigProperties::default();
         let port = config_properties.port.build().unwrap();
         let host_name = config_properties.host_name.build().unwrap();
-        let listeners = config_properties.listeners.build().unwrap();
+        config_properties.advertised_host_name.resolve(&config_properties.host_name).unwrap();
+        config_properties.advertised_port.resolve(&config_properties.port).unwrap();
+        let listeners = config_properties.resolve_listeners().unwrap();
         let advertised_host_name = config_properties.advertised_host_name.build().unwrap();
         let advertised_port = config_properties.advertised_port.build().unwrap();
         let advertised_listeners = config_properties.resolve_advertised_listeners().unwrap();
