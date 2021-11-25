@@ -3,10 +3,13 @@
 use super::{ConfigSet, KafkaConfigError};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::coordinator::transaction::transaction_state_manager::TransactionStateManager;
+use crate::message::compression_codec::BrokerCompressionCodec;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
 pub const TRANSACTIONAL_ID_EXPIRATION_MS_PROP: &str = "transactional.id.expiration.ms";
+pub const DEFAULT_COMPRESSION_TYPE: BrokerCompressionCodec =
+    BrokerCompressionCodec::gen_producer_compression_codec();
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum TransactionConfigKey {
@@ -28,7 +31,8 @@ impl FromStr for TransactionConfigKey {
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match input {
-            PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP => Ok(Self::TransactionalIdExpirationMs),
+            TRANSACTIONAL_ID_EXPIRATION_MS_PROP => Ok(Self::TransactionalIdExpirationMs),
+            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
         }
     }
 }
