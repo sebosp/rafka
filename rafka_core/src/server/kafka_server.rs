@@ -201,14 +201,14 @@ impl KafkaServer {
         kafka_server.zk_client_config = ZKClientConfig::default();
         let broker_meta_props_file = String::from("meta.properties");
         // Using File.separator as "/" since this is going to just work on Linux.
-        for bmc_log_dir in &config.log_dirs {
+        for bmc_log_dir in &config.log.log_dirs {
             let filename = format!("{}/{}", bmc_log_dir, broker_meta_props_file);
             kafka_server
                 .broker_metadata_checkpoints
                 .insert(bmc_log_dir.clone(), BrokerMetadataCheckpoint::new(&filename));
         }
         kafka_server.init_time = time;
-        kafka_server.dynamic_broker_config = DynamicBrokerConfig::new(config);
+        kafka_server.dynamic_broker_config = DynamicBrokerConfig::new(config.clone());
         kafka_server.config = config;
         kafka_server
     }
@@ -274,7 +274,7 @@ impl KafkaServer {
                 &self.broker_state,
                 self.kafka_scheduler.clone(),
                 self.init_time, // should this be re-calculated?
-                &self.broker_topic_stats,
+                //&self.broker_topic_stats,
                 self.async_task_tx.clone(), /* log_dir_failure_channel needs to be acquaired
                                              * through
                                              * the async_task_tx */
@@ -308,7 +308,7 @@ impl KafkaServer {
         let mut broker_metadata_found = String::from("");
         let mut offline_dirs: Vec<String> = vec![];
 
-        for log_dir in &self.dynamic_broker_config.kafka_config.log_dirs {
+        for log_dir in &self.dynamic_broker_config.kafka_config.log.log_dirs {
             if let Some(checkpoint_dir) = self.broker_metadata_checkpoints.get(log_dir) {
                 match checkpoint_dir.read() {
                     Ok(res) => {
@@ -519,10 +519,8 @@ mod tests {
         let bm_b_unset = BrokerMetadata::new(-1, None);
         let ks_b1 = KafkaServer {
             dynamic_broker_config: DynamicBrokerConfig::new(KafkaConfig {
-                general: GeneralConfig { broker_id: 1, ..GeneralConfig::default() }
-                    ..KafkaConfig::default(),
-            }),
-            ..KafkaServer::default()
+                general: GeneralConfig { broker_id: 1, ..Default::default() }..Default::default(),
+            })..Default::default(),
         };
         let same_broker_id = ks_b1.get_or_generate_broker_id(bm_b1.clone()).await;
         assert!(same_broker_id.is_ok());
