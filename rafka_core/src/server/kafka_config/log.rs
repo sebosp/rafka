@@ -31,6 +31,7 @@ pub const LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP: &str = "log.cleaner.io.max.b
 pub const LOG_CLEANER_BACKOFF_MS_PROP: &str = "log.cleaner.backoff.ms";
 pub const LOG_CLEANER_ENABLE_PROP: &str = "log.cleaner.enable";
 pub const LOG_CLEANER_DELETE_RETENTION_MS_PROP: &str = "log.cleaner.delete.retention.ms";
+pub const LOG_DELETE_DELAY_MS_PROP: &str = "log.segment.delete.delay.ms";
 pub const LOG_CLEANER_IO_BUFFER_SIZE_PROP: &str = "log.cleaner.io.buffer.size";
 pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP: &str = "log.flush.scheduler.interval.ms";
 pub const LOG_FLUSH_INTERVAL_MS_PROP: &str = "log.flush.interval.ms";
@@ -90,6 +91,7 @@ pub enum DefaultLogConfigKey {
     LogCleanerBackoffMs,
     LogCleanerEnable,
     LogCleanerDeleteRetentionMs,
+    LogDeleteDelayMs,
     LogFlushSchedulerIntervalMs,
     LogFlushIntervalMs,
     LogFlushOffsetCheckpointIntervalMs,
@@ -132,6 +134,7 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogCleanerDeleteRetentionMs => {
                 write!(f, "{}", LOG_CLEANER_DELETE_RETENTION_MS_PROP)
             },
+            Self::LogDeleteDelayMs => write!(f, "{}", LOG_DELETE_DELAY_MS_PROP),
             Self::LogFlushSchedulerIntervalMs => {
                 write!(f, "{}", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
             },
@@ -174,6 +177,7 @@ impl FromStr for DefaultLogConfigKey {
             LOG_CLEANER_BACKOFF_MS_PROP => Ok(Self::LogCleanerBackoffMs),
             LOG_CLEANER_ENABLE_PROP => Ok(Self::LogCleanerEnable),
             LOG_CLEANER_DELETE_RETENTION_MS_PROP => Ok(Self::LogCleanerDeleteRetentionMs),
+            LOG_DELETE_DELAY_MS_PROP => Ok(Self::LogDeleteDelayMs),
             LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
             LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
             LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
@@ -211,7 +215,8 @@ pub struct DefaultLogConfigProperties {
     log_cleaner_io_max_bytes_per_second: ConfigDef<f64>,
     log_cleaner_backoff_ms: ConfigDef<i64>,
     log_cleaner_enable: ConfigDef<bool>,
-    log_cleaner_delete_retention_ms: ConfigDef<i64>,
+    pub log_cleaner_delete_retention_ms: ConfigDef<i64>,
+    pub log_delete_delay_ms: ConfigDef<i64>,
     log_flush_scheduler_interval_ms: ConfigDef<i64>,
     log_flush_interval_ms: ConfigDef<i64>,
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
@@ -416,7 +421,18 @@ impl Default for DefaultLogConfigProperties {
                 .with_key(LOG_CLEANER_DELETE_RETENTION_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(String::from("How long are delete records retained?"))
-                .with_default(true),
+                .with_default(24 * 60 * 60 * 1000),
+            log_delete_delay_ms: ConfigDef::default()
+                .with_key(LOG_DELETE_DELAY_MS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "The amount of time to wait before deleting a file from the filesystem",
+                ))
+                .with_default(60000)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, LOG_DELETE_DELAY_MS_PROP)
+                })),
             log_flush_scheduler_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -529,6 +545,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogCleanerDeleteRetentionMs => {
                 self.log_cleaner_delete_retention_ms.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::LogDeleteDelayMs => {
+                self.log_delete_delay_ms.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogFlushSchedulerIntervalMs => {
                 self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
             },
@@ -566,6 +585,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_cleaner_backoff_ms = self.log_cleaner_backoff_ms.build()?;
         let log_cleaner_enable = self.log_cleaner_enable.build()?;
         let log_cleaner_delete_retention_ms = self.log_cleaner_delete_retention_ms.build()?;
+        let log_delete_delay_ms = self.log_delete_delay_ms.build()?;
         let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
         let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
         let log_flush_offset_checkpoint_interval_ms =
@@ -580,6 +600,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_roll_time_jitter_millis,
             log_retention_time_millis,
             log_cleanup_interval_ms,
+            log_cleanup_policy,
             log_cleaner_threads,
             num_recovery_threads_per_data_dir,
             log_cleaner_dedupe_buffer_size,
@@ -589,6 +610,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_cleaner_backoff_ms,
             log_cleaner_enable,
             log_cleaner_delete_retention_ms,
+            log_delete_delay_ms,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
@@ -699,6 +721,7 @@ pub struct DefaultLogConfig {
     pub log_cleaner_backoff_ms: i64,
     pub log_cleaner_enable: bool,
     pub log_cleaner_delete_retention_ms: i64,
+    pub log_delete_delay_ms: i64,
     pub log_flush_scheduler_interval_ms: i64,
     pub log_flush_interval_ms: i64,
     pub log_flush_offset_checkpoint_interval_ms: i32,
@@ -730,6 +753,7 @@ impl Default for DefaultLogConfig {
         let log_cleaner_enable = config_properties.log_cleaner_enable.build().unwrap();
         let log_cleaner_delete_retention_ms =
             config_properties.log_cleaner_delete_retention_ms.build().unwrap();
+        let log_delete_delay_ms = config_properties.log_delete_delay_ms.build().unwrap();
         let log_flush_scheduler_interval_ms =
             config_properties.log_flush_scheduler_interval_ms.build().unwrap();
         let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
@@ -755,6 +779,7 @@ impl Default for DefaultLogConfig {
             log_cleaner_backoff_ms,
             log_cleaner_enable,
             log_cleaner_delete_retention_ms,
+            log_delete_delay_ms,
             log_flush_scheduler_interval_ms,
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,

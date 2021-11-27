@@ -175,7 +175,7 @@ pub struct LogConfigProperties {
     cleanup_policy: ConfigDef<String>,
     compression_type: ConfigDef<String>,
     delete_retention_ms: ConfigDef<i64>,
-    file_delete_delay_ms: ConfigDef<u64>,
+    file_delete_delay_ms: ConfigDef<i64>,
     flush_messages: ConfigDef<u64>,
     flush_ms: ConfigDef<u64>,
     // TODO: transform Vec<> to String and build the resulting Vec<> on build()
@@ -238,9 +238,6 @@ pub struct LogConfigProperties {
 //
 // (MaxCompactionLagMsProp, LONG, Defaults.MaxCompactionLagMs, atLeast(1), MEDIUM,
 // MaxCompactionLagMsDoc, KafkaConfig.LogCleanerMaxCompactionLagMsProp)
-//
-// (FileDeleteDelayMsProp, LONG, Defaults.FileDeleteDelayMs, atLeast(0), MEDIUM,
-// FileDeleteDelayMsDoc, KafkaConfig.LogDeleteDelayMsProp)
 //
 // (MinCleanableDirtyRatioProp, DOUBLE, Defaults.MinCleanableDirtyRatio, between(0, 1), MEDIUM,
 // MinCleanableRatioDoc, KafkaConfig.LogCleanerMinCleanRatioProp)
@@ -313,12 +310,18 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, DELETE_RETENTION_MS_CONFIG)
                 })),
+// (FileDeleteDelayMsProp, LONG, Defaults.FileDeleteDelayMs, atLeast(0), MEDIUM,
+// FileDeleteDelayMsDoc, KafkaConfig.LogDeleteDelayMsProp)
+//
             file_delete_delay_ms: ConfigDef::default()
                 .with_key(FILE_DELETE_DELAY_MS_CONFIG)
-               .with_importance()
-               .with_doc(FILE_DELETE_DELAY_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(FILE_DELETE_DELAY_MS_DOC.to_string())
+                .with_default(broker_default_log_properties.log_delete_delay_ms.build().unwrap())
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
+                })),
             flush_messages: ConfigDef::default()
                 .with_key(FLUSH_MESSAGES_CONFIG)
                .with_importance()
