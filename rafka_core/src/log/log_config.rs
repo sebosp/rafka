@@ -176,7 +176,7 @@ pub struct LogConfigProperties {
     compression_type: ConfigDef<String>,
     delete_retention_ms: ConfigDef<i64>,
     file_delete_delay_ms: ConfigDef<i64>,
-    flush_messages: ConfigDef<u64>,
+    flush_messages: ConfigDef<i64>,
     flush_ms: ConfigDef<u64>,
     // TODO: transform Vec<> to String and build the resulting Vec<> on build()
     follower_replication_throttled_replicas: ConfigDef<Vec<String>>,
@@ -212,9 +212,6 @@ pub struct LogConfigProperties {
 //
 // (SegmentIndexBytesProp, INT, Defaults.MaxIndexSize, atLeast(0), MEDIUM, MaxIndexSizeDoc,
 // KafkaConfig.LogIndexSizeMaxBytesProp)
-//
-// (FlushMessagesProp, LONG, Defaults.FlushInterval, atLeast(0), MEDIUM, FlushIntervalDoc,
-// KafkaConfig.LogFlushIntervalMessagesProp)
 //
 // (FlushMsProp, LONG, Defaults.FlushMs, atLeast(0), MEDIUM, FlushMsDoc,
 // KafkaConfig.LogFlushIntervalMsProp)
@@ -275,7 +272,6 @@ impl Default for LogConfigProperties {
     fn default() -> Self {
         let broker_default_log_properties = DefaultLogConfigProperties::default();
         Self {
-            //(CleanupPolicyProp, LIST, Defaults.CleanupPolicy, ValidList.in(LogConfig.Compact, LogConfig.Delete), MEDIUM, CompactDoc, KafkaConfig.LogCleanupPolicyProp)
             cleanup_policy: ConfigDef::default()
                 .with_key(CLEANUP_POLICY_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -283,11 +279,12 @@ impl Default for LogConfigProperties {
                 .with_default(DELETE.to_string())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
-                    ConfigDef::value_in_list(data, vec![&DELETE.to_string(), &COMPACT.to_string()], CLEANUP_POLICY_CONFIG)
+                    ConfigDef::value_in_list(
+                        data,
+                        vec![&DELETE.to_string(), &COMPACT.to_string()],
+                        CLEANUP_POLICY_CONFIG,
+                    )
                 })),
-// (CompressionTypeProp, STRING, Defaults.CompressionType,
-// in(BrokerCompressionCodec.brokerCompressionOptions:_*), MEDIUM, CompressionTypeDoc,
-// KafkaConfig.CompressionTypeProp)
             compression_type: ConfigDef::default()
                 .with_key(COMPRESSION_TYPE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -295,24 +292,26 @@ impl Default for LogConfigProperties {
                 .with_default(DEFAULT_COMPRESSION_TYPE.name.to_string())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
-                    ConfigDef::value_in_list(data,
-                        BrokerCompressionCodec::broker_compression_options().iter().map(|val| &val.to_string()).collect(),
-                        COMPRESSION_TYPE_CONFIG)
+                    ConfigDef::value_in_list(
+                        data,
+                        BrokerCompressionCodec::broker_compression_options()
+                            .iter()
+                            .map(|val| &val.to_string())
+                            .collect(),
+                        COMPRESSION_TYPE_CONFIG,
+                    )
                 })),
-// (DeleteRetentionMsProp, LONG, Defaults.DeleteRetentionMs, atLeast(0), MEDIUM,
-// DeleteRetentionMsDoc, KafkaConfig.LogCleanerDeleteRetentionMsProp)
             delete_retention_ms: ConfigDef::default()
                 .with_key(DELETE_RETENTION_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(DELETE_RETENTION_MS_DOC.to_string())
-                .with_default(broker_default_log_properties.log_cleaner_delete_retention_ms.build().unwrap())
+                .with_default(
+                    broker_default_log_properties.log_cleaner_delete_retention_ms.build().unwrap(),
+                )
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, DELETE_RETENTION_MS_CONFIG)
                 })),
-// (FileDeleteDelayMsProp, LONG, Defaults.FileDeleteDelayMs, atLeast(0), MEDIUM,
-// FileDeleteDelayMsDoc, KafkaConfig.LogDeleteDelayMsProp)
-//
             file_delete_delay_ms: ConfigDef::default()
                 .with_key(FILE_DELETE_DELAY_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -322,136 +321,143 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
                 })),
+            // (FlushMessagesProp, LONG, Defaults.FlushInterval, atLeast(0), MEDIUM,
+            // FlushIntervalDoc, KafkaConfig.LogFlushIntervalMessagesProp)
             flush_messages: ConfigDef::default()
-                .with_key(FLUSH_MESSAGES_CONFIG)
-               .with_importance()
-               .with_doc(FLUSH_MESSAGES_DOC.to_string())
-               .with_default()
-                .with_validator(),
+                .with_key(FLUSH_MESSAGES_INTERVAL_CONFIG)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(FLUSH_MESSAGES_INTERVAL_DOC.to_string())
+                .with_default(
+                    broker_default_log_properties.log_flush_interval_messages.build().unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
+                })),
             flush_ms: ConfigDef::default()
                 .with_key(FLUSH_MS_CONFIG)
-               .with_importance()
-               .with_doc(FLUSH_MS_DOC.to_string())
+                .with_importance()
+                .with_doc(FLUSH_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             follower_replication_throttled_replicas: ConfigDef::default()
                 .with_key(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_CONFIG)
-               .with_importance()
-               .with_doc(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_DOC.to_string())
+                .with_importance()
+                .with_doc(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             index_interval_bytes: ConfigDef::default()
                 .with_key(INDEX_INTERVAL_BYTES_CONFIG)
-               .with_importance()
-               .with_doc(INDEX_INTERVAL_BYTES_DOC.to_string())
+                .with_importance()
+                .with_doc(INDEX_INTERVAL_BYTES_DOC.to_string())
                 .with_default()
                 .with_validator(),
             leader_replication_throttled_replicas: ConfigDef::default()
                 .with_key(LEADER_REPLICATION_THROTTLED_REPLICAS_CONFIG)
-               .with_importance()
-               .with_doc(LEADER_REPLICATION_THROTTLED_REPLICAS_DOC.to_string())
+                .with_importance()
+                .with_doc(LEADER_REPLICATION_THROTTLED_REPLICAS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             max_compaction_lag_ms: ConfigDef::default()
                 .with_key(MAX_COMPACTION_LAG_MS_CONFIG)
-               .with_importance()
-               .with_doc(MAX_COMPACTION_LAG_MS_DOC.to_string())
+                .with_importance()
+                .with_doc(MAX_COMPACTION_LAG_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             max_message_bytes: ConfigDef::default()
                 .with_key(MAX_MESSAGE_BYTES_CONFIG)
-               .with_importance()
-               .with_doc(MAX_MESSAGE_BYTES_DOC.to_string())
+                .with_importance()
+                .with_doc(MAX_MESSAGE_BYTES_DOC.to_string())
                 .with_default()
                 .with_validator(),
             message_down_conversion_enable: ConfigDef::default()
                 .with_key(MESSAGE_DOWNCONVERSION_ENABLE_CONFIG)
-               .with_importance()
-               .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC.to_string())
+                .with_importance()
+                .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC.to_string())
                 .with_default()
                 .with_validator(),
             message_format_version: ConfigDef::default()
                 .with_key(MESSAGE_FORMAT_VERSION_CONFIG)
-               .with_importance()
-               .with_doc(MESSAGE_FORMAT_VERSION_DOC.to_string())
+                .with_importance()
+                .with_doc(MESSAGE_FORMAT_VERSION_DOC.to_string())
                 .with_default()
                 .with_validator(),
             message_timestamp_difference_max_ms: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_CONFIG)
-               .with_importance()
-               .with_doc(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC.to_string())
+                .with_importance()
+                .with_doc(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             message_timestamp_type: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_TYPE_CONFIG)
-               .with_importance()
-               .with_doc(MESSAGE_TIMESTAMP_TYPE_DOC.to_string())
+                .with_importance()
+                .with_doc(MESSAGE_TIMESTAMP_TYPE_DOC.to_string())
                 .with_default()
                 .with_validator(),
             min_cleanable_dirty_ratio: ConfigDef::default()
                 .with_key(MIN_CLEANABLE_DIRTY_RATIO_CONFIG)
-               .with_importance()
-               .with_doc(MIN_CLEANABLE_DIRTY_RATIO_DOC.to_string())
+                .with_importance()
+                .with_doc(MIN_CLEANABLE_DIRTY_RATIO_DOC.to_string())
                 .with_default()
                 .with_validator(),
             min_compaction_lag_ms: ConfigDef::default()
                 .with_key(MIN_COMPACTION_LAG_MS_CONFIG)
-               .with_importance()
-               .with_doc(MIN_COMPACTION_LAG_MS_DOC.to_string())
+                .with_importance()
+                .with_doc(MIN_COMPACTION_LAG_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             min_in_sync_replicas: ConfigDef::default()
                 .with_key(MIN_IN_SYNC_REPLICAS_CONFIG)
-               .with_importance()
-               .with_doc(MIN_IN_SYNC_REPLICAS_DOC.to_string())
+                .with_importance()
+                .with_doc(MIN_IN_SYNC_REPLICAS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             pre_allocate_enable: ConfigDef::default()
                 .with_key(PREALLOCATE_ENABLE_CONFIG)
-               .with_importance()
-               .with_doc(PREALLOCATE_ENABLE_DOC.to_string())
+                .with_importance()
+                .with_doc(PREALLOCATE_ENABLE_DOC.to_string())
                 .with_default()
                 .with_validator(),
             retention_bytes: ConfigDef::default()
                 .with_key(RETENTION_BYTES_CONFIG)
-               .with_importance()
-               .with_doc(RETENTION_BYTES_DOC.to_string())
+                .with_importance()
+                .with_doc(RETENTION_BYTES_DOC.to_string())
                 .with_default()
                 .with_validator(),
             retention_ms: ConfigDef::default()
                 .with_key(RETENTION_MS_CONFIG)
-               .with_importance()
-               .with_doc(RETENTION_MS_DOC.to_string())
+                .with_importance()
+                .with_doc(RETENTION_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             segment_bytes: ConfigDef::default()
                 .with_key(SEGMENT_BYTES_CONFIG)
-               .with_importance()
-               .with_doc(SEGMENT_BYTES_DOC.to_string())
+                .with_importance()
+                .with_doc(SEGMENT_BYTES_DOC.to_string())
                 .with_default()
                 .with_validator(),
             segment_index_bytes: ConfigDef::default()
                 .with_key(SEGMENT_INDEX_BYTES_CONFIG)
-               .with_importance()
-               .with_doc(SEGMENT_INDEX_BYTES_DOC.to_string())
+                .with_importance()
+                .with_doc(SEGMENT_INDEX_BYTES_DOC.to_string())
                 .with_default()
                 .with_validator(),
             segment_jitter_ms: ConfigDef::default()
                 .with_key(SEGMENT_JITTER_MS_CONFIG)
-               .with_importance()
-               .with_doc(SEGMENT_JITTER_MS_DOC.to_string())
+                .with_importance()
+                .with_doc(SEGMENT_JITTER_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             segment_ms: ConfigDef::default()
                 .with_key(SEGMENT_MS_CONFIG)
-               .with_importance()
-               .with_doc(SEGMENT_MS_DOC.to_string())
+                .with_importance()
+                .with_doc(SEGMENT_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),
             unclean_leader_election_enable: ConfigDef::default()
                 .with_key(UNCLEAN_LEADER_ELECTION_ENABLE_CONFIG)
-               .with_importance()
-               .with_doc(UNCLEAN_LEADER_ELECTION_ENABLE_DOC.to_string())
+                .with_importance()
+                .with_doc(UNCLEAN_LEADER_ELECTION_ENABLE_DOC.to_string())
                 .with_default()
                 .with_validator(),
         }
