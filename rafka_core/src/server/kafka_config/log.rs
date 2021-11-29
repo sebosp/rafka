@@ -222,7 +222,7 @@ pub struct DefaultLogConfigProperties {
     pub log_cleaner_delete_retention_ms: ConfigDef<i64>,
     pub log_flush_interval_messages: ConfigDef<i64>,
     pub log_delete_delay_ms: ConfigDef<i64>,
-    log_flush_scheduler_interval_ms: ConfigDef<i64>,
+    pub log_flush_scheduler_interval_ms: ConfigDef<i64>,
     log_flush_interval_ms: ConfigDef<i64>,
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,

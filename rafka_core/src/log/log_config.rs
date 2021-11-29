@@ -177,7 +177,7 @@ pub struct LogConfigProperties {
     delete_retention_ms: ConfigDef<i64>,
     file_delete_delay_ms: ConfigDef<i64>,
     flush_messages: ConfigDef<i64>,
-    flush_ms: ConfigDef<u64>,
+    flush_ms: ConfigDef<i64>,
     // TODO: transform Vec<> to String and build the resulting Vec<> on build()
     follower_replication_throttled_replicas: ConfigDef<Vec<String>>,
     index_interval_bytes: ConfigDef<i32>,
@@ -212,9 +212,6 @@ pub struct LogConfigProperties {
 //
 // (SegmentIndexBytesProp, INT, Defaults.MaxIndexSize, atLeast(0), MEDIUM, MaxIndexSizeDoc,
 // KafkaConfig.LogIndexSizeMaxBytesProp)
-//
-// (FlushMsProp, LONG, Defaults.FlushMs, atLeast(0), MEDIUM, FlushMsDoc,
-// KafkaConfig.LogFlushIntervalMsProp)
 //
 // (RetentionBytesProp, LONG, Defaults.RetentionSize, MEDIUM, RetentionSizeDoc,
 // KafkaConfig.LogRetentionBytesProp) // can be negative. See
@@ -321,8 +318,6 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
                 })),
-            // (FlushMessagesProp, LONG, Defaults.FlushInterval, atLeast(0), MEDIUM,
-            // FlushIntervalDoc, KafkaConfig.LogFlushIntervalMessagesProp)
             flush_messages: ConfigDef::default()
                 .with_key(FLUSH_MESSAGES_INTERVAL_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -334,12 +329,19 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
                 })),
+            // (FlushMsProp, LONG, Defaults.FlushMs, atLeast(0), MEDIUM, FlushMsDoc,
+            // KafkaConfig.LogFlushIntervalMsProp)
             flush_ms: ConfigDef::default()
                 .with_key(FLUSH_MS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(FLUSH_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties.log_flush_scheduler_interval_ms.build().unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
+                })),
             follower_replication_throttled_replicas: ConfigDef::default()
                 .with_key(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_CONFIG)
                 .with_importance()
