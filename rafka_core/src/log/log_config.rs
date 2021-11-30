@@ -179,7 +179,7 @@ pub struct LogConfigProperties {
     flush_messages: ConfigDef<i64>,
     flush_ms: ConfigDef<i64>,
     // TODO: transform Vec<> to String and build the resulting Vec<> on build()
-    follower_replication_throttled_replicas: ConfigDef<Vec<String>>,
+    follower_replication_throttled_replicas: ConfigDef<String>,
     index_interval_bytes: ConfigDef<i32>,
     leader_replication_throttled_replicas: ConfigDef<Vec<String>>,
     max_compaction_lag_ms: ConfigDef<u64>,
@@ -257,10 +257,6 @@ pub struct LogConfigProperties {
 // (LeaderReplicationThrottledReplicasProp, LIST, Defaults.LeaderReplicationThrottledReplicas,
 // ThrottledReplicaListValidator, MEDIUM, LeaderReplicationThrottledReplicasDoc,
 // LeaderReplicationThrottledReplicasProp)
-//
-// (FollowerReplicationThrottledReplicasProp, LIST, Defaults.FollowerReplicationThrottledReplicas,
-// ThrottledReplicaListValidator, MEDIUM, FollowerReplicationThrottledReplicasDoc,
-// FollowerReplicationThrottledReplicasProp)
 //
 // (MessageDownConversionEnableProp, BOOLEAN, Defaults.MessageDownConversionEnable, LOW,
 // MessageDownConversionEnableDoc, KafkaConfig.LogMessageDownConversionEnableProp)
@@ -342,11 +338,20 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
                 })),
+            // (FollowerReplicationThrottledReplicasProp, LIST,
+            // Defaults.FollowerReplicationThrottledReplicas,
+            // ThrottledReplicaListValidator, MEDIUM, FollowerReplicationThrottledReplicasDoc,
+            // FollowerReplicationThrottledReplicasProp)
             follower_replication_throttled_replicas: ConfigDef::default()
-                .with_key(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_CONFIG)
-                .with_importance()
-                .with_doc(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_DOC.to_string())
-                .with_default()
+                .with_key(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "A list of replicas for which log replication should be throttled on the \
+                     follower side. The list should describe a set of replicas in the form \
+                     [PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the \
+                     wildcard '*' can be used to throttle all replicas for this topic.",
+                ))
+                .with_default(String::from(""))
                 .with_validator(),
             index_interval_bytes: ConfigDef::default()
                 .with_key(INDEX_INTERVAL_BYTES_CONFIG)
@@ -587,7 +592,7 @@ pub struct LogConfig {
     message_timestamp_type: String,
     message_timestamp_difference_max_ms: i64,
     leader_replication_throttled_replicas: String,
-    follower_replication_throttled_replicas: String,
+    follower_replication_throttled_replicas: Vec<String>,
     message_down_conversion_enable: bool,
 }
 
