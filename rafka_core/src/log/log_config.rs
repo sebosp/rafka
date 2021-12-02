@@ -3,6 +3,7 @@
 use crate::common::config::topic_config::*;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::message::compression_codec::BrokerCompressionCodec;
+use crate::server::config_handler::ThrottledReplicaListValidator;
 use crate::server::kafka_config::log::{DefaultLogConfig, DefaultLogConfigProperties};
 use crate::server::kafka_config::transaction_management::DEFAULT_COMPRESSION_TYPE;
 use crate::server::kafka_config::{ConfigSet, KafkaConfigError};
@@ -351,8 +352,13 @@ impl Default for LogConfigProperties {
                      [PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the \
                      wildcard '*' can be used to throttle all replicas for this topic.",
                 ))
-                .with_default(String::from(""))
-                .with_validator(),
+                .with_validator(Box::new(|data| match data {
+                    Some(val) => ThrottledReplicaListValidator::ensure_valid_string(
+                        FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP,
+                        val,
+                    ),
+                    None => Ok(()),
+                })),
             index_interval_bytes: ConfigDef::default()
                 .with_key(INDEX_INTERVAL_BYTES_CONFIG)
                 .with_importance()
@@ -561,6 +567,19 @@ impl ConfigSet for LogConfigProperties {
         Ok(())
     }
 }
+impl LogConfigProperties {
+    // RAFKA TODO: Call this on build()
+    pub fn resolve_follower_replication_throttled_replicas(
+        &self,
+    ) -> Result<Vec<String>, KafkaConfigError> {
+        self.follower_replication_throttled_replicas.validate()?;
+        match self.follower_replication_throttled_replicas.get_value() {
+            Some(val) => Ok(val.split(",").map(|val| val.trim().to_string()).collect()),
+            None => Ok(vec![]),
+        }
+    }
+}
+
 /// `LogConfig` is a topic-specific configuration, in constrant, the `DefaultLogConfig` is the
 /// broker-general configs (i.e. if topics are created, their default values is DefaultLogConfig.
 /// #[derive(Debug, Default)]
