@@ -5,6 +5,14 @@ use std::fmt;
 use std::str::FromStr;
 use tracing::{error, info};
 
+/// Perform  validation of configuration read from .properties, zookeeper, etc
+pub trait Validator {
+    type Value;
+    fn ensure_valid(name: &str, value: Self::Value) -> Result<(), KafkaConfigError> {
+        Ok(())
+    }
+}
+
 /// `ConfigDefImportance` provides the levels of importance that different java_properties
 /// have.
 #[derive(Debug, PartialEq, Clone)]
@@ -229,6 +237,10 @@ where
         }
     }
 
+    /// build() usually consumes self, however in this case, the ConfigDef should live on, a
+    /// property may be read initially from .properties file and later on be re-configured via
+    /// admin cli or KV-store (zkp, raft), if we consume self, the validator, the default, etc
+    /// would be gone and couldn't be re-used.
     pub fn build(&mut self) -> Result<T, KafkaConfigError>
     where
         T: Clone,
