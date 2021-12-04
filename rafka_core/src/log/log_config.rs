@@ -225,9 +225,6 @@ pub struct LogConfigProperties {
 // (MaxMessageBytesProp, INT, Defaults.MaxMessageSize, atLeast(0), MEDIUM, MaxMessageSizeDoc,
 // KafkaConfig.MessageMaxBytesProp)
 //
-// (IndexIntervalBytesProp, INT, Defaults.IndexInterval, atLeast(0), MEDIUM, IndexIntervalDoc,
-// KafkaConfig.LogIndexIntervalBytesProp)
-//
 // (MinCompactionLagMsProp, LONG, Defaults.MinCompactionLagMs, atLeast(0), MEDIUM,
 // MinCompactionLagMsDoc, KafkaConfig.LogCleanerMinCompactionLagMsProp)
 //
@@ -359,12 +356,19 @@ impl Default for LogConfigProperties {
                     ),
                     None => Ok(()),
                 })),
+            // (IndexIntervalBytesProp, INT, Defaults.IndexInterval, atLeast(0), MEDIUM,
+            // IndexIntervalDoc, KafkaConfig.LogIndexIntervalBytesProp)
             index_interval_bytes: ConfigDef::default()
-                .with_key(INDEX_INTERVAL_BYTES_CONFIG)
-                .with_importance()
-                .with_doc(INDEX_INTERVAL_BYTES_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_key(INDEX_INTERVAL_BYTES_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(INDEX_INTERVAL_BYTES_DOCS.to_string())
+                .with_default(
+                    broker_default_log_properties.log_index_interval_bytes.build().unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, INDEX_INTERVAL_BYTES_CONFIG)
+                })),
             leader_replication_throttled_replicas: ConfigDef::default()
                 .with_key(LEADER_REPLICATION_THROTTLED_REPLICAS_CONFIG)
                 .with_importance()
