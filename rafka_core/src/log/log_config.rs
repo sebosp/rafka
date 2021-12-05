@@ -34,11 +34,14 @@ pub const DELETE_RETENTION_MS_PROP: &str = DELETE_RETENTION_MS_CONFIG;
 pub const FILE_DELETE_DELAY_MS_PROP: &str = FILE_DELETE_DELAY_MS_CONFIG;
 pub const FLUSH_MESSAGES_PROP: &str = FLUSH_MESSAGES_INTERVAL_CONFIG;
 pub const FLUSH_MS_PROP: &str = FLUSH_MS_CONFIG;
+
+// Leave these out of TopicConfig for now as they are replication quota configs
 pub const FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP: &str =
     "follower.replication.throttled.replicas";
-pub const INDEX_INTERVAL_BYTES_PROP: &str = INDEX_INTERVAL_BYTES_CONFIG;
 pub const LEADER_REPLICATION_THROTTLED_REPLICAS_PROP: &str =
     "leader.replication.throttled.replicas";
+
+pub const INDEX_INTERVAL_BYTES_PROP: &str = INDEX_INTERVAL_BYTES_CONFIG;
 pub const MAX_COMPACTION_LAG_MS_PROP: &str = MAX_COMPACTION_LAG_MS_CONFIG;
 pub const MAX_MESSAGE_BYTES_PROP: &str = MAX_MESSAGE_BYTES_CONFIG;
 pub const MESSAGE_DOWNCONVERSION_ENABLE_PROP: &str = MESSAGE_DOWNCONVERSION_ENABLE_CONFIG;
@@ -182,8 +185,9 @@ pub struct LogConfigProperties {
     // TODO: transform Vec<> to String and build the resulting Vec<> on build()
     follower_replication_throttled_replicas: ConfigDef<String>,
     index_interval_bytes: ConfigDef<i32>,
-    leader_replication_throttled_replicas: ConfigDef<Vec<String>>,
-    max_compaction_lag_ms: ConfigDef<u64>,
+    // TODO: transform Vec<> to String and build the resulting Vec<> on build()
+    leader_replication_throttled_replicas: ConfigDef<String>,
+    max_compaction_lag_ms: ConfigDef<i64>,
     max_message_bytes: ConfigDef<i32>,
     message_down_conversion_enable: ConfigDef<bool>,
     message_format_version: ConfigDef<String>,
@@ -228,9 +232,6 @@ pub struct LogConfigProperties {
 // (MinCompactionLagMsProp, LONG, Defaults.MinCompactionLagMs, atLeast(0), MEDIUM,
 // MinCompactionLagMsDoc, KafkaConfig.LogCleanerMinCompactionLagMsProp)
 //
-// (MaxCompactionLagMsProp, LONG, Defaults.MaxCompactionLagMs, atLeast(1), MEDIUM,
-// MaxCompactionLagMsDoc, KafkaConfig.LogCleanerMaxCompactionLagMsProp)
-//
 // (MinCleanableDirtyRatioProp, DOUBLE, Defaults.MinCleanableDirtyRatio, between(0, 1), MEDIUM,
 // MinCleanableRatioDoc, KafkaConfig.LogCleanerMinCleanRatioProp)
 //
@@ -251,10 +252,6 @@ pub struct LogConfigProperties {
 //
 // (MessageTimestampDifferenceMaxMsProp, LONG, Defaults.MessageTimestampDifferenceMaxMs, atLeast(0),
 // MEDIUM, MessageTimestampDifferenceMaxMsDoc, KafkaConfig.LogMessageTimestampDifferenceMaxMsProp)
-//
-// (LeaderReplicationThrottledReplicasProp, LIST, Defaults.LeaderReplicationThrottledReplicas,
-// ThrottledReplicaListValidator, MEDIUM, LeaderReplicationThrottledReplicasDoc,
-// LeaderReplicationThrottledReplicasProp)
 //
 // (MessageDownConversionEnableProp, BOOLEAN, Defaults.MessageDownConversionEnable, LOW,
 // MessageDownConversionEnableDoc, KafkaConfig.LogMessageDownConversionEnableProp)
@@ -323,8 +320,6 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
                 })),
-            // (FlushMsProp, LONG, Defaults.FlushMs, atLeast(0), MEDIUM, FlushMsDoc,
-            // KafkaConfig.LogFlushIntervalMsProp)
             flush_ms: ConfigDef::default()
                 .with_key(FLUSH_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -336,10 +331,6 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
                 })),
-            // (FollowerReplicationThrottledReplicasProp, LIST,
-            // Defaults.FollowerReplicationThrottledReplicas,
-            // ThrottledReplicaListValidator, MEDIUM, FollowerReplicationThrottledReplicasDoc,
-            // FollowerReplicationThrottledReplicasProp)
             follower_replication_throttled_replicas: ConfigDef::default()
                 .with_key(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -356,8 +347,6 @@ impl Default for LogConfigProperties {
                     ),
                     None => Ok(()),
                 })),
-            // (IndexIntervalBytesProp, INT, Defaults.IndexInterval, atLeast(0), MEDIUM,
-            // IndexIntervalDoc, KafkaConfig.LogIndexIntervalBytesProp)
             index_interval_bytes: ConfigDef::default()
                 .with_key(INDEX_INTERVAL_BYTES_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -370,17 +359,37 @@ impl Default for LogConfigProperties {
                     ConfigDef::at_least(data, &0, INDEX_INTERVAL_BYTES_CONFIG)
                 })),
             leader_replication_throttled_replicas: ConfigDef::default()
-                .with_key(LEADER_REPLICATION_THROTTLED_REPLICAS_CONFIG)
-                .with_importance()
-                .with_doc(LEADER_REPLICATION_THROTTLED_REPLICAS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_key(LEADER_REPLICATION_THROTTLED_REPLICAS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "A list of replicas for which log replication should be throttled on the \
+                     leader side. The list should describe a set of replicas in the form \
+                     [PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the \
+                     wildcard '*' can be used to throttle all replicas for this topic.",
+                ))
+                .with_validator(Box::new(|data| match data {
+                    Some(val) => ThrottledReplicaListValidator::ensure_valid_string(
+                        FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP,
+                        val,
+                    ),
+                    None => Ok(()),
+                })),
+            // (MaxCompactionLagMsProp, LONG, Defaults.MaxCompactionLagMs, atLeast(1), MEDIUM,
+            // MaxCompactionLagMsDoc, KafkaConfig.LogCleanerMaxCompactionLagMsProp)
             max_compaction_lag_ms: ConfigDef::default()
                 .with_key(MAX_COMPACTION_LAG_MS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MAX_COMPACTION_LAG_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties
+                        .log_cleaner_max_compaction_lag_ms
+                        .build()
+                        .unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, MAX_COMPACTION_LAG_MS_CONFIG)
+                })),
             max_message_bytes: ConfigDef::default()
                 .with_key(MAX_MESSAGE_BYTES_CONFIG)
                 .with_importance()
@@ -578,6 +587,17 @@ impl LogConfigProperties {
     ) -> Result<Vec<String>, KafkaConfigError> {
         self.follower_replication_throttled_replicas.validate()?;
         match self.follower_replication_throttled_replicas.get_value() {
+            Some(val) => Ok(val.split(",").map(|val| val.trim().to_string()).collect()),
+            None => Ok(vec![]),
+        }
+    }
+
+    // RAFKA TODO: Call this on build()
+    pub fn resolve_leader_replication_throttled_replicas(
+        &self,
+    ) -> Result<Vec<String>, KafkaConfigError> {
+        self.leader_replication_throttled_replicas.validate()?;
+        match self.leader_replication_throttled_replicas.get_value() {
             Some(val) => Ok(val.split(",").map(|val| val.trim().to_string()).collect()),
             None => Ok(vec![]),
         }
