@@ -693,8 +693,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let log_message_format_version = self.log_message_format_version.build()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
-        let log_message_down_conversion_enable =
-            self.log_flush_start_offset_checkpoint_interval_ms.build()?;
+        let log_message_down_conversion_enable = self.log_message_down_conversion_enable.build()?;
         let log_dirs = self.resolve_log_dirs()?;
         Ok(Self::ConfigType {
             log_dirs,
