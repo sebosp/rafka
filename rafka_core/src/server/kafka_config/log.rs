@@ -5,12 +5,16 @@
 
 use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
 use super::{ConfigSet, KafkaConfigError};
+use crate::common::config::topic_config::MESSAGE_DOWNCONVERSION_ENABLE_DOC;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
+use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
 use tracing::warn;
+
+pub const LOG_CONFIG_PREFIX: &str = "log.";
 
 pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_DIRS_PROP: &str = "log.dirs";
@@ -25,7 +29,6 @@ pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
 pub const LOG_CLEANUP_INTERVAL_MS_PROP: &str = "log.retention.check.interval.ms";
 pub const LOG_CLEANUP_POLICY_PROP: &str = "log.cleanup.policy";
 pub const LOG_CLEANER_THREADS_PROP: &str = "log.cleaner.threads";
-pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
 pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP: &str = "log.cleaner.dedupe.buffer.size";
 pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP: &str = "log.cleaner.io.buffer.load.factor";
 pub const LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP: &str = "log.cleaner.io.max.bytes.per.second";
@@ -43,6 +46,11 @@ pub const LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
     "log.flush.offset.checkpoint.interval.ms";
 pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
     "log.flush.start.offset.checkpoint.interval.ms";
+pub const LOG_MESSAGE_FORMAT_VERSION_PROP: &str =
+    concatcp!(LOG_CONFIG_PREFIX, "message.format.version");
+pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
+pub const LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP: &str =
+    concatcp!(LOG_CONFIG_PREFIX, "message.downconversion.enable");
 
 // RAFKA TODO: This is a topic property, should be moved to its proper place
 #[derive(Debug, Clone, PartialEq)]
@@ -87,7 +95,6 @@ pub enum DefaultLogConfigKey {
     LogCleanupIntervalMs,
     LogCleanupPolicy,
     LogCleanerThreads,
-    NumRecoveryThreadsPerDataDir,
     LogCleanerDedupeBufferSize,
     LogCleanerIoBufferSize,
     LogCleanerDedupeBufferLoadFactor,
@@ -103,6 +110,9 @@ pub enum DefaultLogConfigKey {
     LogFlushIntervalMs,
     LogFlushOffsetCheckpointIntervalMs,
     LogFlushStartOffsetCheckpointIntervalMs,
+    LogMessageFormatVersion,
+    NumRecoveryThreadsPerDataDir,
+    LogMessageDownConversionEnable,
 }
 
 impl fmt::Display for DefaultLogConfigKey {
@@ -121,9 +131,6 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogCleanupIntervalMs => write!(f, "{}", LOG_CLEANUP_INTERVAL_MS_PROP),
             Self::LogCleanupPolicy => write!(f, "{}", LOG_CLEANUP_POLICY_PROP),
             Self::LogCleanerThreads => write!(f, "{}", LOG_CLEANER_THREADS_PROP),
-            Self::NumRecoveryThreadsPerDataDir => {
-                write!(f, "{}", NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
-            },
             Self::LogCleanerDedupeBufferSize => {
                 write!(f, "{}", LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP)
             },
@@ -157,6 +164,13 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogFlushStartOffsetCheckpointIntervalMs => {
                 write!(f, "{}", LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
             },
+            Self::LogMessageFormatVersion => write!(f, "{}", LOG_MESSAGE_FORMAT_VERSION_PROP),
+            Self::NumRecoveryThreadsPerDataDir => {
+                write!(f, "{}", NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
+            },
+            Self::LogMessageDownConversionEnable => {
+                write!(f, "{}", LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
+            },
         }
     }
 }
@@ -179,7 +193,6 @@ impl FromStr for DefaultLogConfigKey {
             LOG_CLEANUP_INTERVAL_MS_PROP => Ok(Self::LogCleanupIntervalMs),
             LOG_CLEANUP_POLICY => Ok(Self::LogCleanupPolicy),
             LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
-            NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
             LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
             LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
             LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP => {
@@ -201,6 +214,9 @@ impl FromStr for DefaultLogConfigKey {
             LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
                 Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
             },
+            LOG_MESSAGE_FORMAT_VERSION_PROP => Ok(Self::LogMessageFormatVersion),
+            NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
+            LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP => Ok(Self::LogMessageDownConversionEnable),
             _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
         }
     }
@@ -223,7 +239,6 @@ pub struct DefaultLogConfigProperties {
     log_cleanup_interval_ms: ConfigDef<i64>,
     log_cleanup_policy: ConfigDef<String>,
     log_cleaner_threads: ConfigDef<i32>,
-    num_recovery_threads_per_data_dir: ConfigDef<i32>,
     log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
     log_cleaner_io_buffer_size: ConfigDef<i32>,
     log_cleaner_dedupe_buffer_load_factor: ConfigDef<f64>,
@@ -239,10 +254,14 @@ pub struct DefaultLogConfigProperties {
     log_flush_interval_ms: ConfigDef<i64>,
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
+    pub log_message_format_version: ConfigDef<String>,
+    num_recovery_threads_per_data_dir: ConfigDef<i32>,
+    pub log_message_down_conversion_enable: ConfigDef<bool>,
 }
 
 impl Default for DefaultLogConfigProperties {
     fn default() -> Self {
+        let inter_broker_protocol_version = ApiVersion.latest_version().to_string();
         Self {
             log_dir: ConfigDef::default()
                 .with_key(LOG_DIR_PROP)
@@ -375,14 +394,6 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
                 })),
-            num_recovery_threads_per_data_dir: ConfigDef::default()
-                .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The number of threads per data directory to be used for log recovery at \
-                     startup and flushing at shutdown",
-                ))
-                .with_default(1),
             log_cleaner_dedupe_buffer_size: ConfigDef::default()
                 .with_key(LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -518,6 +529,32 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
                 })),
+            log_message_format_version: ConfigDef::default()
+                .with_key(LOG_MESSAGE_FORMAT_VERSION_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "Specify the message format version the broker will use to append messages to \
+                     the logs. The value should be a valid ApiVersion. Some examples are: 0.8.2, \
+                     0.9.0.0, 0.10.0, check ApiVersion for more details. By setting a particular \
+                     message format version, the user is certifying that all the existing \
+                     messages on disk are smaller or equal than the specified version. Setting \
+                     this value incorrectly will cause consumers with older versions to break as \
+                     they will receive messages with a format that they don't understand.",
+                ))
+                .with_default(inter_broker_protocol_version),
+            num_recovery_threads_per_data_dir: ConfigDef::default()
+                .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "The number of threads per data directory to be used for log recovery at \
+                     startup and flushing at shutdown",
+                ))
+                .with_default(1),
+            log_message_down_conversion_enable: ConfigDef::default()
+                .with_key(LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
+                .with_importance(ConfigDefImportance::Low)
+                .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC.to_string())
+                .with_default(true),
         }
     }
 }
@@ -614,8 +651,14 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogFlushStartOffsetCheckpointIntervalMs => self
                 .log_flush_start_offset_checkpoint_interval_ms
                 .try_set_parsed_value(property_value)?,
+            Self::ConfigKey::LogMessageFormatVersion => {
+                self.log_message_format_version.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::NumRecoveryThreadsPerDataDir => {
                 self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
+            },
+            Self::ConfigKey::LogMessageDownConversionEnable => {
+                self.log_message_down_conversion_enable.try_set_parsed_value(property_value)?
             },
         };
         Ok(())
@@ -629,7 +672,6 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
         let log_cleanup_policy = self.resolve_log_cleanup_policy()?;
         let log_cleaner_threads = self.log_cleaner_threads.build()?;
-        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
         let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
         let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
         let log_cleaner_dedupe_buffer_load_factor =
@@ -649,6 +691,10 @@ impl ConfigSet for DefaultLogConfigProperties {
             self.log_flush_offset_checkpoint_interval_ms.build()?;
         let log_flush_start_offset_checkpoint_interval_ms =
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
+        let log_message_format_version = self.log_message_format_version.build()?;
+        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
+        let log_message_down_conversion_enable =
+            self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let log_dirs = self.resolve_log_dirs()?;
         Ok(Self::ConfigType {
             log_dirs,
@@ -659,7 +705,6 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_cleanup_interval_ms,
             log_cleanup_policy,
             log_cleaner_threads,
-            num_recovery_threads_per_data_dir,
             log_cleaner_dedupe_buffer_size,
             log_cleaner_io_buffer_size,
             log_cleaner_dedupe_buffer_load_factor,
@@ -675,6 +720,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
+            log_message_format_version,
+            num_recovery_threads_per_data_dir,
+            log_message_down_conversion_enable,
         })
     }
 }
@@ -773,7 +821,6 @@ pub struct DefaultLogConfig {
     pub log_cleanup_interval_ms: i64,
     pub log_cleanup_policy: Vec<LogCleanupPolicy>,
     pub log_cleaner_threads: i32,
-    pub num_recovery_threads_per_data_dir: i32,
     pub log_cleaner_dedupe_buffer_size: i64,
     pub log_cleaner_io_buffer_size: i32,
     pub log_cleaner_dedupe_buffer_load_factor: f64,
@@ -789,6 +836,9 @@ pub struct DefaultLogConfig {
     pub log_flush_interval_ms: i64,
     pub log_flush_offset_checkpoint_interval_ms: i32,
     pub log_flush_start_offset_checkpoint_interval_ms: i32,
+    pub log_message_format_version: ApiVersion,
+    pub num_recovery_threads_per_data_dir: i32,
+    pub log_message_down_conversion_enable: bool,
 }
 
 impl Default for DefaultLogConfig {
@@ -829,8 +879,12 @@ impl Default for DefaultLogConfig {
             config_properties.log_flush_offset_checkpoint_interval_ms.build().unwrap();
         let log_flush_start_offset_checkpoint_interval_ms =
             config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
+        let log_message_format_version =
+            config_properties.log_message_format_version.build().unwrap();
         let num_recovery_threads_per_data_dir =
             config_properties.num_recovery_threads_per_data_dir.build().unwrap();
+        let log_message_down_conversion_enable =
+            config_properties.log_message_down_conversion_enable.build().unwrap();
         Self {
             log_dirs,
             log_segment_bytes,
@@ -855,7 +909,9 @@ impl Default for DefaultLogConfig {
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
+            log_message_format_version,
             num_recovery_threads_per_data_dir,
+            log_message_down_conversion_enable,
         }
     }
 }
