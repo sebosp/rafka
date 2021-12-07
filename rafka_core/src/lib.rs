@@ -6,6 +6,7 @@ extern crate slog_term;
 #[macro_use]
 extern crate serde_derive;
 
+pub mod api;
 pub mod cluster;
 pub mod common;
 pub mod coordinator;
