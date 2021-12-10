@@ -415,9 +415,9 @@ impl From<KafkaApiVersion> for ApiVersionDefinition {
 }
 
 impl TryFrom<String> for ApiVersionDefinition {
+    // TODO: Maybe create its error enum
     type Error = String;
 
-    // TODO: Maybe create its error enum
     /// Tries to create an `ApiVersionDefinition` instance from an input string,  formats can be
     /// like: "0.8.0", "0.8.0.x", "0.10.0", "0.10.0-IV1").
     fn try_from(input: String) -> Result<Self, Self::Error> {
@@ -449,9 +449,6 @@ impl Default for ApiVersion {
                 .insert(key, *group.collect::<Vec<ApiVersionDefinition>>().last().unwrap().clone());
         }
 
-        // allVersions.map(v => v.version -> v).toMap ++ allVersions.groupBy(_.shortVersion).map {
-        // case (k, v) => k -> v.last }
-
         Self { version_map, all_versions }
     }
 }
@@ -467,8 +464,6 @@ impl ApiVersion {
             RecordVersion::V0 => KafkaApiVersion::Kafka0_8_0,
             RecordVersion::V1 => KafkaApiVersion::Kafka0_10_0Iv0,
             RecordVersion::V2 => KafkaApiVersion::Kafka0_11_0Iv0,
-            //_ => Err(format!("Invalid message format version {}", record_version)), This is
-            //unreachable, when the record_version is built, it would have already errored out.
         }
     }
 }
