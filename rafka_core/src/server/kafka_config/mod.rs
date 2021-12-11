@@ -3,11 +3,7 @@
 //! Changes:
 //! - No SSL, no SASL
 //! - RAFKA NOTE: ADVERTISED_LISTENERS are variable keys that need to be decomposed into actual
-//!   listeners Thus using serde_json need to be tweaked properly
-//! TODO:
-//! - The amount of properties is too big to handle sanely, adding, parsing, checking, too error
-//! prone, perhaps splitting them by cathegories is the next step, that would allow us to split
-//! into smaller files and specialize them there.
+//!   listeners, thus using serde_json need to be tweaked properly
 
 pub mod general;
 pub mod log;
@@ -23,6 +19,7 @@ use self::transaction_management::{
     TransactionConfig, TransactionConfigKey, TransactionConfigProperties,
 };
 use self::zookeeper::{ZookeeperConfig, ZookeeperConfigKey, ZookeeperConfigProperties};
+use crate::common::config::config_exception;
 use enum_iterator::IntoEnumIterator;
 use fs_err::File;
 use std::collections::HashMap;
@@ -126,6 +123,8 @@ pub enum KafkaConfigError {
     UnknownCleanupPolicy(String),
     #[error("Invalid Broker Compression Codec")]
     InvalidBrokerCompressionCodec(String),
+    #[error("Config Exception {0}")]
+    ConfigException(#[from] config_exception::ConfigException),
 }
 
 /// This implementation is only for testing, for example any I/O error is considered equal
@@ -155,6 +154,7 @@ impl PartialEq for KafkaConfigError {
             Self::InvalidBrokerCompressionCodec(lhs) => {
                 matches!(rhs, Self::InvalidBrokerCompressionCodec(rhs) if lhs == rhs)
             },
+            Self::ConfigException(lhs) => matches!(rhs, Self::ConfigException(rhs) if lhs == rhs),
         }
     }
 }
