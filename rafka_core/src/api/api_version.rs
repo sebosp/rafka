@@ -4,12 +4,19 @@
 //! The version changes are done as part of broker upgrades so that they store messages compatible
 //! with brokers that are pending upgrade.
 
+use crate::common::config::config_exception::ConfigException;
+use crate::common::config_def::Validator;
 use crate::common::record::record_version::RecordVersion;
+use crate::server::kafka_config::KafkaConfigError;
 use enum_iterator::IntoEnumIterator;
 use itertools::Itertools;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::fmt;
 
+/// An ApiVersionDefinition contains a unified version of the original source code DefaultApiVersion
+/// and LegacyApiVersion traits. This seems to be mostly used for documentation (or parsing from
+/// config).
 #[derive(Debug)]
 pub struct ApiVersionDefinition {
     id: i32,
@@ -19,66 +26,85 @@ pub struct ApiVersionDefinition {
     record_version: RecordVersion,
 }
 
-#[derive(Debug, IntoEnumIterator)]
+impl fmt::Display for ApiVersionDefinition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.version)
+    }
+}
+
+impl PartialEq for ApiVersionDefinition {
+    fn eq(&self, rhs: &Self) -> bool {
+        self.id == rhs.id
+    }
+}
+
+// TODO: MAybe KafkaApiVersion should contain the (ApiVersionDefinition) for each variant?
+#[derive(Clone, Debug, IntoEnumIterator, PartialEq)]
 pub enum KafkaApiVersion {
     Kafka0_8_0,
     Kafka0_8_1,
     Kafka0_8_2,
     Kafka0_9_0,
-    // 0.10.0-IV0 is introduced for KIP-31/32 which changes the message format.
+    /// 0.10.0-IV0 is introduced for KIP-31/32 which changes the message format.
     Kafka0_10_0Iv0,
-    // 0.10.0-IV1 is introduced for KIP-36(rack awareness) and KIP-43(SASL handshake).
+    /// 0.10.0-IV1 is introduced for KIP-36(rack awareness) and KIP-43(SASL handshake).
     Kafka0_10_0Iv1,
-    // introduced for JoinGroup protocol change in KIP-62
+    /// introduced for JoinGroup protocol change in KIP-62
     Kafka0_10_1Iv0,
-    // 0.10.1-IV1 is introduced for KIP-74(fetch response size limit).
+    /// 0.10.1-IV1 is introduced for KIP-74(fetch response size limit).
     Kafka0_10_1Iv1,
-    // introduced ListOffsetRequest v1 in KIP-79
+    /// introduced ListOffsetRequest v1 in KIP-79
     Kafka0_10_1Iv2,
-    // introduced UpdateMetadataRequest v3 in KIP-103
+    /// introduced UpdateMetadataRequest v3 in KIP-103
     Kafka0_10_2Iv0,
-    // KIP-98 (idempotent and transactional producer support)
+    /// KIP-98 (idempotent and transactional producer support)
     Kafka0_11_0Iv0,
-    // introduced DeleteRecordsRequest v0 and FetchRequest v4 in KIP-107
+    /// introduced DeleteRecordsRequest v0 and FetchRequest v4 in KIP-107
     Kafka0_11_0Iv1,
-    // Introduced leader epoch fetches to the replica fetcher via KIP-101
+    /// Introduced leader epoch fetches to the replica fetcher via KIP-101
     Kafka0_11_0Iv2,
-    // Introduced LeaderAndIsrRequest V1, UpdateMetadataRequest V4 and FetchRequest V6 via KIP-112
+    /// Introduced LeaderAndIsrRequest V1, UpdateMetadataRequest V4 and FetchRequest V6 via KIP-112
     Kafka1_0Iv0,
-    // Introduced DeleteGroupsRequest V0 via KIP-229, plus KIP-227 incremental fetch requests,
-    // and KafkaStorageException for fetch requests.
+    /// Introduced DeleteGroupsRequest V0 via KIP-229, plus KIP-227 incremental fetch requests,
+    /// and KafkaStorageException for fetch requests.
     Kafka1_1Iv0,
-    // Introduced OffsetsForLeaderEpochRequest V1 via KIP-279 (Fix log divergence between leader
-    // and follower after fast leader fail over)
+    /// Introduced OffsetsForLeaderEpochRequest V1 via KIP-279 (Fix log divergence between leader
+    /// and follower after fast leader fail over)
     Kafka2_0Iv0,
-    // Several request versions were bumped due to KIP-219 (Improve quota communication)
+    /// Several request versions were bumped due to KIP-219 (Improve quota communication)
     Kafka2_0Iv1,
-    // Introduced new schemas for group offset (v2) and group metadata (v2) (KIP-211)
+    /// Introduced new schemas for group offset (v2) and group metadata (v2) (KIP-211)
     Kafka2_1Iv0,
-    // New Fetch, OffsetsForLeaderEpoch, and ListOffsets schemas (KIP-320)
+    /// New Fetch, OffsetsForLeaderEpoch, and ListOffsets schemas (KIP-320)
     Kafka2_1Iv1,
-    // Support ZStandard Compression Codec (KIP-110)
+    /// Support ZStandard Compression Codec (KIP-110)
     Kafka2_1Iv2,
-    // Introduced broker generation (KIP-380), and
-    // LeaderAdnIsrRequest V2, UpdateMetadataRequest V5, StopReplicaRequest V1
+    /// Introduced broker generation (KIP-380), and
+    /// LeaderAdnIsrRequest V2, UpdateMetadataRequest V5, StopReplicaRequest V1
     Kafka2_2Iv0,
-    // New error code for ListOffsets when a new leader is lagging behind former HW (KIP-207)
+    /// New error code for ListOffsets when a new leader is lagging behind former HW (KIP-207)
     Kafka2_2Iv1,
-    // Introduced static membership.
+    /// Introduced static membership.
     Kafka2_3Iv0,
-    // Add rack_id to FetchRequest, preferred_read_replica to FetchResponse, and replica_id to
-    // OffsetsForLeaderRequest
+    /// Add rack_id to FetchRequest, preferred_read_replica to FetchResponse, and replica_id to
+    /// OffsetsForLeaderRequest
     Kafka2_3Iv1,
-    // Add adding_replicas and removing_replicas fields to LeaderAndIsrRequest
+    /// Add adding_replicas and removing_replicas fields to LeaderAndIsrRequest
     Kafka2_4Iv0,
-    // Flexible version support in inter-broker APIs
+    /// Flexible version support in inter-broker APIs
     Kafka2_4Iv1,
-    // No new APIs, equivalent to 2.4-IV1
+    /// No new APIs, equivalent to 2.4-IV1
     Kafka2_5Iv0,
-    // Introduced StopReplicaRequest V3 containing the leader epoch for each partition (KIP-570)
+    /// Introduced StopReplicaRequest V3 containing the leader epoch for each partition (KIP-570)
     Kafka2_6Iv0,
-    // Introduced feature versioning support (KIP-584)
+    /// Introduced feature versioning support (KIP-584)
     Kafka2_7Iv0,
+}
+
+impl Default for KafkaApiVersion {
+    fn default() -> Self {
+        Self::Kafka2_7Iv0
+    }
 }
 
 impl KafkaApiVersion {
@@ -374,7 +400,24 @@ impl KafkaApiVersion {
     }
 
     pub fn all_versions() -> Vec<ApiVersionDefinition> {
+        // From into_enum_iter crate documentation:
+        // Variants are yielded in the order they are defined in the enum.
         KafkaApiVersion::into_enum_iter().map(|val| val.into()).collect()
+    }
+}
+
+impl From<ApiVersionDefinition> for KafkaApiVersion {
+    fn from(version: ApiVersionDefinition) -> Self {
+        // We set it to the default() version, but we know that it would be overwritten
+        // by one of the variants as ApiVersionDefinition and KafkaApiVersion are a 1-to-1
+        // relationship, they both should be one type somehow. TODO.
+        let mut res = KafkaApiVersion::default();
+        for variant in KafkaApiVersion::into_enum_iter() {
+            if variant == KafkaApiVersion::from(version) {
+                res = variant;
+            }
+        }
+        res
     }
 }
 
@@ -414,6 +457,15 @@ impl From<KafkaApiVersion> for ApiVersionDefinition {
     }
 }
 
+impl TryFrom<String> for KafkaApiVersion {
+    // TODO: Maybe create its error enum
+    type Error = String;
+
+    fn try_from(input: String) -> Result<Self, Self::Error> {
+        Ok(KafkaApiVersion::from(ApiVersionDefinition::try_from(input)?))
+    }
+}
+
 impl TryFrom<String> for ApiVersionDefinition {
     // TODO: Maybe create its error enum
     type Error = String;
@@ -432,8 +484,12 @@ impl TryFrom<String> for ApiVersionDefinition {
     }
 }
 
+/// An ApiVersion collection, the all_versions contains all the `KafkaApiVersion` that are known.
+#[derive(Debug)]
 pub struct ApiVersion {
+    /// contains the full-version and short-version mapping to KafkaApiVersion
     version_map: HashMap<String, ApiVersionDefinition>,
+    /// contains all the `KafkaApiVersion` that are known.
     all_versions: Vec<ApiVersionDefinition>,
 }
 
@@ -464,6 +520,38 @@ impl ApiVersion {
             RecordVersion::V0 => KafkaApiVersion::Kafka0_8_0,
             RecordVersion::V1 => KafkaApiVersion::Kafka0_10_0Iv0,
             RecordVersion::V2 => KafkaApiVersion::Kafka0_11_0Iv0,
+        }
+    }
+}
+
+pub struct ApiVersionValidator {}
+
+impl fmt::Display for ApiVersionValidator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            ApiVersion::default()
+                .all_versions
+                .into_iter()
+                .map(|val| val.version)
+                .unique()
+                .join(", ")
+        )
+    }
+}
+
+impl Validator for ApiVersionValidator {
+    type Value = String;
+
+    fn ensure_valid(name: &str, proposed: Self::Value) -> Result<(), KafkaConfigError> {
+        match ApiVersionDefinition::try_from(proposed) {
+            Ok(val) => Ok(()),
+            Err(err) => Err(KafkaConfigError::ConfigException(ConfigException::InvalidValue(
+                name.to_string(),
+                proposed,
+                err,
+            ))),
         }
     }
 }
