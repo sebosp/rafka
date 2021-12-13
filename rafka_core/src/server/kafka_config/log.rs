@@ -5,11 +5,13 @@
 
 use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
 use super::{ConfigSet, KafkaConfigError};
+use crate::api::api_version::{ApiVersion, KafkaApiVersion};
 use crate::common::config::topic_config::MESSAGE_DOWNCONVERSION_ENABLE_DOC;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
 use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
+use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
 use tracing::warn;
@@ -261,7 +263,7 @@ pub struct DefaultLogConfigProperties {
 
 impl Default for DefaultLogConfigProperties {
     fn default() -> Self {
-        let inter_broker_protocol_version = ApiVersion.latest_version().to_string();
+        let inter_broker_protocol_version = ApiVersion::latest_version();
         Self {
             log_dir: ConfigDef::default()
                 .with_key(LOG_DIR_PROP)
@@ -541,7 +543,7 @@ impl Default for DefaultLogConfigProperties {
                      this value incorrectly will cause consumers with older versions to break as \
                      they will receive messages with a format that they don't understand.",
                 ))
-                .with_default(inter_broker_protocol_version),
+                .with_default(inter_broker_protocol_version.to_string()),
             num_recovery_threads_per_data_dir: ConfigDef::default()
                 .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -691,7 +693,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             self.log_flush_offset_checkpoint_interval_ms.build()?;
         let log_flush_start_offset_checkpoint_interval_ms =
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
-        let log_message_format_version = self.log_message_format_version.build()?;
+        let log_message_format_version = self.resolve_log_message_format_version()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
         let log_message_down_conversion_enable = self.log_message_down_conversion_enable.build()?;
         let log_dirs = self.resolve_log_dirs()?;
@@ -805,6 +807,14 @@ impl DefaultLogConfigProperties {
             None => Ok(vec![]),
         }
     }
+
+    pub fn resolve_log_message_format_version(
+        &mut self,
+    ) -> Result<KafkaApiVersion, KafkaConfigError> {
+        // self.log_message_format_version has a default, so it's safe to unwrap().
+        KafkaApiVersion::try_from(self.log_message_format_version.get_value().unwrap().clone())
+            .map_err(|err| KafkaConfigError::InvalidValue(err))
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -835,7 +845,7 @@ pub struct DefaultLogConfig {
     pub log_flush_interval_ms: i64,
     pub log_flush_offset_checkpoint_interval_ms: i32,
     pub log_flush_start_offset_checkpoint_interval_ms: i32,
-    pub log_message_format_version: ApiVersion,
+    pub log_message_format_version: KafkaApiVersion,
     pub num_recovery_threads_per_data_dir: i32,
     pub log_message_down_conversion_enable: bool,
 }
@@ -879,7 +889,7 @@ impl Default for DefaultLogConfig {
         let log_flush_start_offset_checkpoint_interval_ms =
             config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
         let log_message_format_version =
-            config_properties.log_message_format_version.build().unwrap();
+            config_properties.resolve_log_message_format_version().unwrap();
         let num_recovery_threads_per_data_dir =
             config_properties.num_recovery_threads_per_data_dir.build().unwrap();
         let log_message_down_conversion_enable =
