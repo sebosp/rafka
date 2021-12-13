@@ -586,6 +586,7 @@ impl ConfigSet for LogConfigProperties {
         Ok(())
     }
 }
+
 impl LogConfigProperties {
     // RAFKA TODO: Call this on build()
     pub fn resolve_follower_replication_throttled_replicas(

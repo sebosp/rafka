@@ -252,22 +252,24 @@ where
         }
     }
 
-    /// `resolve` attempts to resolve the current value, if the current value is None it tries to
-    /// find the value from a fallback property. If the fallback property is None, a
-    /// KafkaConfigError is returned.
+    /// `resolve` validates the current value if Some() variant, if None it fallbacks to `fallback`
+    /// If the fallback property is None, a KafkaConfigError is returned.
+    /// TODO: rename to `get_or_fallback`
     pub fn resolve(&mut self, fallback: &Self) -> Result<(), KafkaConfigError>
     where
         T: Clone,
     {
-        if let Some(_) = &self.value {
+        if self.value.is_some() {
             Ok(())
         } else {
-            info!(
-                "Unspecified property {}: attempting to use fallback property {} as value",
-                self.key, fallback.key
-            );
             match &fallback.value {
                 Some(_) => {
+                    info!(
+                        "Unspecified property {}: using fallback property {} with value, {:?}",
+                        self.key,
+                        fallback.key,
+                        fallback.get_value()
+                    );
                     self.value = fallback.value.clone();
                     Ok(())
                 },
