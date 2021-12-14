@@ -1,7 +1,8 @@
 //! From core/src/main/scala/kafka/log/LogConfig.scala
 
+use crate::api::api_version::{ApiVersionValidator, KafkaApiVersion};
 use crate::common::config::topic_config::*;
-use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use crate::common::config_def::{ConfigDef, ConfigDefImportance, Validator};
 use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
 use crate::server::kafka_config::general::GeneralConfigProperties;
@@ -245,9 +246,6 @@ pub struct LogConfigProperties {
 // (MessageTimestampTypeProp, STRING, Defaults.MessageTimestampType, in("CreateTime",
 // "LogAppendTime"), MEDIUM, MessageTimestampTypeDoc, KafkaConfig.LogMessageTimestampTypeProp)
 //
-// (MessageTimestampDifferenceMaxMsProp, LONG, Defaults.MessageTimestampDifferenceMaxMs, atLeast(0),
-// MEDIUM, MessageTimestampDifferenceMaxMsDoc, KafkaConfig.LogMessageTimestampDifferenceMaxMsProp)
-//
 impl Default for LogConfigProperties {
     fn default() -> Self {
         let broker_default_log_properties = DefaultLogConfigProperties::default();
@@ -381,8 +379,6 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &1, MAX_COMPACTION_LAG_MS_CONFIG)
                 })),
-            // (MaxMessageBytesProp, INT, Defaults.MaxMessageSize, atLeast(0), MEDIUM,
-            // MaxMessageSizeDoc, KafkaConfig.MessageMaxBytesProp)
             max_message_bytes: ConfigDef::default()
                 .with_key(MAX_MESSAGE_BYTES_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -393,8 +389,6 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, MAX_COMPACTION_LAG_MS_CONFIG)
                 })),
-            // (MessageDownConversionEnableProp, BOOLEAN, Defaults.MessageDownConversionEnable, LOW,
-            // MessageDownConversionEnableDoc, KafkaConfig.LogMessageDownConversionEnableProp)
             message_down_conversion_enable: ConfigDef::default()
                 .with_key(MESSAGE_DOWNCONVERSION_ENABLE_CONFIG)
                 .with_importance(ConfigDefImportance::Low)
@@ -405,15 +399,28 @@ impl Default for LogConfigProperties {
                         .build()
                         .unwrap(),
                 ),
-            // (MessageFormatVersionProp, STRING, Defaults.MessageFormatVersion,
-            // ApiVersionValidator, MEDIUM, MessageFormatVersionDoc,
-            // KafkaConfig.LogMessageFormatVersionProp)
             message_format_version: ConfigDef::default()
                 .with_key(MESSAGE_FORMAT_VERSION_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MESSAGE_FORMAT_VERSION_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    // TODO: Calling build() is a bad idea from outside, because there might be a
+                    // resolve_<field> and we may just forget to call it... Bad bad bad
+                    broker_default_log_properties
+                        .resolve_log_message_format_version()
+                        .unwrap()
+                        .to_string(),
+                )
+                .with_validator(Box::new(|data| {
+                    // safe to unwrap, we have a default
+                    ApiVersionValidator::ensure_valid(
+                        MESSAGE_FORMAT_VERSION_CONFIG,
+                        data.unwrap().clone(),
+                    )
+                })),
+            // (MessageTimestampDifferenceMaxMsProp, LONG, Defaults.MessageTimestampDifferenceMaxMs,
+            // atLeast(0), MEDIUM, MessageTimestampDifferenceMaxMsDoc,
+            // KafkaConfig.LogMessageTimestampDifferenceMaxMsProp)
             message_timestamp_difference_max_ms: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_CONFIG)
                 .with_importance()
@@ -613,7 +620,7 @@ impl LogConfigProperties {
 
 /// `LogConfig` is a topic-specific configuration, in constrant, the `DefaultLogConfig` is the
 /// broker-general configs (i.e. if topics are created, their default values is DefaultLogConfig.
-/// #[derive(Debug, Default)]
+#[derive(Debug, Default)]
 pub struct LogConfig {
     min_compaction_lag: u64,
     max_compaction_lag: u64,
@@ -638,7 +645,7 @@ pub struct LogConfig {
     min_in_sync_replicas: i32,
     compression_type: String,
     preallocate: bool,
-    message_format_version: String,
+    message_format_version: KafkaApiVersion,
     message_timestamp_type: String,
     message_timestamp_difference_max_ms: i64,
     leader_replication_throttled_replicas: String,

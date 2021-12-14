@@ -4,15 +4,14 @@
 //! The version changes are done as part of broker upgrades so that they store messages compatible
 //! with brokers that are pending upgrade.
 
-use crate::common::config::config_exception::ConfigException;
 use crate::common::config_def::Validator;
 use crate::common::record::record_version::RecordVersion;
 use crate::server::kafka_config::KafkaConfigError;
 use enum_iterator::IntoEnumIterator;
 use itertools::Itertools;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::fmt;
+use std::str::FromStr;
 
 /// An ApiVersionDefinition contains a unified version of the original source code DefaultApiVersion
 /// and LegacyApiVersion traits. This seems to be mostly used for documentation (or parsing from
@@ -104,6 +103,14 @@ pub enum KafkaApiVersion {
 impl Default for KafkaApiVersion {
     fn default() -> Self {
         Self::Kafka2_7Iv0
+    }
+}
+
+impl fmt::Display for KafkaApiVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // This looks pretty bad cloning, maybe it's again because KafkaApiVersion and
+        // ApiVersionDefinition are separated...
+        write!(f, "{}", ApiVersionDefinition::from(self.clone()).to_string())
     }
 }
 
@@ -457,29 +464,30 @@ impl From<KafkaApiVersion> for ApiVersionDefinition {
     }
 }
 
-impl TryFrom<String> for KafkaApiVersion {
-    // TODO: Maybe create its error enum
-    type Error = String;
+impl FromStr for KafkaApiVersion {
+    type Err = KafkaConfigError;
 
-    fn try_from(input: String) -> Result<Self, Self::Error> {
-        Ok(KafkaApiVersion::from(ApiVersionDefinition::try_from(input)?))
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        Ok(KafkaApiVersion::from(ApiVersionDefinition::from_str(input)?))
     }
 }
 
-impl TryFrom<String> for ApiVersionDefinition {
-    // TODO: Maybe create its error enum
-    type Error = String;
+impl FromStr for ApiVersionDefinition {
+    type Err = KafkaConfigError;
 
     /// Tries to create an `ApiVersionDefinition` instance from an input string,  formats can be
     /// like: "0.8.0", "0.8.0.x", "0.10.0", "0.10.0-IV1").
-    fn try_from(input: String) -> Result<Self, Self::Error> {
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
         let api_versions = ApiVersion::default();
         let version_segments: Vec<&str> = input.split('.').collect();
         let num_segments = if input.starts_with(&String::from("0.")) { 3 } else { 2 };
         let key = version_segments.iter().take(num_segments).join(".");
         match api_versions.version_map.get(&key) {
             Some(val) => Ok(*val.clone()),
-            None => Err(format!("Version `{}` is not a valid version", input)),
+            None => Err(KafkaConfigError::InvalidValue(format!(
+                "Version `{}` is not a valid version",
+                input
+            ))),
         }
     }
 }
@@ -545,13 +553,6 @@ impl Validator for ApiVersionValidator {
     type Value = String;
 
     fn ensure_valid(name: &str, proposed: Self::Value) -> Result<(), KafkaConfigError> {
-        match ApiVersionDefinition::try_from(proposed) {
-            Ok(val) => Ok(()),
-            Err(err) => Err(KafkaConfigError::ConfigException(ConfigException::InvalidValue(
-                name.to_string(),
-                proposed,
-                err,
-            ))),
-        }
+        Ok(ApiVersionDefinition::from_str(&proposed).map(|_| ())?)
     }
 }
