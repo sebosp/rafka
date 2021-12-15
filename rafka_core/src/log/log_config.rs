@@ -405,7 +405,9 @@ impl Default for LogConfigProperties {
                 .with_doc(MESSAGE_FORMAT_VERSION_DOC.to_string())
                 .with_default(
                     // TODO: Calling build() is a bad idea from outside, because there might be a
-                    // resolve_<field> and we may just forget to call it... Bad bad bad
+                    // resolve_<field> and we may just forget to call it... Perhaps one option is
+                    // to always create a resolve_<field> and impl there the custom resolver, if
+                    // there is no custom resolver, then simply call build()
                     broker_default_log_properties
                         .resolve_log_message_format_version()
                         .unwrap()
@@ -423,7 +425,7 @@ impl Default for LogConfigProperties {
             // KafkaConfig.LogMessageTimestampDifferenceMaxMsProp)
             message_timestamp_difference_max_ms: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC.to_string())
                 .with_default()
                 .with_validator(),

@@ -11,7 +11,6 @@ use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
 use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
-use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
 use tracing::warn;
@@ -50,6 +49,8 @@ pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
     "log.flush.start.offset.checkpoint.interval.ms";
 pub const LOG_MESSAGE_FORMAT_VERSION_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.format.version");
+pub const LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP: &str =
+    concatcp!(LOG_CONFIG_PREFIX, "message.timestamp.difference.max.ms");
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
 pub const LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.downconversion.enable");
@@ -113,6 +114,7 @@ pub enum DefaultLogConfigKey {
     LogFlushOffsetCheckpointIntervalMs,
     LogFlushStartOffsetCheckpointIntervalMs,
     LogMessageFormatVersion,
+    LogMessageTimestampDifferenceMaxMs,
     NumRecoveryThreadsPerDataDir,
     LogMessageDownConversionEnable,
 }
@@ -167,6 +169,9 @@ impl fmt::Display for DefaultLogConfigKey {
                 write!(f, "{}", LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
             },
             Self::LogMessageFormatVersion => write!(f, "{}", LOG_MESSAGE_FORMAT_VERSION_PROP),
+            Self::LogMessageTimestampDifferenceMaxMs => {
+                write!(f, "{}", LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP)
+            },
             Self::NumRecoveryThreadsPerDataDir => {
                 write!(f, "{}", NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
             },
@@ -217,6 +222,9 @@ impl FromStr for DefaultLogConfigKey {
                 Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
             },
             LOG_MESSAGE_FORMAT_VERSION_PROP => Ok(Self::LogMessageFormatVersion),
+            LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP => {
+                Ok(Self::LogMessageTimestampDifferenceMaxMs)
+            },
             NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
             LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP => Ok(Self::LogMessageDownConversionEnable),
             _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
@@ -257,6 +265,7 @@ pub struct DefaultLogConfigProperties {
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
     pub log_message_format_version: ConfigDef<String>,
+    pub log_message_timestamp_difference_max_ms: ConfigDef<i64>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
     pub log_message_down_conversion_enable: ConfigDef<bool>,
 }
@@ -544,6 +553,19 @@ impl Default for DefaultLogConfigProperties {
                      they will receive messages with a format that they don't understand.",
                 ))
                 .with_default(inter_broker_protocol_version.to_string()),
+            log_message_timestamp_difference_max_ms: ConfigDef::default()
+                .with_key(LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "The maximum difference allowed between the timestamp when a broker receives \
+                     a message and the timestamp specified in the message. If \
+                     log.message.timestamp.type=CreateTime, a message will be rejected if the \
+                     difference in timestamp exceeds this threshold. This configuration is \
+                     ignored if log.message.timestamp.type=LogAppendTime.The maximum timestamp \
+                     difference allowed should be no greater than log.retention.ms to avoid \
+                     unnecessarily frequent log rolling.",
+                ))
+                .with_default(i64::MAX),
             num_recovery_threads_per_data_dir: ConfigDef::default()
                 .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -656,6 +678,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogMessageFormatVersion => {
                 self.log_message_format_version.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::LogMessageTimestampDifferenceMaxMs => {
+                self.log_message_timestamp_difference_max_ms.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::NumRecoveryThreadsPerDataDir => {
                 self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
             },
@@ -694,6 +719,8 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_flush_start_offset_checkpoint_interval_ms =
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let log_message_format_version = self.resolve_log_message_format_version()?;
+        let log_message_timestamp_difference_max_ms =
+            self.log_message_timestamp_difference_max_ms.build()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
         let log_message_down_conversion_enable = self.log_message_down_conversion_enable.build()?;
         let log_dirs = self.resolve_log_dirs()?;
@@ -722,6 +749,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             log_message_format_version,
+            log_message_timestamp_difference_max_ms,
             num_recovery_threads_per_data_dir,
             log_message_down_conversion_enable,
         })
@@ -812,8 +840,7 @@ impl DefaultLogConfigProperties {
         &mut self,
     ) -> Result<KafkaApiVersion, KafkaConfigError> {
         // self.log_message_format_version has a default, so it's safe to unwrap().
-        KafkaApiVersion::try_from(self.log_message_format_version.get_value().unwrap().clone())
-            .map_err(|err| KafkaConfigError::InvalidValue(err))
+        KafkaApiVersion::from_str(&self.log_message_format_version.get_value().unwrap().clone())
     }
 }
 
@@ -846,6 +873,7 @@ pub struct DefaultLogConfig {
     pub log_flush_offset_checkpoint_interval_ms: i32,
     pub log_flush_start_offset_checkpoint_interval_ms: i32,
     pub log_message_format_version: KafkaApiVersion,
+    pub log_message_timestamp_difference_max_ms: i64,
     pub num_recovery_threads_per_data_dir: i32,
     pub log_message_down_conversion_enable: bool,
 }
@@ -890,6 +918,8 @@ impl Default for DefaultLogConfig {
             config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
         let log_message_format_version =
             config_properties.resolve_log_message_format_version().unwrap();
+        let log_message_timestamp_difference_max_ms =
+            config_properties.log_message_timestamp_difference_max_ms.build().unwrap();
         let num_recovery_threads_per_data_dir =
             config_properties.num_recovery_threads_per_data_dir.build().unwrap();
         let log_message_down_conversion_enable =
@@ -919,6 +949,7 @@ impl Default for DefaultLogConfig {
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             log_message_format_version,
+            log_message_timestamp_difference_max_ms,
             num_recovery_threads_per_data_dir,
             log_message_down_conversion_enable,
         }
