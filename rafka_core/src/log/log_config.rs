@@ -193,7 +193,7 @@ pub struct LogConfigProperties {
     max_message_bytes: ConfigDef<usize>,
     message_down_conversion_enable: ConfigDef<bool>,
     message_format_version: ConfigDef<String>,
-    message_timestamp_difference_max_ms: ConfigDef<u64>,
+    message_timestamp_difference_max_ms: ConfigDef<i64>,
     message_timestamp_type: ConfigDef<String>,
     min_cleanable_dirty_ratio: ConfigDef<f64>,
     min_compaction_lag_ms: ConfigDef<u64>,
@@ -427,13 +427,26 @@ impl Default for LogConfigProperties {
                 .with_key(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties
+                        .log_message_timestamp_difference_max_ms
+                        .build()
+                        .unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, DELETE_RETENTION_MS_CONFIG)
+                })),
             message_timestamp_type: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_TYPE_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MESSAGE_TIMESTAMP_TYPE_DOC.to_string())
-                .with_default()
+                .with_default(
+                    broker_default_log_properties
+                        .resolve_log_message_timestamp_type()
+                        .unwrap()
+                        .to_string(),
+                )
                 .with_validator(),
             min_cleanable_dirty_ratio: ConfigDef::default()
                 .with_key(MIN_CLEANABLE_DIRTY_RATIO_CONFIG)

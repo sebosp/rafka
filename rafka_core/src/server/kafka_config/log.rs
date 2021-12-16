@@ -49,6 +49,8 @@ pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
     "log.flush.start.offset.checkpoint.interval.ms";
 pub const LOG_MESSAGE_FORMAT_VERSION_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.format.version");
+pub const LOG_MESSAGE_TIMESTAMP_TYPE_PROP: &str =
+    concatcp!(LOG_CONFIG_PREFIX, "message.timestamp.type");
 pub const LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.timestamp.difference.max.ms");
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
@@ -83,6 +85,39 @@ impl fmt::Display for LogCleanupPolicy {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogMessageTimestampType {
+    CreateTime,
+    LogAppendTime,
+}
+
+impl FromStr for LogMessageTimestampType {
+    type Err = KafkaConfigError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match input {
+            "CreateTime" => Ok(Self::CreateTime),
+            "LogAppendTime" => Ok(Self::LogAppendTime),
+            _ => Err(KafkaConfigError::UnknownCleanupPolicy(input.to_string())),
+        }
+    }
+}
+
+impl fmt::Display for LogMessageTimestampType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CreateTime => write!(f, "CreateTime"),
+            Self::LogAppendTime => write!(f, "LogAppendTime"),
+        }
+    }
+}
+
+impl Default for LogMessageTimestampType {
+    fn default() -> Self {
+        Self::CreateTime
+    }
+}
+
 #[derive(Debug, IntoEnumIterator)]
 pub enum DefaultLogConfigKey {
     LogDir,
@@ -114,6 +149,7 @@ pub enum DefaultLogConfigKey {
     LogFlushOffsetCheckpointIntervalMs,
     LogFlushStartOffsetCheckpointIntervalMs,
     LogMessageFormatVersion,
+    LogMessageTimestampType,
     LogMessageTimestampDifferenceMaxMs,
     NumRecoveryThreadsPerDataDir,
     LogMessageDownConversionEnable,
@@ -169,6 +205,7 @@ impl fmt::Display for DefaultLogConfigKey {
                 write!(f, "{}", LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
             },
             Self::LogMessageFormatVersion => write!(f, "{}", LOG_MESSAGE_FORMAT_VERSION_PROP),
+            Self::LogMessageTimestampType => write!(f, "{}", LOG_MESSAGE_TIMESTAMP_TYPE_PROP),
             Self::LogMessageTimestampDifferenceMaxMs => {
                 write!(f, "{}", LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP)
             },
@@ -222,6 +259,7 @@ impl FromStr for DefaultLogConfigKey {
                 Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
             },
             LOG_MESSAGE_FORMAT_VERSION_PROP => Ok(Self::LogMessageFormatVersion),
+            LOG_MESSAGE_TIMESTAMP_TYPE_PROP => Ok(Self::LogMessageTimestampType),
             LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP => {
                 Ok(Self::LogMessageTimestampDifferenceMaxMs)
             },
@@ -265,6 +303,7 @@ pub struct DefaultLogConfigProperties {
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
     pub log_message_format_version: ConfigDef<String>,
+    pub log_message_timestamp_type: ConfigDef<String>,
     pub log_message_timestamp_difference_max_ms: ConfigDef<i64>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
     pub log_message_down_conversion_enable: ConfigDef<bool>,
@@ -395,7 +434,15 @@ impl Default for DefaultLogConfigProperties {
                      separated list of valid policies. Valid policies are: \"delete\" and \
                      \"compact\"",
                 ))
-                .with_default(String::from("delete")),
+                .with_default(String::from("delete"))
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::value_in_list(
+                        data,
+                        vec![&DELETE.to_string(), &COMPACT.to_string()],
+                        LOG_CLEANUP_POLICY_PROP,
+                    )
+                })),
             log_cleaner_threads: ConfigDef::default()
                 .with_key(LOG_CLEANER_THREADS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -553,6 +600,14 @@ impl Default for DefaultLogConfigProperties {
                      they will receive messages with a format that they don't understand.",
                 ))
                 .with_default(inter_broker_protocol_version.to_string()),
+            log_message_timestamp_type: ConfigDef::default()
+                .with_key(LOG_MESSAGE_TIMESTAMP_TYPE_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "Define whether the timestamp in the message is message create time or log \
+                     append time. The value should be either `CreateTime` or `LogAppendTime`",
+                ))
+                .with_default(LogMessageTimestampType::default().to_string()),
             log_message_timestamp_difference_max_ms: ConfigDef::default()
                 .with_key(LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -678,6 +733,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogMessageFormatVersion => {
                 self.log_message_format_version.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::LogMessageTimestampType => {
+                self.log_message_timestamp_type.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogMessageTimestampDifferenceMaxMs => {
                 self.log_message_timestamp_difference_max_ms.try_set_parsed_value(property_value)?
             },
@@ -719,6 +777,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_flush_start_offset_checkpoint_interval_ms =
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let log_message_format_version = self.resolve_log_message_format_version()?;
+        let log_message_timestamp_type = self.resolve_log_message_timestamp_type()?;
         let log_message_timestamp_difference_max_ms =
             self.log_message_timestamp_difference_max_ms.build()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
@@ -749,6 +808,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             log_message_format_version,
+            log_message_timestamp_type,
             log_message_timestamp_difference_max_ms,
             num_recovery_threads_per_data_dir,
             log_message_down_conversion_enable,
@@ -820,6 +880,13 @@ impl DefaultLogConfigProperties {
         Ok(millis)
     }
 
+    pub fn resolve_log_message_timestamp_type(
+        &mut self,
+    ) -> Result<LogMessageTimestampType, KafkaConfigError> {
+        // LogMessageTimestampType has a default, safe to unwrap
+        LogMessageTimestampType::from_str(self.log_message_timestamp_type.get_value().unwrap())
+    }
+
     pub fn resolve_log_cleanup_policy(
         &mut self,
     ) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
@@ -873,6 +940,7 @@ pub struct DefaultLogConfig {
     pub log_flush_offset_checkpoint_interval_ms: i32,
     pub log_flush_start_offset_checkpoint_interval_ms: i32,
     pub log_message_format_version: KafkaApiVersion,
+    pub log_message_timestamp_type: LogMessageTimestampType,
     pub log_message_timestamp_difference_max_ms: i64,
     pub num_recovery_threads_per_data_dir: i32,
     pub log_message_down_conversion_enable: bool,
@@ -918,6 +986,8 @@ impl Default for DefaultLogConfig {
             config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
         let log_message_format_version =
             config_properties.resolve_log_message_format_version().unwrap();
+        let log_message_timestamp_type =
+            config_properties.resolve_log_message_timestamp_type().unwrap();
         let log_message_timestamp_difference_max_ms =
             config_properties.log_message_timestamp_difference_max_ms.build().unwrap();
         let num_recovery_threads_per_data_dir =
@@ -949,6 +1019,7 @@ impl Default for DefaultLogConfig {
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
             log_message_format_version,
+            log_message_timestamp_type,
             log_message_timestamp_difference_max_ms,
             num_recovery_threads_per_data_dir,
             log_message_down_conversion_enable,
