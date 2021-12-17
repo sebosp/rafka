@@ -34,9 +34,11 @@ pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP: &str = "log.cleaner.dedupe.buffer
 pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP: &str = "log.cleaner.io.buffer.load.factor";
 pub const LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP: &str = "log.cleaner.io.max.bytes.per.second";
 pub const LOG_CLEANER_BACKOFF_MS_PROP: &str = "log.cleaner.backoff.ms";
+pub const LOG_CLEANER_MIN_CLEAN_RATIO_PROP: &str = "log.cleaner.min.cleanable.ratio";
 pub const LOG_CLEANER_ENABLE_PROP: &str = "log.cleaner.enable";
 pub const LOG_CLEANER_DELETE_RETENTION_MS_PROP: &str = "log.cleaner.delete.retention.ms";
-pub const LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP: &str = "log.cleaner.delete.retention.ms";
+pub const LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP: &str = "log.cleaner.min.compaction.lag.ms";
+pub const LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP: &str = "log.cleaner.max.compaction.lag.ms";
 pub const LOG_INDEX_INTERVAL_BYTES_PROP: &str = "log.index.interval.bytes";
 pub const LOG_FLUSH_INTERVAL_MESSAGES_PROP: &str = "log.flush.interval.messages";
 pub const LOG_DELETE_DELAY_MS_PROP: &str = "log.segment.delete.delay.ms";
@@ -138,6 +140,7 @@ pub enum DefaultLogConfigKey {
     LogCleanerDedupeBufferLoadFactor,
     LogCleanerIoMaxBytesPerSecond,
     LogCleanerBackoffMs,
+    LogCleanerMinCleanRatio,
     LogCleanerEnable,
     LogCleanerDeleteRetentionMs,
     LogCleanerMaxCompactionLagMs,
@@ -184,6 +187,7 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogCleanerBackoffMs => {
                 write!(f, "{}", LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
             },
+            Self::LogCleanerMinCleanRatio => write!(f, "{}", LOG_CLEANER_MIN_CLEAN_RATIO_PROP),
             Self::LogCleanerEnable => write!(f, "{}", LOG_CLEANER_ENABLE_PROP),
             Self::LogCleanerDeleteRetentionMs => {
                 write!(f, "{}", LOG_CLEANER_DELETE_RETENTION_MS_PROP)
@@ -244,6 +248,7 @@ impl FromStr for DefaultLogConfigKey {
             },
             LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP => Ok(Self::LogCleanerIoMaxBytesPerSecond),
             LOG_CLEANER_BACKOFF_MS_PROP => Ok(Self::LogCleanerBackoffMs),
+            LOG_CLEANER_MIN_CLEAN_RATIO => Ok(Self::LogCleanerMinCleanRatio),
             LOG_CLEANER_ENABLE_PROP => Ok(Self::LogCleanerEnable),
             LOG_CLEANER_DELETE_RETENTION_MS_PROP => Ok(Self::LogCleanerDeleteRetentionMs),
             LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMaxCompactionLagMs),
@@ -292,6 +297,7 @@ pub struct DefaultLogConfigProperties {
     log_cleaner_dedupe_buffer_load_factor: ConfigDef<f64>,
     log_cleaner_io_max_bytes_per_second: ConfigDef<f64>,
     log_cleaner_backoff_ms: ConfigDef<i64>,
+    pub log_cleaner_min_clean_ratio: ConfigDef<f64>,
     log_cleaner_enable: ConfigDef<bool>,
     pub log_cleaner_delete_retention_ms: ConfigDef<i64>,
     pub log_cleaner_max_compaction_lag_ms: ConfigDef<i64>,
@@ -439,7 +445,10 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::value_in_list(
                         data,
-                        vec![&DELETE.to_string(), &COMPACT.to_string()],
+                        vec![
+                            &LogCleanupPolicy::Delete.to_string(),
+                            &LogCleanupPolicy::Compact.to_string(),
+                        ],
                         LOG_CLEANUP_POLICY_PROP,
                     )
                 })),
@@ -494,6 +503,22 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, LOG_CLEANER_BACKOFF_MS_PROP)
                 })),
+            log_cleaner_min_clean_ratio: ConfigDef::default()
+                .with_key(LOG_CLEANER_MIN_CLEAN_RATIO_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(format!(
+                    "The minimum ratio of dirty log to total log for a log to eligible for \
+                     cleaning. If the {}  or the {} configurations are also specified, then the \
+                     log compactor considers the log eligible for compaction as soon as either: \
+                     (i) the dirty ratio threshold has been met and the log has had dirty \
+                     (uncompacted) records for at least the {} duration, or (ii) if the log has \
+                     had dirty (uncompacted) records for at most the {} period.",
+                    LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP,
+                    LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP,
+                    LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP,
+                    LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP
+                ))
+                .with_default(0.5),
             log_cleaner_enable: ConfigDef::default()
                 .with_key(LOG_CLEANER_ENABLE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -700,6 +725,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogCleanerBackoffMs => {
                 self.log_cleaner_backoff_ms.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::LogCleanerMinCleanRatio => {
+                self.log_cleaner_min_clean_ratio.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogCleanerEnable => {
                 self.log_cleaner_enable.try_set_parsed_value(property_value)?
             },
@@ -764,6 +792,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_cleaner_io_max_bytes_per_second =
             self.log_cleaner_io_max_bytes_per_second.build()?;
         let log_cleaner_backoff_ms = self.log_cleaner_backoff_ms.build()?;
+        let log_cleaner_min_clean_ratio = self.log_cleaner_min_clean_ratio.build()?;
         let log_cleaner_enable = self.log_cleaner_enable.build()?;
         let log_cleaner_delete_retention_ms = self.log_cleaner_delete_retention_ms.build()?;
         let log_cleaner_max_compaction_lag_ms = self.log_cleaner_max_compaction_lag_ms.build()?;
@@ -797,6 +826,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_cleaner_dedupe_buffer_load_factor,
             log_cleaner_io_max_bytes_per_second,
             log_cleaner_backoff_ms,
+            log_cleaner_min_clean_ratio,
             log_cleaner_enable,
             log_cleaner_delete_retention_ms,
             log_cleaner_max_compaction_lag_ms,
@@ -929,6 +959,7 @@ pub struct DefaultLogConfig {
     pub log_cleaner_dedupe_buffer_load_factor: f64,
     pub log_cleaner_io_max_bytes_per_second: f64,
     pub log_cleaner_backoff_ms: i64,
+    pub log_cleaner_min_clean_ratio: f64,
     pub log_cleaner_enable: bool,
     pub log_cleaner_delete_retention_ms: i64,
     pub log_cleaner_max_compaction_lag_ms: i64,
@@ -968,6 +999,8 @@ impl Default for DefaultLogConfig {
         let log_cleaner_io_max_bytes_per_second =
             config_properties.log_cleaner_io_max_bytes_per_second.build().unwrap();
         let log_cleaner_backoff_ms = config_properties.log_cleaner_backoff_ms.build().unwrap();
+        let log_cleaner_min_clean_ratio =
+            config_properties.log_cleaner_min_clean_ratio.build().unwrap();
         let log_cleaner_enable = config_properties.log_cleaner_enable.build().unwrap();
         let log_cleaner_delete_retention_ms =
             config_properties.log_cleaner_delete_retention_ms.build().unwrap();
@@ -1008,6 +1041,7 @@ impl Default for DefaultLogConfig {
             log_cleaner_dedupe_buffer_load_factor,
             log_cleaner_io_max_bytes_per_second,
             log_cleaner_backoff_ms,
+            log_cleaner_min_clean_ratio,
             log_cleaner_enable,
             log_cleaner_delete_retention_ms,
             log_cleaner_max_compaction_lag_ms,

@@ -231,9 +231,6 @@ pub struct LogConfigProperties {
 // (MinCompactionLagMsProp, LONG, Defaults.MinCompactionLagMs, atLeast(0), MEDIUM,
 // MinCompactionLagMsDoc, KafkaConfig.LogCleanerMinCompactionLagMsProp)
 //
-// (MinCleanableDirtyRatioProp, DOUBLE, Defaults.MinCleanableDirtyRatio, between(0, 1), MEDIUM,
-// MinCleanableRatioDoc, KafkaConfig.LogCleanerMinCleanRatioProp)
-//
 // (UncleanLeaderElectionEnableProp, BOOLEAN, Defaults.UncleanLeaderElectionEnable, MEDIUM,
 // UncleanLeaderElectionEnableDoc, KafkaConfig.UncleanLeaderElectionEnableProp)
 //
@@ -420,9 +417,6 @@ impl Default for LogConfigProperties {
                         data.unwrap().clone(),
                     )
                 })),
-            // (MessageTimestampDifferenceMaxMsProp, LONG, Defaults.MessageTimestampDifferenceMaxMs,
-            // atLeast(0), MEDIUM, MessageTimestampDifferenceMaxMsDoc,
-            // KafkaConfig.LogMessageTimestampDifferenceMaxMsProp)
             message_timestamp_difference_max_ms: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -447,13 +441,22 @@ impl Default for LogConfigProperties {
                         .unwrap()
                         .to_string(),
                 )
-                .with_validator(),
+                .with_validator(Box::new(|data| {
+                    ConfigDef::value_in_list(
+                        data,
+                        vec![&String::from("CreateTime"), &String::from("LogAppendTime")],
+                        MESSAGE_TIMESTAMP_TYPE_CONFIG,
+                    )
+                })),
+            // (MinCleanableDirtyRatioProp, DOUBLE, Defaults.MinCleanableDirtyRatio, between(0, 1),
+            // MEDIUM, MinCleanableRatioDoc, KafkaConfig.LogCleanerMinCleanRatioProp)
             min_cleanable_dirty_ratio: ConfigDef::default()
                 .with_key(MIN_CLEANABLE_DIRTY_RATIO_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MIN_CLEANABLE_DIRTY_RATIO_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties.log_cleaner_min_clean_ratio.build().unwrap(),
+                ),
             min_compaction_lag_ms: ConfigDef::default()
                 .with_key(MIN_COMPACTION_LAG_MS_CONFIG)
                 .with_importance()
