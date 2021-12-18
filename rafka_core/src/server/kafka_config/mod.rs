@@ -125,6 +125,8 @@ pub enum KafkaConfigError {
     InvalidBrokerCompressionCodec(String),
     #[error("Config Exception {0}")]
     ConfigException(#[from] config_exception::ConfigException),
+    #[error("Invalid Log Message Timestamp Type")]
+    InvalidLogMessageTimestampType(String),
 }
 
 /// This implementation is only for testing, for example any I/O error is considered equal
@@ -155,6 +157,9 @@ impl PartialEq for KafkaConfigError {
                 matches!(rhs, Self::InvalidBrokerCompressionCodec(rhs) if lhs == rhs)
             },
             Self::ConfigException(lhs) => matches!(rhs, Self::ConfigException(rhs) if lhs == rhs),
+            Self::InvalidLogMessageTimestampType(lhs) => {
+                matches!(rhs, Self::InvalidLogMessageTimestampType(rhs) if lhs == rhs)
+            },
         }
     }
 }
