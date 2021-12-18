@@ -214,6 +214,34 @@ where
         }
     }
 
+    /// Checks a value is between both the upper (inclusive) and lower bound
+    pub fn between(data: Option<&T>, min: &T, max: &T, key: &str) -> Result<(), KafkaConfigError>
+    where
+        T: PartialEq + PartialOrd + fmt::Display,
+    {
+        match data {
+            Some(val) => {
+                if val < min {
+                    Err(KafkaConfigError::InvalidValue(format!(
+                        "{}: '{}' should be at least {}",
+                        key, val, min
+                    )))
+                } else if val > max {
+                    Err(KafkaConfigError::InvalidValue(format!(
+                        "{}: '{}' should be no more than {}",
+                        key, val, max
+                    )))
+                } else {
+                    Ok(())
+                }
+            },
+            None => {
+                error!("Running between() with no value provided for ConfigDef {:?}", data);
+                Err(KafkaConfigError::ComparisonOnNone(key.to_string()))
+            },
+        }
+    }
+
     pub fn get_value(&self) -> Option<&T> {
         self.value.as_ref()
     }
