@@ -6,7 +6,9 @@ use crate::common::config_def::{ConfigDef, ConfigDefImportance, Validator};
 use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
 use crate::server::kafka_config::general::GeneralConfigProperties;
-use crate::server::kafka_config::log::{DefaultLogConfig, DefaultLogConfigProperties};
+use crate::server::kafka_config::log::{
+    DefaultLogConfig, DefaultLogConfigProperties, LogMessageTimestampType,
+};
 use crate::server::kafka_config::transaction_management::DEFAULT_COMPRESSION_TYPE;
 use crate::server::kafka_config::{ConfigSet, KafkaConfigError};
 use enum_iterator::IntoEnumIterator;
@@ -196,7 +198,7 @@ pub struct LogConfigProperties {
     message_timestamp_difference_max_ms: ConfigDef<i64>,
     message_timestamp_type: ConfigDef<String>,
     min_cleanable_dirty_ratio: ConfigDef<f64>,
-    min_compaction_lag_ms: ConfigDef<u64>,
+    min_compaction_lag_ms: ConfigDef<i64>,
     min_in_sync_replicas: ConfigDef<i32>,
     pre_allocate_enable: ConfigDef<bool>,
     retention_bytes: ConfigDef<u64>,
@@ -227,9 +229,6 @@ pub struct LogConfigProperties {
 // (RetentionMsProp, LONG, Defaults.RetentionMs, atLeast(-1), MEDIUM, RetentionMsDoc,
 // KafkaConfig.LogRetentionTimeMillisProp) // // can be negative. See
 // kafka.log.LogManager.cleanupExpiredSegments
-//
-// (MinCompactionLagMsProp, LONG, Defaults.MinCompactionLagMs, atLeast(0), MEDIUM,
-// MinCompactionLagMsDoc, KafkaConfig.LogCleanerMinCompactionLagMsProp)
 //
 // (UncleanLeaderElectionEnableProp, BOOLEAN, Defaults.UncleanLeaderElectionEnable, MEDIUM,
 // UncleanLeaderElectionEnableDoc, KafkaConfig.UncleanLeaderElectionEnableProp)
@@ -442,27 +441,37 @@ impl Default for LogConfigProperties {
                         .to_string(),
                 )
                 .with_validator(Box::new(|data| {
+                    // RAFKA TODO: Technically the FromStr would take care of this, but it doesn't
+                    // show the error on "should be in list [x, y]
                     ConfigDef::value_in_list(
                         data,
-                        vec![&String::from("CreateTime"), &String::from("LogAppendTime")],
+                        vec![
+                            &LogMessageTimestampType::CreateTime.to_string(),
+                            &LogMessageTimestampType::LogAppendTime.to_string(),
+                        ],
                         MESSAGE_TIMESTAMP_TYPE_CONFIG,
                     )
                 })),
-            // (MinCleanableDirtyRatioProp, DOUBLE, Defaults.MinCleanableDirtyRatio, between(0, 1),
-            // MEDIUM, MinCleanableRatioDoc, KafkaConfig.LogCleanerMinCleanRatioProp)
             min_cleanable_dirty_ratio: ConfigDef::default()
                 .with_key(MIN_CLEANABLE_DIRTY_RATIO_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MIN_CLEANABLE_DIRTY_RATIO_DOC.to_string())
                 .with_default(
                     broker_default_log_properties.log_cleaner_min_clean_ratio.build().unwrap(),
-                ),
+                )
+                .with_validator(Box::new(|data| {
+                    ConfigDef::between(data, &0f64, &1f64, MIN_CLEANABLE_DIRTY_RATIO_CONFIG)
+                })),
             min_compaction_lag_ms: ConfigDef::default()
                 .with_key(MIN_COMPACTION_LAG_MS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MIN_COMPACTION_LAG_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties
+                        .log_cleaner_min_compaction_lag_ms
+                        .build()
+                        .unwrap(),
+                ),
             min_in_sync_replicas: ConfigDef::default()
                 .with_key(MIN_IN_SYNC_REPLICAS_CONFIG)
                 .with_importance()
@@ -640,8 +649,6 @@ impl LogConfigProperties {
 /// broker-general configs (i.e. if topics are created, their default values is DefaultLogConfig.
 #[derive(Debug, Default)]
 pub struct LogConfig {
-    min_compaction_lag: u64,
-    max_compaction_lag: u64,
     segment_size: usize,
     segment_ms: i64,
     segment_jitter_ms: i64,
@@ -656,6 +663,7 @@ pub struct LogConfig {
     delete_retention_ms: i64,
     compaction_lag_ms: i64,
     max_compaction_lag_ms: i64,
+    min_compaction_lag_ms: i64,
     min_cleanable_ratio: f64,
     compact: String,
     delete: bool,
@@ -673,13 +681,13 @@ pub struct LogConfig {
 
 impl LogConfig {
     pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
-        if self.min_compaction_lag > self.max_compaction_lag {
+        if self.min_compaction_lag_ms > self.max_compaction_lag_ms {
             return Err(KafkaConfigError::InvalidValue(format!(
                 "conflict topic config setting {} ({}) > {} ({})",
                 MIN_COMPACTION_LAG_MS_CONFIG,
-                self.min_compaction_lag,
+                self.min_compaction_lag_ms,
                 MAX_COMPACTION_LAG_MS_CONFIG,
-                self.max_compaction_lag,
+                self.max_compaction_lag_ms,
             )));
         }
         Ok(())

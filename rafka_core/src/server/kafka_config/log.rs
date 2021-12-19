@@ -143,6 +143,7 @@ pub enum DefaultLogConfigKey {
     LogCleanerMinCleanRatio,
     LogCleanerEnable,
     LogCleanerDeleteRetentionMs,
+    LogCleanerMinCompactionLagMs,
     LogCleanerMaxCompactionLagMs,
     LogIndexIntervalBytes,
     LogFlushIntervalMessages,
@@ -191,6 +192,9 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogCleanerEnable => write!(f, "{}", LOG_CLEANER_ENABLE_PROP),
             Self::LogCleanerDeleteRetentionMs => {
                 write!(f, "{}", LOG_CLEANER_DELETE_RETENTION_MS_PROP)
+            },
+            Self::LogCleanerMinCompactionLagMs => {
+                write!(f, "{}", LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP)
             },
             Self::LogCleanerMaxCompactionLagMs => {
                 write!(f, "{}", LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP)
@@ -251,6 +255,7 @@ impl FromStr for DefaultLogConfigKey {
             LOG_CLEANER_MIN_CLEAN_RATIO => Ok(Self::LogCleanerMinCleanRatio),
             LOG_CLEANER_ENABLE_PROP => Ok(Self::LogCleanerEnable),
             LOG_CLEANER_DELETE_RETENTION_MS_PROP => Ok(Self::LogCleanerDeleteRetentionMs),
+            LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMinCompactionLagMs),
             LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMaxCompactionLagMs),
             LOG_INDEX_INTERVAL_BYTES_PROP => Ok(Self::LogIndexIntervalBytes),
             LOG_FLUSH_INTERVAL_MESSAGES_PROP => Ok(Self::LogFlushIntervalMessages),
@@ -300,6 +305,7 @@ pub struct DefaultLogConfigProperties {
     pub log_cleaner_min_clean_ratio: ConfigDef<f64>,
     log_cleaner_enable: ConfigDef<bool>,
     pub log_cleaner_delete_retention_ms: ConfigDef<i64>,
+    pub log_cleaner_min_compaction_lag_ms: ConfigDef<i64>,
     pub log_cleaner_max_compaction_lag_ms: ConfigDef<i64>,
     pub log_index_interval_bytes: ConfigDef<i32>,
     pub log_flush_interval_messages: ConfigDef<i64>,
@@ -534,6 +540,14 @@ impl Default for DefaultLogConfigProperties {
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(String::from("How long are delete records retained?"))
                 .with_default(24 * 60 * 60 * 1000),
+            log_cleaner_min_compaction_lag_ms: ConfigDef::default()
+                .with_key(LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "The minimum time a message will remain uncompacted in the log. Only \
+                     applicable for logs that are being compacted.",
+                ))
+                .with_default(0),
             log_cleaner_max_compaction_lag_ms: ConfigDef::default()
                 .with_key(LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -734,6 +748,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogCleanerDeleteRetentionMs => {
                 self.log_cleaner_delete_retention_ms.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::LogCleanerMinCompactionLagMs => {
+                self.log_cleaner_min_compaction_lag_ms.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogCleanerMaxCompactionLagMs => {
                 self.log_cleaner_max_compaction_lag_ms.try_set_parsed_value(property_value)?
             },
@@ -795,6 +812,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_cleaner_min_clean_ratio = self.log_cleaner_min_clean_ratio.build()?;
         let log_cleaner_enable = self.log_cleaner_enable.build()?;
         let log_cleaner_delete_retention_ms = self.log_cleaner_delete_retention_ms.build()?;
+        let log_cleaner_min_compaction_lag_ms = self.log_cleaner_min_compaction_lag_ms.build()?;
         let log_cleaner_max_compaction_lag_ms = self.log_cleaner_max_compaction_lag_ms.build()?;
         let log_index_interval_bytes = self.log_index_interval_bytes.build()?;
         let log_flush_interval_messages = self.log_flush_interval_messages.build()?;
@@ -829,6 +847,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_cleaner_min_clean_ratio,
             log_cleaner_enable,
             log_cleaner_delete_retention_ms,
+            log_cleaner_min_compaction_lag_ms,
             log_cleaner_max_compaction_lag_ms,
             log_index_interval_bytes,
             log_flush_interval_messages,
@@ -962,6 +981,7 @@ pub struct DefaultLogConfig {
     pub log_cleaner_min_clean_ratio: f64,
     pub log_cleaner_enable: bool,
     pub log_cleaner_delete_retention_ms: i64,
+    pub log_cleaner_min_compaction_lag_ms: i64,
     pub log_cleaner_max_compaction_lag_ms: i64,
     pub log_index_interval_bytes: i32,
     pub log_flush_interval_messages: i64,
@@ -1004,6 +1024,8 @@ impl Default for DefaultLogConfig {
         let log_cleaner_enable = config_properties.log_cleaner_enable.build().unwrap();
         let log_cleaner_delete_retention_ms =
             config_properties.log_cleaner_delete_retention_ms.build().unwrap();
+        let log_cleaner_min_compaction_lag_ms =
+            config_properties.log_cleaner_min_compaction_lag_ms.build().unwrap();
         let log_cleaner_max_compaction_lag_ms =
             config_properties.log_cleaner_max_compaction_lag_ms.build().unwrap();
         let log_index_interval_bytes = config_properties.log_index_interval_bytes.build().unwrap();
@@ -1044,6 +1066,7 @@ impl Default for DefaultLogConfig {
             log_cleaner_min_clean_ratio,
             log_cleaner_enable,
             log_cleaner_delete_retention_ms,
+            log_cleaner_min_compaction_lag_ms,
             log_cleaner_max_compaction_lag_ms,
             log_index_interval_bytes,
             log_flush_interval_messages,
