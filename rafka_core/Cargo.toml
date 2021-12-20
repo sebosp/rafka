@@ -11,7 +11,6 @@ slog = "2.7.0"
 slog-term = "2.6.0"
 futures = "0.3.8"
 tokio = { version = "1", features = ["full"] }
-failure = "0.1"
 tracing = "0.1"
 tracing-futures = "0.2"
 tracing-log = { version = "0.1", features = ["env_logger"] }
@@ -39,5 +38,5 @@ path = "../rafka_derive"
 
 [dev-dependencies]
 test-env-log = { version = "0.2", features = ["trace"] }
-env_logger = "0.8"
-tracing-subscriber = { version = "0.2", features = ["chrono", "env-filter", "fmt"] }
+env_logger = "0.9"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter", "fmt"] }
