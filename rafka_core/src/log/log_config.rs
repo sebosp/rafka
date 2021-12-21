@@ -233,9 +233,6 @@ pub struct LogConfigProperties {
 // (UncleanLeaderElectionEnableProp, BOOLEAN, Defaults.UncleanLeaderElectionEnable, MEDIUM,
 // UncleanLeaderElectionEnableDoc, KafkaConfig.UncleanLeaderElectionEnableProp)
 //
-// (MinInSyncReplicasProp, INT, Defaults.MinInSyncReplicas, atLeast(1), MEDIUM,
-// MinInSyncReplicasDoc, KafkaConfig.MinInSyncReplicasProp)
-//
 // (PreAllocateEnableProp, BOOLEAN, Defaults.PreAllocateEnable, MEDIUM, PreAllocateEnableDoc,
 // KafkaConfig.LogPreAllocateProp)
 //
@@ -472,12 +469,18 @@ impl Default for LogConfigProperties {
                         .build()
                         .unwrap(),
                 ),
+            // (MinInSyncReplicasProp, INT, Defaults.MinInSyncReplicas, atLeast(1), MEDIUM,
+            // MinInSyncReplicasDoc, KafkaConfig.MinInSyncReplicasProp)
             min_in_sync_replicas: ConfigDef::default()
                 .with_key(MIN_IN_SYNC_REPLICAS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MIN_IN_SYNC_REPLICAS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(broker_default_log_properties.min_in_sync_replicas.build().unwrap())
+                .with_validator(Box::new(|data| {
+                    // NOTE: This being a usize it cannot be lower than 0...
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, MAX_COMPACTION_LAG_MS_CONFIG)
+                })),
             pre_allocate_enable: ConfigDef::default()
                 .with_key(PREALLOCATE_ENABLE_CONFIG)
                 .with_importance()

@@ -56,6 +56,7 @@ pub const LOG_MESSAGE_TIMESTAMP_TYPE_PROP: &str =
 pub const LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.timestamp.difference.max.ms");
 pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.per.data.dir";
+pub const MIN_IN_SYNC_REPLICAS_PROP: &str = "min.insync.replicas";
 pub const LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.downconversion.enable");
 
@@ -156,6 +157,7 @@ pub enum DefaultLogConfigKey {
     LogMessageTimestampType,
     LogMessageTimestampDifferenceMaxMs,
     NumRecoveryThreadsPerDataDir,
+    MinInSyncReplicas,
     LogMessageDownConversionEnable,
 }
 
@@ -220,6 +222,7 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::NumRecoveryThreadsPerDataDir => {
                 write!(f, "{}", NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
             },
+            Self::MinInSyncReplicas => write!(f, "{}", MIN_IN_SYNC_REPLICAS_PROP),
             Self::LogMessageDownConversionEnable => {
                 write!(f, "{}", LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
             },
@@ -274,6 +277,7 @@ impl FromStr for DefaultLogConfigKey {
                 Ok(Self::LogMessageTimestampDifferenceMaxMs)
             },
             NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
+            MIN_IN_SYNC_REPLICAS_PROP => Ok(Self::MinInSyncReplicas),
             LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP => Ok(Self::LogMessageDownConversionEnable),
             _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
         }
@@ -318,6 +322,7 @@ pub struct DefaultLogConfigProperties {
     pub log_message_timestamp_type: ConfigDef<String>,
     pub log_message_timestamp_difference_max_ms: ConfigDef<i64>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
+    pub min_in_sync_replicas: ConfigDef<i32>,
     pub log_message_down_conversion_enable: ConfigDef<bool>,
 }
 
@@ -668,6 +673,26 @@ impl Default for DefaultLogConfigProperties {
                      startup and flushing at shutdown",
                 ))
                 .with_default(1),
+            min_in_sync_replicas: ConfigDef::default()
+                .with_key(MIN_IN_SYNC_REPLICAS_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from(
+                    "When a producer sets acks to \"all\" (or \"-1\"),  min.insync.replicas \
+                     specifies the minimum number of replicas that must acknowledge  a write for \
+                     the write to be considered successful. If this minimum cannot be met,  then \
+                     the producer will raise an exception (either NotEnoughReplicas or  \
+                     NotEnoughReplicasAfterAppend). When used together, min.insync.replicas and \
+                     acks  allow you to enforce greater durability guarantees. A typical scenario \
+                     would be to  create a topic with a replication factor of 3, set \
+                     min.insync.replicas to 2, and  produce with acks of \"all\". This will \
+                     ensure that the producer raises an exception  if a majority of replicas do \
+                     not receive a write.",
+                ))
+                .with_default(1)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, MIN_IN_SYNC_REPLICAS_PROP)
+                })),
             log_message_down_conversion_enable: ConfigDef::default()
                 .with_key(LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
                 .with_importance(ConfigDefImportance::Low)
@@ -787,6 +812,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::NumRecoveryThreadsPerDataDir => {
                 self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::MinInSyncReplicas => {
+                self.min_in_sync_replicas.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogMessageDownConversionEnable => {
                 self.log_message_down_conversion_enable.try_set_parsed_value(property_value)?
             },
@@ -828,6 +856,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_message_timestamp_difference_max_ms =
             self.log_message_timestamp_difference_max_ms.build()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
+        let min_in_sync_replicas = self.min_in_sync_replicas.build()?;
         let log_message_down_conversion_enable = self.log_message_down_conversion_enable.build()?;
         let log_dirs = self.resolve_log_dirs()?;
         Ok(Self::ConfigType {
@@ -860,6 +889,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_message_timestamp_type,
             log_message_timestamp_difference_max_ms,
             num_recovery_threads_per_data_dir,
+            min_in_sync_replicas,
             log_message_down_conversion_enable,
         })
     }
@@ -994,6 +1024,7 @@ pub struct DefaultLogConfig {
     pub log_message_timestamp_type: LogMessageTimestampType,
     pub log_message_timestamp_difference_max_ms: i64,
     pub num_recovery_threads_per_data_dir: i32,
+    pub min_in_sync_replicas: bool,
     pub log_message_down_conversion_enable: bool,
 }
 
@@ -1047,6 +1078,7 @@ impl Default for DefaultLogConfig {
             config_properties.log_message_timestamp_difference_max_ms.build().unwrap();
         let num_recovery_threads_per_data_dir =
             config_properties.num_recovery_threads_per_data_dir.build().unwrap();
+        let min_in_sync_replicas = config_properties.min_in_sync_replicas.build().unwrap();
         let log_message_down_conversion_enable =
             config_properties.log_message_down_conversion_enable.build().unwrap();
         Self {
@@ -1079,6 +1111,7 @@ impl Default for DefaultLogConfig {
             log_message_timestamp_type,
             log_message_timestamp_difference_max_ms,
             num_recovery_threads_per_data_dir,
+            min_in_sync_replicas,
             log_message_down_conversion_enable,
         }
     }
