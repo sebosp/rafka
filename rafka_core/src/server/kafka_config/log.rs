@@ -49,6 +49,7 @@ pub const LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
     "log.flush.offset.checkpoint.interval.ms";
 pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP: &str =
     "log.flush.start.offset.checkpoint.interval.ms";
+pub const LOG_PRE_ALLOCATE_PROP: &str = "log.preallocate";
 pub const LOG_MESSAGE_FORMAT_VERSION_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.format.version");
 pub const LOG_MESSAGE_TIMESTAMP_TYPE_PROP: &str =
@@ -153,6 +154,7 @@ pub enum DefaultLogConfigKey {
     LogFlushIntervalMs,
     LogFlushOffsetCheckpointIntervalMs,
     LogFlushStartOffsetCheckpointIntervalMs,
+    LogPreAllocateEnable,
     LogMessageFormatVersion,
     LogMessageTimestampType,
     LogMessageTimestampDifferenceMaxMs,
@@ -214,6 +216,7 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogFlushStartOffsetCheckpointIntervalMs => {
                 write!(f, "{}", LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
             },
+            Self::LogPreAllocateEnable => write!(f, "{}", LOG_PRE_ALLOCATE_PROP),
             Self::LogMessageFormatVersion => write!(f, "{}", LOG_MESSAGE_FORMAT_VERSION_PROP),
             Self::LogMessageTimestampType => write!(f, "{}", LOG_MESSAGE_TIMESTAMP_TYPE_PROP),
             Self::LogMessageTimestampDifferenceMaxMs => {
@@ -271,6 +274,7 @@ impl FromStr for DefaultLogConfigKey {
             LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
                 Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
             },
+            LOG_PRE_ALLOCATE_PROP => Ok(Self::LogPreAllocateEnable),
             LOG_MESSAGE_FORMAT_VERSION_PROP => Ok(Self::LogMessageFormatVersion),
             LOG_MESSAGE_TIMESTAMP_TYPE_PROP => Ok(Self::LogMessageTimestampType),
             LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP => {
@@ -318,6 +322,7 @@ pub struct DefaultLogConfigProperties {
     log_flush_interval_ms: ConfigDef<i64>,
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
+    pub log_pre_allocate_enable: ConfigDef<bool>,
     pub log_message_format_version: ConfigDef<String>,
     pub log_message_timestamp_type: ConfigDef<String>,
     pub log_message_timestamp_difference_max_ms: ConfigDef<i64>,
@@ -631,6 +636,14 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
                 })),
+            log_pre_allocate_enable: ConfigDef::default()
+                .with_key(LOG_PRE_ALLOCATE_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from(
+                    "Should pre allocate file when create new segment? If you are using Kafka on \
+                     Windows, you probably need to set it to true.",
+                ))
+                .with_default(false),
             log_message_format_version: ConfigDef::default()
                 .with_key(LOG_MESSAGE_FORMAT_VERSION_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -800,6 +813,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogFlushStartOffsetCheckpointIntervalMs => self
                 .log_flush_start_offset_checkpoint_interval_ms
                 .try_set_parsed_value(property_value)?,
+            Self::ConfigKey::LogPreAllocateEnable => {
+                self.log_pre_allocate_enable.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogMessageFormatVersion => {
                 self.log_message_format_version.try_set_parsed_value(property_value)?
             },
@@ -851,6 +867,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             self.log_flush_offset_checkpoint_interval_ms.build()?;
         let log_flush_start_offset_checkpoint_interval_ms =
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
+        let log_pre_allocate_enable = self.log_pre_allocate_enable.build()?;
         let log_message_format_version = self.resolve_log_message_format_version()?;
         let log_message_timestamp_type = self.resolve_log_message_timestamp_type()?;
         let log_message_timestamp_difference_max_ms =
@@ -885,6 +902,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
+            log_pre_allocate_enable,
             log_message_format_version,
             log_message_timestamp_type,
             log_message_timestamp_difference_max_ms,
@@ -1020,11 +1038,12 @@ pub struct DefaultLogConfig {
     pub log_flush_interval_ms: i64,
     pub log_flush_offset_checkpoint_interval_ms: i32,
     pub log_flush_start_offset_checkpoint_interval_ms: i32,
+    pub log_pre_allocate_enable: bool,
     pub log_message_format_version: KafkaApiVersion,
     pub log_message_timestamp_type: LogMessageTimestampType,
     pub log_message_timestamp_difference_max_ms: i64,
     pub num_recovery_threads_per_data_dir: i32,
-    pub min_in_sync_replicas: bool,
+    pub min_in_sync_replicas: i32,
     pub log_message_down_conversion_enable: bool,
 }
 
@@ -1070,6 +1089,7 @@ impl Default for DefaultLogConfig {
             config_properties.log_flush_offset_checkpoint_interval_ms.build().unwrap();
         let log_flush_start_offset_checkpoint_interval_ms =
             config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
+        let log_pre_allocate_enable = config_properties.log_pre_allocate_enable.build().unwrap();
         let log_message_format_version =
             config_properties.resolve_log_message_format_version().unwrap();
         let log_message_timestamp_type =
@@ -1107,6 +1127,7 @@ impl Default for DefaultLogConfig {
             log_flush_interval_ms,
             log_flush_offset_checkpoint_interval_ms,
             log_flush_start_offset_checkpoint_interval_ms,
+            log_pre_allocate_enable,
             log_message_format_version,
             log_message_timestamp_type,
             log_message_timestamp_difference_max_ms,

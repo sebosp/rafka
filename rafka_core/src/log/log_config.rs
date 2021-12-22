@@ -56,7 +56,7 @@ pub const MESSAGE_TIMESTAMP_TYPE_PROP: &str = MESSAGE_TIMESTAMP_TYPE_CONFIG;
 pub const MIN_CLEANABLE_DIRTY_RATIO_PROP: &str = MIN_CLEANABLE_DIRTY_RATIO_CONFIG;
 pub const MIN_COMPACTION_LAG_MS_PROP: &str = MIN_COMPACTION_LAG_MS_CONFIG;
 pub const MIN_IN_SYNC_REPLICAS_PROP: &str = MIN_IN_SYNC_REPLICAS_CONFIG;
-pub const PREALLOCATE_ENABLE_PROP: &str = PREALLOCATE_ENABLE_CONFIG;
+pub const PREALLOCATE_ENABLE_PROP: &str = PREALLOCATE_CONFIG;
 pub const RETENTION_BYTES_PROP: &str = RETENTION_BYTES_CONFIG;
 pub const RETENTION_MS_PROP: &str = RETENTION_MS_CONFIG;
 pub const SEGMENT_BYTES_PROP: &str = SEGMENT_BYTES_CONFIG;
@@ -232,9 +232,6 @@ pub struct LogConfigProperties {
 //
 // (UncleanLeaderElectionEnableProp, BOOLEAN, Defaults.UncleanLeaderElectionEnable, MEDIUM,
 // UncleanLeaderElectionEnableDoc, KafkaConfig.UncleanLeaderElectionEnableProp)
-//
-// (PreAllocateEnableProp, BOOLEAN, Defaults.PreAllocateEnable, MEDIUM, PreAllocateEnableDoc,
-// KafkaConfig.LogPreAllocateProp)
 //
 // (MessageTimestampTypeProp, STRING, Defaults.MessageTimestampType, in("CreateTime",
 // "LogAppendTime"), MEDIUM, MessageTimestampTypeDoc, KafkaConfig.LogMessageTimestampTypeProp)
@@ -469,8 +466,6 @@ impl Default for LogConfigProperties {
                         .build()
                         .unwrap(),
                 ),
-            // (MinInSyncReplicasProp, INT, Defaults.MinInSyncReplicas, atLeast(1), MEDIUM,
-            // MinInSyncReplicasDoc, KafkaConfig.MinInSyncReplicasProp)
             min_in_sync_replicas: ConfigDef::default()
                 .with_key(MIN_IN_SYNC_REPLICAS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -481,12 +476,15 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &1, MAX_COMPACTION_LAG_MS_CONFIG)
                 })),
+            // (PreAllocateEnableProp, BOOLEAN, Defaults.PreAllocateEnable, MEDIUM,
+            // PreAllocateEnableDoc, KafkaConfig.LogPreAllocateProp)
             pre_allocate_enable: ConfigDef::default()
-                .with_key(PREALLOCATE_ENABLE_CONFIG)
-                .with_importance()
-                .with_doc(PREALLOCATE_ENABLE_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_key(PREALLOCATE_CONFIG)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(PREALLOCATE_DOC.to_string())
+                .with_default(
+                    broker_default_log_properties.log_pre_allocate_enable.build().unwrap(),
+                ),
             retention_bytes: ConfigDef::default()
                 .with_key(RETENTION_BYTES_CONFIG)
                 .with_importance()
