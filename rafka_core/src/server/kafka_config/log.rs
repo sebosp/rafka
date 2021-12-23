@@ -27,6 +27,7 @@ pub const LOG_ROLL_TIME_JITTER_HOURS_PROP: &str = "log.roll.jitter.hours";
 pub const LOG_RETENTION_TIME_MILLIS_PROP: &str = "log.retention.ms";
 pub const LOG_RETENTION_TIME_MINUTES_PROP: &str = "log.retention.minutes";
 pub const LOG_RETENTION_TIME_HOURS_PROP: &str = "log.retention.hours";
+pub const LOG_RETENTION_BYTES_PROP: &str = "log.retention.bytes";
 pub const LOG_CLEANUP_INTERVAL_MS_PROP: &str = "log.retention.check.interval.ms";
 pub const LOG_CLEANUP_POLICY_PROP: &str = "log.cleanup.policy";
 pub const LOG_CLEANER_THREADS_PROP: &str = "log.cleaner.threads";
@@ -134,6 +135,7 @@ pub enum DefaultLogConfigKey {
     LogRetentionTimeMillis,
     LogRetentionTimeMinutes,
     LogRetentionTimeHours,
+    LogRetentionBytes,
     LogCleanupIntervalMs,
     LogCleanupPolicy,
     LogCleanerThreads,
@@ -176,6 +178,7 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogRetentionTimeMillis => write!(f, "{}", LOG_RETENTION_TIME_MILLIS_PROP),
             Self::LogRetentionTimeMinutes => write!(f, "{}", LOG_RETENTION_TIME_MINUTES_PROP),
             Self::LogRetentionTimeHours => write!(f, "{}", LOG_RETENTION_TIME_HOURS_PROP),
+            Self::LogRetentionBytes => write!(f, "{}", LOG_RETENTION_BYTES_PROP),
             Self::LogCleanupIntervalMs => write!(f, "{}", LOG_CLEANUP_INTERVAL_MS_PROP),
             Self::LogCleanupPolicy => write!(f, "{}", LOG_CLEANUP_POLICY_PROP),
             Self::LogCleanerThreads => write!(f, "{}", LOG_CLEANER_THREADS_PROP),
@@ -248,6 +251,7 @@ impl FromStr for DefaultLogConfigKey {
             LOG_RETENTION_TIME_MILLIS_PROP => Ok(Self::LogRetentionTimeMillis),
             LOG_RETENTION_TIME_MINUTES_PROP => Ok(Self::LogRetentionTimeMinutes),
             LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
+            LOG_RETENTION_BYTES_PROP => Ok(Self::LogRetentionBytes),
             LOG_CLEANUP_INTERVAL_MS_PROP => Ok(Self::LogCleanupIntervalMs),
             LOG_CLEANUP_POLICY => Ok(Self::LogCleanupPolicy),
             LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
@@ -302,6 +306,7 @@ pub struct DefaultLogConfigProperties {
     log_retention_time_millis: ConfigDef<i64>,
     log_retention_time_minutes: ConfigDef<i32>,
     log_retention_time_hours: ConfigDef<i32>,
+    pub log_retention_bytes: ConfigDef<i64>,
     log_cleanup_interval_ms: ConfigDef<i64>,
     log_cleanup_policy: ConfigDef<String>,
     log_cleaner_threads: ConfigDef<i32>,
@@ -440,6 +445,11 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &1, LOG_CLEANER_THREADS_PROP)
                 })),
+            log_retention_bytes: ConfigDef::default()
+                .with_key(LOG_RETENTION_BYTES_PROP)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(String::from("The maximum size of the log before deleting it"))
+                .with_default(-1),
             log_cleanup_interval_ms: ConfigDef::default()
                 .with_key(LOG_CLEANUP_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
@@ -750,8 +760,8 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogRetentionTimeMinutes => {
                 self.log_retention_time_minutes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRetentionTimeHours => {
-                self.log_retention_time_hours.try_set_parsed_value(property_value)?
+            Self::ConfigKey::LogRetentionBytes => {
+                self.log_retention_bytes.try_set_parsed_value(property_value)?
             },
             Self::ConfigKey::LogCleanupIntervalMs => {
                 self.log_cleanup_interval_ms.try_set_parsed_value(property_value)?
@@ -1018,6 +1028,7 @@ pub struct DefaultLogConfig {
     pub log_roll_time_jitter_millis: i64,
     /// The coalesced time retention, resolving hours or minutes to its millis
     pub log_retention_time_millis: i64,
+    pub log_retention_bytes: i64,
     pub log_cleanup_interval_ms: i64,
     pub log_cleanup_policy: Vec<LogCleanupPolicy>,
     pub log_cleaner_threads: i32,
@@ -1057,6 +1068,7 @@ impl Default for DefaultLogConfig {
             config_properties.resolve_log_roll_time_jitter_millis().unwrap();
         let log_retention_time_millis =
             config_properties.resolve_log_retention_time_millis().unwrap();
+        let log_retention_bytes = config_properties.log_retention_bytes.build().unwrap();
         let log_cleanup_interval_ms = config_properties.log_cleanup_interval_ms.build().unwrap();
         let log_cleanup_policy = config_properties.resolve_log_cleanup_policy().unwrap();
         let log_cleaner_threads = config_properties.log_cleaner_threads.build().unwrap();
@@ -1107,6 +1119,7 @@ impl Default for DefaultLogConfig {
             log_roll_time_millis,
             log_roll_time_jitter_millis,
             log_retention_time_millis,
+            log_retention_bytes,
             log_cleanup_interval_ms,
             log_cleanup_policy,
             log_cleaner_threads,

@@ -201,7 +201,7 @@ pub struct LogConfigProperties {
     min_compaction_lag_ms: ConfigDef<i64>,
     min_in_sync_replicas: ConfigDef<i32>,
     pre_allocate_enable: ConfigDef<bool>,
-    retention_bytes: ConfigDef<u64>,
+    retention_bytes: ConfigDef<i64>,
     retention_ms: ConfigDef<u64>,
     segment_bytes: ConfigDef<i32>,
     segment_index_bytes: ConfigDef<i32>,
@@ -221,10 +221,6 @@ pub struct LogConfigProperties {
 //
 // (SegmentIndexBytesProp, INT, Defaults.MaxIndexSize, atLeast(0), MEDIUM, MaxIndexSizeDoc,
 // KafkaConfig.LogIndexSizeMaxBytesProp)
-//
-// (RetentionBytesProp, LONG, Defaults.RetentionSize, MEDIUM, RetentionSizeDoc,
-// KafkaConfig.LogRetentionBytesProp) // can be negative. See
-// kafka.log.LogManager.cleanupSegmentsToMaintainSize
 //
 // (RetentionMsProp, LONG, Defaults.RetentionMs, atLeast(-1), MEDIUM, RetentionMsDoc,
 // KafkaConfig.LogRetentionTimeMillisProp) // // can be negative. See
@@ -476,8 +472,6 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &1, MAX_COMPACTION_LAG_MS_CONFIG)
                 })),
-            // (PreAllocateEnableProp, BOOLEAN, Defaults.PreAllocateEnable, MEDIUM,
-            // PreAllocateEnableDoc, KafkaConfig.LogPreAllocateProp)
             pre_allocate_enable: ConfigDef::default()
                 .with_key(PREALLOCATE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -485,12 +479,14 @@ impl Default for LogConfigProperties {
                 .with_default(
                     broker_default_log_properties.log_pre_allocate_enable.build().unwrap(),
                 ),
+            // (RetentionBytesProp, LONG, Defaults.RetentionSize, MEDIUM, RetentionSizeDoc,
+            // KafkaConfig.LogRetentionBytesProp) // can be negative. See
+            // kafka.log.LogManager.cleanupSegmentsToMaintainSize
             retention_bytes: ConfigDef::default()
                 .with_key(RETENTION_BYTES_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(RETENTION_BYTES_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(broker_default_log_properties.log_retention_bytes.build().unwrap()),
             retention_ms: ConfigDef::default()
                 .with_key(RETENTION_MS_CONFIG)
                 .with_importance()
