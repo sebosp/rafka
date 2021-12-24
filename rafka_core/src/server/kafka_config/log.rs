@@ -40,6 +40,7 @@ pub const LOG_CLEANER_ENABLE_PROP: &str = "log.cleaner.enable";
 pub const LOG_CLEANER_DELETE_RETENTION_MS_PROP: &str = "log.cleaner.delete.retention.ms";
 pub const LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP: &str = "log.cleaner.min.compaction.lag.ms";
 pub const LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP: &str = "log.cleaner.max.compaction.lag.ms";
+pub const LOG_INDEX_SIZE_MAX_BYTES_PROP: &str = "log.index.size.max.bytes";
 pub const LOG_INDEX_INTERVAL_BYTES_PROP: &str = "log.index.interval.bytes";
 pub const LOG_FLUSH_INTERVAL_MESSAGES_PROP: &str = "log.flush.interval.messages";
 pub const LOG_DELETE_DELAY_MS_PROP: &str = "log.segment.delete.delay.ms";
@@ -150,6 +151,7 @@ pub enum DefaultLogConfigKey {
     LogCleanerMinCompactionLagMs,
     LogCleanerMaxCompactionLagMs,
     LogIndexIntervalBytes,
+    LogIndexSizeMaxBytes,
     LogFlushIntervalMessages,
     LogDeleteDelayMs,
     LogFlushSchedulerIntervalMs,
@@ -207,6 +209,7 @@ impl fmt::Display for DefaultLogConfigKey {
                 write!(f, "{}", LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP)
             },
             Self::LogIndexIntervalBytes => write!(f, "{}", LOG_INDEX_INTERVAL_BYTES_PROP),
+            Self::LogIndexSizeMaxBytes => write!(f, "{}", LOG_INDEX_SIZE_MAX_BYTES_PROP),
             Self::LogFlushIntervalMessages => write!(f, "{}", LOG_FLUSH_INTERVAL_MESSAGES_PROP),
             Self::LogDeleteDelayMs => write!(f, "{}", LOG_DELETE_DELAY_MS_PROP),
             Self::LogFlushSchedulerIntervalMs => {
@@ -268,6 +271,7 @@ impl FromStr for DefaultLogConfigKey {
             LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMinCompactionLagMs),
             LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMaxCompactionLagMs),
             LOG_INDEX_INTERVAL_BYTES_PROP => Ok(Self::LogIndexIntervalBytes),
+            LOG_INDEX_SIZE_MAX_BYTES_PROP => Ok(Self::LogIndexSizeMaxBytes),
             LOG_FLUSH_INTERVAL_MESSAGES_PROP => Ok(Self::LogFlushIntervalMessages),
             LOG_DELETE_DELAY_MS_PROP => Ok(Self::LogDeleteDelayMs),
             LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
@@ -298,14 +302,14 @@ pub struct DefaultLogConfigProperties {
     log_dir: ConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
     log_dirs: ConfigDef<String>,
-    log_segment_bytes: ConfigDef<usize>,
+    pub log_segment_bytes: ConfigDef<usize>,
     log_roll_time_millis: ConfigDef<i64>,
     log_roll_time_hours: ConfigDef<i32>,
     log_roll_time_jitter_millis: ConfigDef<i64>,
-    log_roll_time_jitter_hours: ConfigDef<i32>,
+    pub log_roll_time_jitter_hours: ConfigDef<i32>,
     log_retention_time_millis: ConfigDef<i64>,
     log_retention_time_minutes: ConfigDef<i32>,
-    log_retention_time_hours: ConfigDef<i32>,
+    pub log_retention_time_hours: ConfigDef<i32>,
     pub log_retention_bytes: ConfigDef<i64>,
     log_cleanup_interval_ms: ConfigDef<i64>,
     log_cleanup_policy: ConfigDef<String>,
@@ -321,6 +325,7 @@ pub struct DefaultLogConfigProperties {
     pub log_cleaner_min_compaction_lag_ms: ConfigDef<i64>,
     pub log_cleaner_max_compaction_lag_ms: ConfigDef<i64>,
     pub log_index_interval_bytes: ConfigDef<i32>,
+    pub log_index_size_max_bytes: ConfigDef<usize>,
     pub log_flush_interval_messages: ConfigDef<i64>,
     pub log_delete_delay_ms: ConfigDef<i64>,
     pub log_flush_scheduler_interval_ms: ConfigDef<i64>,
@@ -583,6 +588,15 @@ impl Default for DefaultLogConfigProperties {
                     "The interval with which we add an entry to the offset index",
                 ))
                 .with_default(4096),
+            log_index_size_max_bytes: ConfigDef::default()
+                .with_key(LOG_INDEX_SIZE_MAX_BYTES_PROP)
+                .with_importance(ConfigDefImportance::Medium)
+                .with_doc(String::from("The maximum size in bytes of the offset index"))
+                .with_default(10 * 1024 * 1024)
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &4, LOG_INDEX_SIZE_MAX_BYTES_PROP)
+                })),
             log_flush_interval_messages: ConfigDef::default()
                 .with_key(LOG_FLUSH_INTERVAL_MESSAGES_PROP)
                 .with_importance(ConfigDefImportance::High)
@@ -805,6 +819,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogIndexIntervalBytes => {
                 self.log_index_interval_bytes.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::LogIndexSizeMaxBytes => {
+                self.log_index_size_max_bytes.try_set_parsed_value(property_value)?
+            },
             Self::ConfigKey::LogFlushIntervalMessages => {
                 self.log_flush_interval_messages.try_set_parsed_value(property_value)?
             },
@@ -853,6 +870,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
         let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
+        let log_retention_bytes = self.log_retention_bytes.build()?;
         let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
         let log_cleanup_policy = self.resolve_log_cleanup_policy()?;
         let log_cleaner_threads = self.log_cleaner_threads.build()?;
@@ -869,6 +887,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_cleaner_min_compaction_lag_ms = self.log_cleaner_min_compaction_lag_ms.build()?;
         let log_cleaner_max_compaction_lag_ms = self.log_cleaner_max_compaction_lag_ms.build()?;
         let log_index_interval_bytes = self.log_index_interval_bytes.build()?;
+        let log_index_size_max_bytes = self.log_index_size_max_bytes.build()?;
         let log_flush_interval_messages = self.log_flush_interval_messages.build()?;
         let log_delete_delay_ms = self.log_delete_delay_ms.build()?;
         let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
@@ -892,6 +911,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_roll_time_millis,
             log_roll_time_jitter_millis,
             log_retention_time_millis,
+            log_retention_bytes,
             log_cleanup_interval_ms,
             log_cleanup_policy,
             log_cleaner_threads,
@@ -906,6 +926,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_cleaner_min_compaction_lag_ms,
             log_cleaner_max_compaction_lag_ms,
             log_index_interval_bytes,
+            log_index_size_max_bytes,
             log_flush_interval_messages,
             log_delete_delay_ms,
             log_flush_scheduler_interval_ms,
@@ -1043,6 +1064,7 @@ pub struct DefaultLogConfig {
     pub log_cleaner_min_compaction_lag_ms: i64,
     pub log_cleaner_max_compaction_lag_ms: i64,
     pub log_index_interval_bytes: i32,
+    pub log_index_size_max_bytes: usize,
     pub log_flush_interval_messages: i64,
     pub log_delete_delay_ms: i64,
     pub log_flush_scheduler_interval_ms: i64,
@@ -1091,6 +1113,7 @@ impl Default for DefaultLogConfig {
         let log_cleaner_max_compaction_lag_ms =
             config_properties.log_cleaner_max_compaction_lag_ms.build().unwrap();
         let log_index_interval_bytes = config_properties.log_index_interval_bytes.build().unwrap();
+        let log_index_size_max_bytes = config_properties.log_index_size_max_bytes.build().unwrap();
         let log_flush_interval_messages =
             config_properties.log_flush_interval_messages.build().unwrap();
         let log_delete_delay_ms = config_properties.log_delete_delay_ms.build().unwrap();
@@ -1134,6 +1157,7 @@ impl Default for DefaultLogConfig {
             log_cleaner_min_compaction_lag_ms,
             log_cleaner_max_compaction_lag_ms,
             log_index_interval_bytes,
+            log_index_size_max_bytes,
             log_flush_interval_messages,
             log_delete_delay_ms,
             log_flush_scheduler_interval_ms,

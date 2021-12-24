@@ -3,6 +3,7 @@
 use crate::api::api_version::{ApiVersionValidator, KafkaApiVersion};
 use crate::common::config::topic_config::*;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance, Validator};
+use crate::common::record::legacy_record;
 use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
 use crate::server::kafka_config::general::GeneralConfigProperties;
@@ -16,6 +17,7 @@ use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
+use tracing::info;
 
 // nvim .define() lines copied and translated like:
 // s/^\s*.define(\([^,]*\)Prop, \([^,]*\), .*\([LM][OE][^,]*\),.*/\="0pub const ".
@@ -202,29 +204,16 @@ pub struct LogConfigProperties {
     min_in_sync_replicas: ConfigDef<i32>,
     pre_allocate_enable: ConfigDef<bool>,
     retention_bytes: ConfigDef<i64>,
-    retention_ms: ConfigDef<u64>,
-    segment_bytes: ConfigDef<i32>,
-    segment_index_bytes: ConfigDef<i32>,
+    retention_ms: ConfigDef<i64>,
+    segment_bytes: ConfigDef<usize>,
+    segment_index_bytes: ConfigDef<usize>,
     segment_jitter_ms: ConfigDef<u64>,
     segment_ms: ConfigDef<u64>,
     unclean_leader_election_enable: ConfigDef<bool>,
 }
 
-// (SegmentBytesProp, INT, Defaults.SegmentSize, atLeast(LegacyRecord.RECORD_OVERHEAD_V0), MEDIUM,
-// SegmentSizeDoc, KafkaConfig.LogSegmentBytesProp)
-//
 // (SegmentMsProp, LONG, Defaults.SegmentMs, atLeast(1), MEDIUM, SegmentMsDoc,
 // KafkaConfig.LogRollTimeMillisProp)
-//
-// (SegmentJitterMsProp, LONG, Defaults.SegmentJitterMs, atLeast(0), MEDIUM, SegmentJitterMsDoc,
-// KafkaConfig.LogRollTimeJitterMillisProp)
-//
-// (SegmentIndexBytesProp, INT, Defaults.MaxIndexSize, atLeast(0), MEDIUM, MaxIndexSizeDoc,
-// KafkaConfig.LogIndexSizeMaxBytesProp)
-//
-// (RetentionMsProp, LONG, Defaults.RetentionMs, atLeast(-1), MEDIUM, RetentionMsDoc,
-// KafkaConfig.LogRetentionTimeMillisProp) // // can be negative. See
-// kafka.log.LogManager.cleanupExpiredSegments
 //
 // (UncleanLeaderElectionEnableProp, BOOLEAN, Defaults.UncleanLeaderElectionEnable, MEDIUM,
 // UncleanLeaderElectionEnableDoc, KafkaConfig.UncleanLeaderElectionEnableProp)
@@ -479,44 +468,68 @@ impl Default for LogConfigProperties {
                 .with_default(
                     broker_default_log_properties.log_pre_allocate_enable.build().unwrap(),
                 ),
-            // (RetentionBytesProp, LONG, Defaults.RetentionSize, MEDIUM, RetentionSizeDoc,
-            // KafkaConfig.LogRetentionBytesProp) // can be negative. See
-            // kafka.log.LogManager.cleanupSegmentsToMaintainSize
             retention_bytes: ConfigDef::default()
                 .with_key(RETENTION_BYTES_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(RETENTION_BYTES_DOC.to_string())
                 .with_default(broker_default_log_properties.log_retention_bytes.build().unwrap()),
+            // can be negative. See kafka.log.LogManager.cleanupExpiredSegments
             retention_ms: ConfigDef::default()
                 .with_key(RETENTION_MS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(RETENTION_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties.resolve_log_retention_time_millis().unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &-1, RETENTION_MS_CONFIG)
+                })),
             segment_bytes: ConfigDef::default()
                 .with_key(SEGMENT_BYTES_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(SEGMENT_BYTES_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(broker_default_log_properties.log_segment_bytes.build().unwrap())
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(
+                        data,
+                        &legacy_record::RECORD_OVERHEAD_V0,
+                        SEGMENT_BYTES_CONFIG,
+                    )
+                })),
             segment_index_bytes: ConfigDef::default()
                 .with_key(SEGMENT_INDEX_BYTES_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(SEGMENT_INDEX_BYTES_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties.log_index_size_max_bytes.build().unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    // RAFKA NOTE: Originally this should be greater than 0, but
+                    // KafkaConfig::Log::LogIndexSizeMaxBytes requires at least 4, setting it to 4
+                    // here, not sure...
+                    ConfigDef::at_least(data, &4, SEGMENT_INDEX_BYTES_CONFIG)
+                })),
+            // (SegmentJitterMsProp, LONG, Defaults.SegmentJitterMs, atLeast(0), MEDIUM,
+            // SegmentJitterMsDoc, KafkaConfig.LogRollTimeJitterMillisProp)
             segment_jitter_ms: ConfigDef::default()
                 .with_key(SEGMENT_JITTER_MS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(SEGMENT_JITTER_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    broker_default_log_properties.resolve_log_roll_time_jitter_millis().unwrap(),
+                )
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &0, RETENTION_MS_CONFIG)
+                })),
             segment_ms: ConfigDef::default()
                 .with_key(SEGMENT_MS_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(SEGMENT_MS_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(),
             unclean_leader_election_enable: ConfigDef::default()
                 .with_key(UNCLEAN_LEADER_ELECTION_ENABLE_CONFIG)
                 .with_importance()
