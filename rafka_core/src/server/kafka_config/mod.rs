@@ -8,6 +8,7 @@
 pub mod general;
 pub mod log;
 pub mod quota;
+pub mod replication;
 pub mod socket_server;
 pub mod transaction_management;
 pub mod zookeeper;
