@@ -2,6 +2,10 @@
 //! This configuration, read from server.properties, relates to the Default/General Broker-wide
 //! configuration. A topic may be individually configured via zookeeper, see
 //! `crate::log::log_config`
+//! RAFKA TODO:
+//! In order to get a T out of ConfigDef<T> one may rely on the build() or customer resolve_<field>
+//! It's possible and an error to use the build() unaware of the resolve_<field>, and with so many
+//! fields it's just a matter of time.
 
 use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
 use super::{ConfigSet, KafkaConfigError};
@@ -88,6 +92,17 @@ impl fmt::Display for LogCleanupPolicy {
             Self::Delete => write!(f, "delete"),
             Self::Compact => write!(f, "compact"),
         }
+    }
+}
+
+impl LogCleanupPolicy {
+    pub fn from_str_to_vec(input: &str) -> Result<Vec<Self>, KafkaConfigError> {
+        let mut res: Vec<LogCleanupPolicy> = vec![];
+        let policies: Vec<&str> = input.split(",").collect();
+        for policy in policies {
+            res.push(LogCleanupPolicy::from_str(policy)?);
+        }
+        Ok(res)
     }
 }
 
@@ -471,7 +486,7 @@ impl Default for DefaultLogConfigProperties {
                      separated list of valid policies. Valid policies are: \"delete\" and \
                      \"compact\"",
                 ))
-                .with_default(String::from("delete"))
+                .with_default(LogCleanupPolicy::Delete.to_string())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
                     ConfigDef::value_in_list(
@@ -1019,14 +1034,7 @@ impl DefaultLogConfigProperties {
         &mut self,
     ) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
         match self.log_cleanup_policy.get_value() {
-            Some(val) => {
-                let mut res: Vec<LogCleanupPolicy> = vec![];
-                let policies: Vec<&str> = val.split(",").collect();
-                for policy in policies {
-                    res.push(LogCleanupPolicy::from_str(policy)?);
-                }
-                Ok(res)
-            },
+            Some(val) => LogCleanupPolicy::from_str_to_vec(val),
             None => Ok(vec![]),
         }
     }

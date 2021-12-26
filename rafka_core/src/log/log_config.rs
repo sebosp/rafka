@@ -8,8 +8,9 @@ use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
 use crate::server::kafka_config::general::GeneralConfigProperties;
 use crate::server::kafka_config::log::{
-    DefaultLogConfig, DefaultLogConfigProperties, LogMessageTimestampType,
+    DefaultLogConfig, DefaultLogConfigProperties, LogMessageTimestampType, LogCleanupPolicy,
 };
+use crate::server::kafka_config::replication::ReplicationConfigProperties;
 use crate::server::kafka_config::transaction_management::DEFAULT_COMPRESSION_TYPE;
 use crate::server::kafka_config::{ConfigSet, KafkaConfigError};
 use enum_iterator::IntoEnumIterator;
@@ -33,8 +34,6 @@ use tracing::info;
 // Snakecase(submatch(1)).": ".submatch(2).",
 
 pub const CLEANUP_POLICY_PROP: &str = CLEANUP_POLICY_CONFIG;
-pub const DELETE: &str = "delete";
-pub const COMPACT: &str = "compact";
 pub const COMPRESSION_TYPE_PROP: &str = COMPRESSION_TYPE_CONFIG;
 pub const DELETE_RETENTION_MS_PROP: &str = DELETE_RETENTION_MS_CONFIG;
 pub const FILE_DELETE_DELAY_MS_PROP: &str = FILE_DELETE_DELAY_MS_CONFIG;
@@ -183,7 +182,7 @@ impl FromStr for LogConfigKey {
 #[derive(Debug)]
 pub struct LogConfigProperties {
     cleanup_policy: ConfigDef<String>,
-    compression_type: ConfigDef<String>,
+    compression_type: ConfigDef<BrokerCompressionCodec>,
     delete_retention_ms: ConfigDef<i64>,
     file_delete_delay_ms: ConfigDef<i64>,
     flush_messages: ConfigDef<i64>,
@@ -207,35 +206,30 @@ pub struct LogConfigProperties {
     retention_ms: ConfigDef<i64>,
     segment_bytes: ConfigDef<usize>,
     segment_index_bytes: ConfigDef<usize>,
-    segment_jitter_ms: ConfigDef<u64>,
-    segment_ms: ConfigDef<u64>,
+    segment_jitter_ms: ConfigDef<i64>,
+    segment_ms: ConfigDef<i64>,
     unclean_leader_election_enable: ConfigDef<bool>,
 }
 
-// (SegmentMsProp, LONG, Defaults.SegmentMs, atLeast(1), MEDIUM, SegmentMsDoc,
-// KafkaConfig.LogRollTimeMillisProp)
-//
-// (UncleanLeaderElectionEnableProp, BOOLEAN, Defaults.UncleanLeaderElectionEnable, MEDIUM,
-// UncleanLeaderElectionEnableDoc, KafkaConfig.UncleanLeaderElectionEnableProp)
-//
-// (MessageTimestampTypeProp, STRING, Defaults.MessageTimestampType, in("CreateTime",
-// "LogAppendTime"), MEDIUM, MessageTimestampTypeDoc, KafkaConfig.LogMessageTimestampTypeProp)
-//
 impl Default for LogConfigProperties {
     fn default() -> Self {
         let broker_default_log_properties = DefaultLogConfigProperties::default();
         let general_properties = GeneralConfigProperties::default();
+        let replication_properties = ReplicationConfigProperties::default();
         Self {
             cleanup_policy: ConfigDef::default()
                 .with_key(CLEANUP_POLICY_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(CLEANUP_POLICY_DOC.to_string())
-                .with_default(DELETE.to_string())
+                .with_default(LogCleanupPolicy::Delete.to_string())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
                     ConfigDef::value_in_list(
                         data,
-                        vec![&DELETE.to_string(), &COMPACT.to_string()],
+                        vec![
+                            &LogCleanupPolicy::Delete.to_string(),
+                            &LogCleanupPolicy::Compact.to_string(),
+                        ],
                         CLEANUP_POLICY_CONFIG,
                     )
                 })),
@@ -512,8 +506,6 @@ impl Default for LogConfigProperties {
                     // here, not sure...
                     ConfigDef::at_least(data, &4, SEGMENT_INDEX_BYTES_CONFIG)
                 })),
-            // (SegmentJitterMsProp, LONG, Defaults.SegmentJitterMs, atLeast(0), MEDIUM,
-            // SegmentJitterMsDoc, KafkaConfig.LogRollTimeJitterMillisProp)
             segment_jitter_ms: ConfigDef::default()
                 .with_key(SEGMENT_JITTER_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -529,13 +521,18 @@ impl Default for LogConfigProperties {
                 .with_key(SEGMENT_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(SEGMENT_MS_DOC.to_string())
-                .with_default(),
+                .with_default(broker_default_log_properties.resolve_log_roll_time_millis().unwrap())
+                .with_validator(Box::new(|data| {
+                    // Safe to unwrap, we have a default
+                    ConfigDef::at_least(data, &1, RETENTION_MS_CONFIG)
+                })),
             unclean_leader_election_enable: ConfigDef::default()
                 .with_key(UNCLEAN_LEADER_ELECTION_ENABLE_CONFIG)
-                .with_importance()
+                .with_importance(ConfigDefImportance::Medium)
                 .with_doc(UNCLEAN_LEADER_ELECTION_ENABLE_DOC.to_string())
-                .with_default()
-                .with_validator(),
+                .with_default(
+                    replication_properties.resolve_unclean_leader_election_enable().unwrap(),
+                ),
         }
     }
 }
@@ -629,10 +626,71 @@ impl ConfigSet for LogConfigProperties {
         };
         Ok(())
     }
+
+    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        let cleanup_policy = self.resolve_cleanup_policy().unwrap();
+        let compression_type = self.compression_type.build().unwrap();
+        let delete_retention_ms = self.delete_retention_ms.build().unwrap();
+        let file_delete_delay_ms = self.file_delete_delay_ms.build().unwrap();
+        let flush_messages = self.flush_messages.build().unwrap();
+        let flush_ms = self.flush_ms.build().unwrap();
+        // TODO = self.// TODO.build().unwrap();
+        let follower_replication_throttled_replicas =
+            self.resolve_follower_replication_throttled_replicas().unwrap();
+        let index_interval_bytes = self.index_interval_bytes.build().unwrap();
+        // TODO = self.// TODO.build().unwrap();
+        let leader_replication_throttled_replicas =
+            self.resolve_leader_replication_throttled_replicas().unwrap();
+        let max_compaction_lag_ms = self.max_compaction_lag_ms.build().unwrap();
+        let max_message_bytes = self.max_message_bytes.build().unwrap();
+        let message_down_conversion_enable = self.message_down_conversion_enable.build().unwrap();
+        let message_format_version = self.message_format_version.build().unwrap();
+        let message_timestamp_difference_max_ms =
+            self.message_timestamp_difference_max_ms.build().unwrap();
+        let message_timestamp_type = self.message_timestamp_type.build().unwrap();
+        let min_cleanable_dirty_ratio = self.min_cleanable_dirty_ratio.build().unwrap();
+        let min_compaction_lag_ms = self.min_compaction_lag_ms.build().unwrap();
+        let min_in_sync_replicas = self.min_in_sync_replicas.build().unwrap();
+        let pre_allocate_enable = self.pre_allocate_enable.build().unwrap();
+        let retention_bytes = self.retention_bytes.build().unwrap();
+        let retention_ms = self.retention_ms.build().unwrap();
+        let segment_bytes = self.segment_bytes.build().unwrap();
+        let segment_index_bytes = self.segment_index_bytes.build().unwrap();
+        let segment_jitter_ms = self.segment_jitter_ms.build().unwrap();
+        let segment_ms = self.segment_ms.build().unwrap();
+        let unclean_leader_election_enable = self.unclean_leader_election_enable.build().unwrap();
+        Ok(Self::ConfigType {
+            cleanup_policy,
+            compression_type,
+            delete_retention_ms,
+            file_delete_delay_ms,
+            flush_messages,
+            flush_ms,
+            follower_replication_throttled_replicas,
+            index_interval_bytes,
+            leader_replication_throttled_replicas,
+            max_compaction_lag_ms,
+            max_message_bytes,
+            message_down_conversion_enable,
+            message_format_version,
+            message_timestamp_difference_max_ms,
+            message_timestamp_type,
+            min_cleanable_dirty_ratio,
+            min_compaction_lag_ms,
+            min_in_sync_replicas,
+            pre_allocate_enable,
+            retention_bytes,
+            retention_ms,
+            segment_bytes,
+            segment_index_bytes,
+            segment_jitter_ms,
+            segment_ms,
+            unclean_leader_election_enable,
+        })
+    }
 }
 
 impl LogConfigProperties {
-    // RAFKA TODO: Call this on build()
     pub fn resolve_follower_replication_throttled_replicas(
         &self,
     ) -> Result<Vec<String>, KafkaConfigError> {
@@ -643,7 +701,6 @@ impl LogConfigProperties {
         }
     }
 
-    // RAFKA TODO: Call this on build()
     pub fn resolve_leader_replication_throttled_replicas(
         &self,
     ) -> Result<Vec<String>, KafkaConfigError> {
@@ -653,6 +710,16 @@ impl LogConfigProperties {
             None => Ok(vec![]),
         }
     }
+
+    pub fn resolve_cleanup_policy(
+        &mut self,
+    ) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
+        match self.cleanup_policy.get_value() {
+            Some(val) => LogCleanupPolicy::from_str_to_vec(val),
+            None => Ok(vec![]),
+        }
+    }
+
 }
 
 /// `LogConfig` is a topic-specific configuration, in constrant, the `DefaultLogConfig` is the
@@ -662,6 +729,8 @@ pub struct LogConfig {
     segment_size: usize,
     segment_ms: i64,
     segment_jitter_ms: i64,
+    segment_index_bytes: usize,
+    flush_ms: i64,
     max_index_size: i32,
     flush_interval: i64,
     flush_ms: i64,
@@ -677,9 +746,10 @@ pub struct LogConfig {
     min_cleanable_ratio: f64,
     compact: String,
     delete: bool,
+    cleanup_policy: Vec<LogCleanupPolicy>,
     unclean_leader_election_enable: bool,
     min_in_sync_replicas: i32,
-    compression_type: String,
+    compression_type: BrokerCompressionCodec,
     preallocate: bool,
     message_format_version: KafkaApiVersion,
     message_timestamp_type: String,
@@ -689,6 +759,26 @@ pub struct LogConfig {
     message_down_conversion_enable: bool,
 }
 
+    // TODO: transform Vec<> to String and build the resulting Vec<> on build()
+    index_interval_bytes: ConfigDef<i32>,
+    // TODO: transform Vec<> to String and build the resulting Vec<> on build()
+    leader_replication_throttled_replicas: ConfigDef<String>,
+    max_compaction_lag_ms: ConfigDef<i64>,
+    max_message_bytes: ConfigDef<usize>,
+    message_down_conversion_enable: ConfigDef<bool>,
+    message_format_version: ConfigDef<String>,
+    message_timestamp_difference_max_ms: ConfigDef<i64>,
+    message_timestamp_type: ConfigDef<String>,
+    min_cleanable_dirty_ratio: ConfigDef<f64>,
+    min_compaction_lag_ms: ConfigDef<i64>,
+    min_in_sync_replicas: ConfigDef<i32>,
+    pre_allocate_enable: ConfigDef<bool>,
+    retention_bytes: ConfigDef<i64>,
+    retention_ms: ConfigDef<i64>,
+    segment_bytes: ConfigDef<usize>,
+    segment_jitter_ms: ConfigDef<i64>,
+    segment_ms: ConfigDef<i64>,
+    unclean_leader_election_enable: ConfigDef<bool>,
 impl LogConfig {
     pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
         if self.min_compaction_lag_ms > self.max_compaction_lag_ms {
