@@ -27,7 +27,7 @@ pub const UNCOMPRESSED_CODEC: BrokerCompressionCodec =
 pub const PRODUCER_COMPRESSION_CODEC: BrokerCompressionCodec =
     BrokerCompressionCodec::gen_producer_compression_codec();
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BrokerCompressionCodec {
     pub codec: Option<i32>,
     pub name: &'static str,

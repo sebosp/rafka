@@ -8,7 +8,7 @@ use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
 use crate::server::kafka_config::general::GeneralConfigProperties;
 use crate::server::kafka_config::log::{
-    DefaultLogConfig, DefaultLogConfigProperties, LogMessageTimestampType, LogCleanupPolicy,
+    DefaultLogConfig, DefaultLogConfigProperties, LogCleanupPolicy, LogMessageTimestampType,
 };
 use crate::server::kafka_config::replication::ReplicationConfigProperties;
 use crate::server::kafka_config::transaction_management::DEFAULT_COMPRESSION_TYPE;
@@ -182,7 +182,7 @@ impl FromStr for LogConfigKey {
 #[derive(Debug)]
 pub struct LogConfigProperties {
     cleanup_policy: ConfigDef<String>,
-    compression_type: ConfigDef<BrokerCompressionCodec>,
+    compression_type: ConfigDef<String>,
     delete_retention_ms: ConfigDef<i64>,
     file_delete_delay_ms: ConfigDef<i64>,
     flush_messages: ConfigDef<i64>,
@@ -628,64 +628,65 @@ impl ConfigSet for LogConfigProperties {
     }
 
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
-        let cleanup_policy = self.resolve_cleanup_policy().unwrap();
-        let compression_type = self.compression_type.build().unwrap();
-        let delete_retention_ms = self.delete_retention_ms.build().unwrap();
-        let file_delete_delay_ms = self.file_delete_delay_ms.build().unwrap();
-        let flush_messages = self.flush_messages.build().unwrap();
-        let flush_ms = self.flush_ms.build().unwrap();
-        // TODO = self.// TODO.build().unwrap();
-        let follower_replication_throttled_replicas =
-            self.resolve_follower_replication_throttled_replicas().unwrap();
-        let index_interval_bytes = self.index_interval_bytes.build().unwrap();
-        // TODO = self.// TODO.build().unwrap();
-        let leader_replication_throttled_replicas =
-            self.resolve_leader_replication_throttled_replicas().unwrap();
-        let max_compaction_lag_ms = self.max_compaction_lag_ms.build().unwrap();
-        let max_message_bytes = self.max_message_bytes.build().unwrap();
-        let message_down_conversion_enable = self.message_down_conversion_enable.build().unwrap();
-        let message_format_version = self.message_format_version.build().unwrap();
+        let segment_size = self.segment_bytes.build()?;
+        let segment_ms = self.segment_ms.build()?;
+        let segment_jitter_ms = self.segment_jitter_ms.build()?;
+        let flush_ms = self.flush_ms.build()?;
+        let max_index_size = self.segment_index_bytes.build()?;
+        let flush_interval = self.flush_messages.build()?;
+        let retention_size = self.retention_bytes.build()?;
+        let retention_ms = self.retention_ms.build()?;
+        let max_message_size = self.max_message_bytes.build()?;
+        let index_interval = self.index_interval_bytes.build()?;
+        let file_delete_delay_ms = self.file_delete_delay_ms.build()?;
+        let delete_retention_ms = self.delete_retention_ms.build()?;
+        let compaction_lag_ms = self.min_compaction_lag_ms.build()?;
+        let max_compaction_lag_ms = self.max_compaction_lag_ms.build()?;
+        let min_cleanable_ratio = self.min_cleanable_dirty_ratio.build()?;
+        let cleanup_policy = self.resolve_cleanup_policy()?;
+        let compact = cleanup_policy.contains(&LogCleanupPolicy::Compact);
+        let delete = cleanup_policy.contains(&LogCleanupPolicy::Delete);
+        let unclean_leader_election_enable = self.unclean_leader_election_enable.build()?;
+        let min_in_sync_replicas = self.min_in_sync_replicas.build()?;
+        let compression_type = self.resolve_compression_type()?;
+        let preallocate = self.pre_allocate_enable.build()?;
+        let message_format_version = self.resolve_message_format_version()?;
+        let message_timestamp_type = self.message_timestamp_type.build()?;
         let message_timestamp_difference_max_ms =
-            self.message_timestamp_difference_max_ms.build().unwrap();
-        let message_timestamp_type = self.message_timestamp_type.build().unwrap();
-        let min_cleanable_dirty_ratio = self.min_cleanable_dirty_ratio.build().unwrap();
-        let min_compaction_lag_ms = self.min_compaction_lag_ms.build().unwrap();
-        let min_in_sync_replicas = self.min_in_sync_replicas.build().unwrap();
-        let pre_allocate_enable = self.pre_allocate_enable.build().unwrap();
-        let retention_bytes = self.retention_bytes.build().unwrap();
-        let retention_ms = self.retention_ms.build().unwrap();
-        let segment_bytes = self.segment_bytes.build().unwrap();
-        let segment_index_bytes = self.segment_index_bytes.build().unwrap();
-        let segment_jitter_ms = self.segment_jitter_ms.build().unwrap();
-        let segment_ms = self.segment_ms.build().unwrap();
-        let unclean_leader_election_enable = self.unclean_leader_election_enable.build().unwrap();
+            self.message_timestamp_difference_max_ms.build()?;
+        let leader_replication_throttled_replicas =
+            self.resolve_leader_replication_throttled_replicas()?;
+        let follower_replication_throttled_replicas =
+            self.resolve_follower_replication_throttled_replicas()?;
+        let message_down_conversion_enable = self.message_down_conversion_enable.build()?;
         Ok(Self::ConfigType {
-            cleanup_policy,
-            compression_type,
-            delete_retention_ms,
-            file_delete_delay_ms,
-            flush_messages,
-            flush_ms,
-            follower_replication_throttled_replicas,
-            index_interval_bytes,
-            leader_replication_throttled_replicas,
-            max_compaction_lag_ms,
-            max_message_bytes,
-            message_down_conversion_enable,
-            message_format_version,
-            message_timestamp_difference_max_ms,
-            message_timestamp_type,
-            min_cleanable_dirty_ratio,
-            min_compaction_lag_ms,
-            min_in_sync_replicas,
-            pre_allocate_enable,
-            retention_bytes,
-            retention_ms,
-            segment_bytes,
-            segment_index_bytes,
-            segment_jitter_ms,
+            segment_size,
             segment_ms,
+            segment_jitter_ms,
+            flush_ms,
+            max_index_size,
+            flush_interval,
+            retention_size,
+            retention_ms,
+            max_message_size,
+            index_interval,
+            file_delete_delay_ms,
+            delete_retention_ms,
+            compaction_lag_ms,
+            max_compaction_lag_ms,
+            min_cleanable_ratio,
+            compact,
+            delete,
             unclean_leader_election_enable,
+            min_in_sync_replicas,
+            compression_type,
+            preallocate,
+            message_format_version,
+            message_timestamp_type,
+            message_timestamp_difference_max_ms,
+            leader_replication_throttled_replicas,
+            follower_replication_throttled_replicas,
+            message_down_conversion_enable,
         })
     }
 }
@@ -711,15 +712,20 @@ impl LogConfigProperties {
         }
     }
 
-    pub fn resolve_cleanup_policy(
-        &mut self,
-    ) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
+    pub fn resolve_cleanup_policy(&mut self) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
         match self.cleanup_policy.get_value() {
             Some(val) => LogCleanupPolicy::from_str_to_vec(val),
             None => Ok(vec![]),
         }
     }
 
+    pub fn resolve_compression_type(&mut self) -> Result<BrokerCompressionCodec, KafkaConfigError> {
+        BrokerCompressionCodec::from_str(&self.compression_type.build()?)
+    }
+
+    pub fn resolve_message_format_version(&self) -> Result<KafkaApiVersion, KafkaConfigError> {
+        KafkaApiVersion::from_str(&self.message_format_version.build()?)
+    }
 }
 
 /// `LogConfig` is a topic-specific configuration, in constrant, the `DefaultLogConfig` is the
@@ -729,24 +735,21 @@ pub struct LogConfig {
     segment_size: usize,
     segment_ms: i64,
     segment_jitter_ms: i64,
-    segment_index_bytes: usize,
     flush_ms: i64,
-    max_index_size: i32,
+    max_index_size: usize,
     flush_interval: i64,
-    flush_ms: i64,
     retention_size: i64,
     retention_ms: i64,
-    max_message_size: i32,
+    max_message_size: usize,
     index_interval: i32,
     file_delete_delay_ms: i64,
     delete_retention_ms: i64,
+    /// Contains by default min_compaction_lag_ms
     compaction_lag_ms: i64,
     max_compaction_lag_ms: i64,
-    min_compaction_lag_ms: i64,
     min_cleanable_ratio: f64,
-    compact: String,
+    compact: bool,
     delete: bool,
-    cleanup_policy: Vec<LogCleanupPolicy>,
     unclean_leader_election_enable: bool,
     min_in_sync_replicas: i32,
     compression_type: BrokerCompressionCodec,
@@ -754,38 +757,18 @@ pub struct LogConfig {
     message_format_version: KafkaApiVersion,
     message_timestamp_type: String,
     message_timestamp_difference_max_ms: i64,
-    leader_replication_throttled_replicas: String,
+    leader_replication_throttled_replicas: Vec<String>,
     follower_replication_throttled_replicas: Vec<String>,
     message_down_conversion_enable: bool,
 }
 
-    // TODO: transform Vec<> to String and build the resulting Vec<> on build()
-    index_interval_bytes: ConfigDef<i32>,
-    // TODO: transform Vec<> to String and build the resulting Vec<> on build()
-    leader_replication_throttled_replicas: ConfigDef<String>,
-    max_compaction_lag_ms: ConfigDef<i64>,
-    max_message_bytes: ConfigDef<usize>,
-    message_down_conversion_enable: ConfigDef<bool>,
-    message_format_version: ConfigDef<String>,
-    message_timestamp_difference_max_ms: ConfigDef<i64>,
-    message_timestamp_type: ConfigDef<String>,
-    min_cleanable_dirty_ratio: ConfigDef<f64>,
-    min_compaction_lag_ms: ConfigDef<i64>,
-    min_in_sync_replicas: ConfigDef<i32>,
-    pre_allocate_enable: ConfigDef<bool>,
-    retention_bytes: ConfigDef<i64>,
-    retention_ms: ConfigDef<i64>,
-    segment_bytes: ConfigDef<usize>,
-    segment_jitter_ms: ConfigDef<i64>,
-    segment_ms: ConfigDef<i64>,
-    unclean_leader_election_enable: ConfigDef<bool>,
 impl LogConfig {
     pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
-        if self.min_compaction_lag_ms > self.max_compaction_lag_ms {
+        if self.compaction_lag_ms > self.max_compaction_lag_ms {
             return Err(KafkaConfigError::InvalidValue(format!(
                 "conflict topic config setting {} ({}) > {} ({})",
                 MIN_COMPACTION_LAG_MS_CONFIG,
-                self.min_compaction_lag_ms,
+                self.compaction_lag_ms,
                 MAX_COMPACTION_LAG_MS_CONFIG,
                 self.max_compaction_lag_ms,
             )));
@@ -793,7 +776,7 @@ impl LogConfig {
         Ok(())
     }
 
-    /// Create a log config instance coalescing the the per-broker log properties with the
+    /// Create a log config instance coalescing the per-broker log properties with the
     /// zookeeper per-topic configurations
     pub fn coalesce_broker_defaults_and_per_topic_override(
         defaults: LogConfig,
@@ -803,8 +786,10 @@ impl LogConfig {
         for (property_name, property_value) in topic_overrides {
             log_config_properties.try_set_property(&property_name, &property_value);
         }
-        let overridden_keys = topic_overrides.iter().map(|(&name, &val)| val.to_string()).collect();
+        let overridden_keys: Vec<String> =
+            topic_overrides.iter().map(|(&name, &val)| val.to_string()).collect();
         info!("Overridden Keys for topic: {:?}", overridden_keys);
+        log_config_properties.build()
     }
 }
 

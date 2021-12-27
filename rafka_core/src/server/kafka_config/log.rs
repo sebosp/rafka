@@ -1043,7 +1043,7 @@ impl DefaultLogConfigProperties {
         &mut self,
     ) -> Result<KafkaApiVersion, KafkaConfigError> {
         // self.log_message_format_version has a default, so it's safe to unwrap().
-        KafkaApiVersion::from_str(&self.log_message_format_version.get_value().unwrap().clone())
+        KafkaApiVersion::from_str(&self.log_message_format_version.build()?)
     }
 }
 
