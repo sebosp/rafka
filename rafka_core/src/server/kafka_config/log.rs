@@ -1026,7 +1026,6 @@ impl DefaultLogConfigProperties {
     pub fn resolve_log_message_timestamp_type(
         &mut self,
     ) -> Result<LogMessageTimestampType, KafkaConfigError> {
-        // LogMessageTimestampType has a default, safe to unwrap
         LogMessageTimestampType::from_str(self.log_message_timestamp_type.get_value().unwrap())
     }
 
@@ -1042,7 +1041,6 @@ impl DefaultLogConfigProperties {
     pub fn resolve_log_message_format_version(
         &mut self,
     ) -> Result<KafkaApiVersion, KafkaConfigError> {
-        // self.log_message_format_version has a default, so it's safe to unwrap().
         KafkaApiVersion::from_str(&self.log_message_format_version.build()?)
     }
 }
