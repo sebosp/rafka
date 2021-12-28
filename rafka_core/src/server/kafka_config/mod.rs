@@ -16,6 +16,7 @@ pub mod zookeeper;
 use self::general::{GeneralConfig, GeneralConfigKey, GeneralConfigProperties};
 use self::log::{DefaultLogConfig, DefaultLogConfigKey, DefaultLogConfigProperties};
 use self::quota::{QuotaConfig, QuotaConfigKey, QuotaConfigProperties};
+use self::replication::{ReplicationConfigKey, ReplicationConfigProperties};
 use self::transaction_management::{
     TransactionConfig, TransactionConfigKey, TransactionConfigProperties,
 };
@@ -42,6 +43,7 @@ pub enum KafkaConfigKey {
     Log(DefaultLogConfigKey),
     Transaction(TransactionConfigKey),
     Quota(QuotaConfigKey),
+    Replication(ReplicationConfigKey),
 }
 
 // impl fmt::Display for *ConfigKey {
@@ -58,6 +60,7 @@ impl fmt::Display for KafkaConfigKey {
             Self::Log(val) => write!(f, "{}", val.to_string()),
             Self::Transaction(val) => write!(f, "{}", val.to_string()),
             Self::Quota(val) => write!(f, "{}", val.to_string()),
+            Self::Replication(val) => write!(f, "{}", val.to_string()),
         }
     }
 }
@@ -72,17 +75,20 @@ impl FromStr for KafkaConfigKey {
         if let Ok(val) = GeneralConfigKey::from_str(input) {
             return Ok(Self::General(val));
         }
+        if let Ok(val) = SocketConfigKey::from_str(input) {
+            return Ok(Self::Socket(val));
+        }
         if let Ok(val) = DefaultLogConfigKey::from_str(input) {
             return Ok(Self::Log(val));
+        }
+        if let Ok(val) = TransactionConfigKey::from_str(input) {
+            return Ok(Self::Transaction(val));
         }
         if let Ok(val) = QuotaConfigKey::from_str(input) {
             return Ok(Self::Quota(val));
         }
-        if let Ok(val) = SocketConfigKey::from_str(input) {
-            return Ok(Self::Socket(val));
-        }
-        if let Ok(val) = TransactionConfigKey::from_str(input) {
-            return Ok(Self::Transaction(val));
+        if let Ok(val) = ReplicationConfigKey::from_str(input) {
+            return Ok(Self::Replication(val));
         }
         // vim from enum to match: /^    \(.*\),/\= "         " . Uppercase(submatch(1)) . "_PROP =>
         // Ok(Self::" .submatch(1) . "),"/
@@ -176,9 +182,9 @@ pub trait ConfigSet {
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError>;
-    /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
-    /// KafkaConfig. NOTE: This doesn't consume self, as a ConfigKey may be re-updated on-the-fly
-    /// without the need to restart, for example via zookeeper
+    /// `build` validates and resolves dependant properties from a ConfigKey into a
+    /// ConfigType. NOTE: This doesn't consume self, as a ConfigKey may be re-used after bootstrap,
+    /// on-the-fly without the need to restart, for example via zookeeper
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError>;
     /// `config_names` returns a list of config keys used
     fn config_names() -> Vec<String>
@@ -186,6 +192,22 @@ pub trait ConfigSet {
         Self::ConfigKey: IntoEnumIterator + fmt::Display,
     {
         Self::ConfigKey::into_enum_iter().map(|val| val.to_string()).collect()
+    }
+
+    /// Transforms from a HashMap of configs into a KafkaConfigProperties object
+    /// This may return KafkaConfigError::UnknownKey errors
+    fn from_properties_hashmap(
+        input_config: HashMap<String, String>,
+    ) -> Result<Self, KafkaConfigError>
+    where
+        Self: Default,
+    {
+        let mut config_builder = Self::default();
+        for (property, property_value) in &input_config {
+            debug!("from_properties_hashmap: {} = {}", property, property_value);
+            config_builder.try_set_property(property, property_value)?;
+        }
+        Ok(config_builder)
     }
 }
 
@@ -197,6 +219,7 @@ pub struct KafkaConfigProperties {
     log: DefaultLogConfigProperties,
     transaction: TransactionConfigProperties,
     quota: QuotaConfigProperties,
+    replication: ReplicationConfigProperties,
 }
 
 impl Default for KafkaConfigProperties {
@@ -208,11 +231,15 @@ impl Default for KafkaConfigProperties {
             log: DefaultLogConfigProperties::default(),
             transaction: TransactionConfigProperties::default(),
             quota: QuotaConfigProperties::default(),
+            replication: ReplicationConfigProperties::default(),
         }
     }
 }
 
 impl KafkaConfigProperties {
+    /// RAFKA NOTE: We can't impl ConfigSet here because our KafkaConfigKey cannot derive
+    /// IntoEnumIterator, we could duplicate the code from config_names() everywhere but that looks
+    /// like more pain than gain.
     pub fn try_set_property(
         &mut self,
         property_name: &str,
@@ -237,6 +264,9 @@ impl KafkaConfigProperties {
             },
             KafkaConfigKey::Quota(_) => {
                 self.quota.try_set_property(property_name, property_value)?
+            },
+            KafkaConfigKey::Replication(_) => {
+                self.replication.try_set_property(property_name, property_value)?
             },
         };
         Ok(())
