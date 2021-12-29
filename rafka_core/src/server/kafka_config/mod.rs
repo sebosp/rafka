@@ -16,7 +16,7 @@ pub mod zookeeper;
 use self::general::{GeneralConfig, GeneralConfigKey, GeneralConfigProperties};
 use self::log::{DefaultLogConfig, DefaultLogConfigKey, DefaultLogConfigProperties};
 use self::quota::{QuotaConfig, QuotaConfigKey, QuotaConfigProperties};
-use self::replication::{ReplicationConfigKey, ReplicationConfigProperties};
+use self::replication::{ReplicationConfig, ReplicationConfigKey, ReplicationConfigProperties};
 use self::transaction_management::{
     TransactionConfig, TransactionConfigKey, TransactionConfigProperties,
 };
@@ -209,6 +209,7 @@ pub trait ConfigSet {
         }
         Ok(config_builder)
     }
+    // RAFKA TODO: Consider adding validate_values()
 }
 
 #[derive(Debug)]
@@ -294,7 +295,9 @@ impl KafkaConfigProperties {
         let log = self.log.build()?;
         let transaction = self.transaction.build()?;
         let quota = self.quota.build()?;
-        let kafka_config = KafkaConfig { zookeeper, general, socket, log, transaction, quota };
+        let replication = self.replication.build()?;
+        let kafka_config =
+            KafkaConfig { zookeeper, general, socket, log, transaction, quota, replication };
         kafka_config.validate_values()?;
         Ok(kafka_config)
     }
@@ -321,6 +324,7 @@ pub struct KafkaConfig {
     pub log: DefaultLogConfig,
     pub transaction: TransactionConfig,
     pub quota: QuotaConfig,
+    pub replication: ReplicationConfig,
 }
 
 impl KafkaConfig {
@@ -348,6 +352,7 @@ impl Default for KafkaConfig {
             log: DefaultLogConfig::default(),
             transaction: TransactionConfig::default(),
             quota: QuotaConfig::default(),
+            replication: ReplicationConfig::default(),
         }
     }
 }
