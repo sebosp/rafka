@@ -11,7 +11,7 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
-use crate::log::log_config::LogConfig;
+use crate::log::log_config::{LogConfig, LogConfigProperties};
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::kafka_config::KafkaConfig;
 use crate::zk::zk_data;
@@ -550,7 +550,7 @@ impl KafkaZkClient {
     pub async fn get_log_configs(
         majordomo_tx: mpsc::Sender<AsyncTask>,
         topics: Vec<String>,
-        default_config: &LogConfig,
+        kafka_config: &KafkaConfig,
     ) -> (HashMap<String, LogConfig>, HashMap<String, AsyncTaskError>) {
         let mut log_configs: HashMap<String, LogConfig> = HashMap::new();
         let mut failed: HashMap<String, AsyncTaskError> = HashMap::new();
@@ -569,9 +569,17 @@ impl KafkaZkClient {
                     debug!("Topic {} has config_data: {:?}", topic_name, config_data);
                     match zk_data::ConfigEntityZNode::decode(config_data) {
                         Ok(topic_config_data) => {
-                            let log_config =
-                                LogConfig::from_props(default_config, topic_config_data);
-                            log_configs.insert(topic_name, log_config);
+                            match LogConfig::coalesce_broker_defaults_and_per_topic_override(
+                                kafka_config,
+                                topic_config_data,
+                            ) {
+                                Ok(val) => {
+                                    log_configs.insert(topic_name, val);
+                                },
+                                Err(err) => {
+                                    failed.insert(topic_name, AsyncTaskError::KafkaConfig(err));
+                                },
+                            };
                         },
                         Err(err) => {
                             failed.insert(
