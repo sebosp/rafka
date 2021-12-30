@@ -8,14 +8,13 @@ use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
 use crate::server::kafka_config::general::GeneralConfigProperties;
 use crate::server::kafka_config::log::{
-    DefaultLogConfig, DefaultLogConfigProperties, LogCleanupPolicy, LogMessageTimestampType,
+    DefaultLogConfigProperties, LogCleanupPolicy, LogMessageTimestampType,
 };
 use crate::server::kafka_config::replication::ReplicationConfigProperties;
 use crate::server::kafka_config::transaction_management::DEFAULT_COMPRESSION_TYPE;
-use crate::server::kafka_config::{ConfigSet, KafkaConfigError};
+use crate::server::kafka_config::{ConfigSet, KafkaConfig, KafkaConfigError};
 use enum_iterator::IntoEnumIterator;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::fmt;
 use std::str::FromStr;
 use tracing::info;
@@ -726,11 +725,112 @@ impl LogConfigProperties {
     pub fn resolve_message_format_version(&self) -> Result<KafkaApiVersion, KafkaConfigError> {
         KafkaApiVersion::from_str(&self.message_format_version.build()?)
     }
+
+    pub fn try_from(kafka_config: &KafkaConfig) -> Result<Self, KafkaConfigError> {
+        // From KafkaServer copyKafkaConfigToLog
+        let mut res = Self::default();
+
+        res.try_set_property(SEGMENT_BYTES_PROP, &kafka_config.log.log_segment_bytes.to_string())?;
+        res.try_set_property(SEGMENT_MS_PROP, &kafka_config.log.log_roll_time_millis.to_string())?;
+        res.try_set_property(
+            SEGMENT_JITTER_MS_PROP,
+            &kafka_config.log.log_roll_time_jitter_millis.to_string(),
+        )?;
+        res.try_set_property(
+            SEGMENT_INDEX_BYTES_PROP,
+            &kafka_config.log.log_index_size_max_bytes.to_string(),
+        )?;
+        res.try_set_property(
+            FLUSH_MESSAGES_PROP,
+            &kafka_config.log.log_flush_interval_messages.to_string(),
+        )?;
+        res.try_set_property(FLUSH_MS_PROP, &kafka_config.log.log_flush_interval_ms.to_string())?;
+        res.try_set_property(
+            RETENTION_BYTES_PROP,
+            &kafka_config.log.log_retention_bytes.to_string(),
+        )?;
+        res.try_set_property(
+            RETENTION_MS_PROP,
+            &kafka_config.log.log_retention_time_millis.to_string(),
+        )?;
+        res.try_set_property(
+            MAX_MESSAGE_BYTES_PROP,
+            &kafka_config.general.message_max_bytes.to_string(),
+        )?;
+        res.try_set_property(
+            INDEX_INTERVAL_BYTES_PROP,
+            &kafka_config.log.log_index_interval_bytes.to_string(),
+        )?;
+        res.try_set_property(
+            DELETE_RETENTION_MS_PROP,
+            &kafka_config.log.log_cleaner_delete_retention_ms.to_string(),
+        )?;
+        res.try_set_property(
+            MIN_COMPACTION_LAG_MS_PROP,
+            &kafka_config.log.log_cleaner_min_compaction_lag_ms.to_string(),
+        )?;
+        res.try_set_property(
+            MAX_COMPACTION_LAG_MS_PROP,
+            &kafka_config.log.log_cleaner_max_compaction_lag_ms.to_string(),
+        )?;
+        res.try_set_property(
+            FILE_DELETE_DELAY_MS_PROP,
+            &kafka_config.log.log_delete_delay_ms.to_string(),
+        )?;
+        res.try_set_property(
+            MIN_CLEANABLE_DIRTY_RATIO_PROP,
+            &kafka_config.log.log_cleaner_min_clean_ratio.to_string(),
+        )?;
+        res.try_set_property(
+            CLEANUP_POLICY_PROP,
+            &kafka_config
+                .log
+                .log_cleanup_policy
+                .iter()
+                .map(|val| val.to_string())
+                .collect::<Vec<String>>()
+                .join(","),
+        )?;
+        res.try_set_property(
+            MIN_IN_SYNC_REPLICAS_PROP,
+            &kafka_config.log.min_in_sync_replicas.to_string(),
+        )?;
+        res.try_set_property(
+            COMPRESSION_TYPE_PROP,
+            &kafka_config.quota.compression_type.to_string(),
+        )?;
+        res.try_set_property(
+            UNCLEAN_LEADER_ELECTION_ENABLE_PROP,
+            &kafka_config.replication.unclean_leader_election_enable.to_string(),
+        )?;
+        res.try_set_property(
+            PREALLOCATE_ENABLE_PROP,
+            &kafka_config.log.log_pre_allocate_enable.to_string(),
+        )?;
+        res.try_set_property(
+            MESSAGE_FORMAT_VERSION_PROP,
+            &kafka_config.log.log_message_format_version.to_string(),
+        )?;
+        res.try_set_property(
+            MESSAGE_TIMESTAMP_TYPE_PROP,
+            &kafka_config.log.log_message_timestamp_type.to_string(),
+        )?;
+        res.try_set_property(
+            MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP,
+            &kafka_config.log.log_message_timestamp_difference_max_ms.to_string(),
+        )?;
+        res.try_set_property(
+            MESSAGE_DOWNCONVERSION_ENABLE_PROP,
+            &kafka_config.log.log_message_down_conversion_enable.to_string(),
+        )?;
+
+        Ok(res)
+    }
 }
 
 /// `LogConfig` is a topic-specific configuration, in constrant, the `DefaultLogConfig` is the
 /// broker-general configs (i.e. if topics are created, their default values is DefaultLogConfig.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct LogConfig {
     segment_size: usize,
     segment_ms: i64,
@@ -777,58 +877,20 @@ impl LogConfig {
     }
 
     /// Create a log config instance coalescing the per-broker log properties with the
-    /// zookeeper per-topic configurations
+    /// zookeeper per-topic configurations, previously known as from_props
     pub fn coalesce_broker_defaults_and_per_topic_override(
-        defaults: LogConfig,
+        kafka_config: &KafkaConfig,
         topic_overrides: HashMap<String, String>,
     ) -> Result<Self, KafkaConfigError> {
-        let log_config_properties = LogConfigProperties::default();
+        let mut broker_defaults = LogConfigProperties::try_from(&kafka_config)?;
+
         for (property_name, property_value) in topic_overrides {
-            log_config_properties.try_set_property(&property_name, &property_value);
+            broker_defaults.try_set_property(&property_name, &property_value);
         }
         let overridden_keys: Vec<String> =
             topic_overrides.iter().map(|(&name, &val)| val.to_string()).collect();
         info!("Overridden Keys for topic: {:?}", overridden_keys);
-        log_config_properties.build()
-    }
-}
-
-impl TryFrom<DefaultLogConfig> for LogConfig {
-    type Error = KafkaConfigError;
-
-    fn try_from(general_config: DefaultLogConfig) -> Result<Self, Self::Error> {
-        // From KafkaServer copyKafkaConfigToLog
-        let mut res = Self::default();
-        res.segment_size = general_config.log_segment_bytes;
-
-        // logProps.put(LogConfig.SegmentBytesProp, kafkaConfig.logSegmentBytes)
-        // logProps.put(LogConfig.SegmentMsProp, kafkaConfig.logRollTimeMillis)
-        // logProps.put(LogConfig.SegmentJitterMsProp, kafkaConfig.logRollTimeJitterMillis)
-        // logProps.put(LogConfig.SegmentIndexBytesProp, kafkaConfig.logIndexSizeMaxBytes)
-        // logProps.put(LogConfig.FlushMessagesProp, kafkaConfig.logFlushIntervalMessages)
-        // logProps.put(LogConfig.FlushMsProp, kafkaConfig.logFlushIntervalMs)
-        // logProps.put(LogConfig.RetentionBytesProp, kafkaConfig.logRetentionBytes)
-        // logProps.put(LogConfig.RetentionMsProp, kafkaConfig.logRetentionTimeMillis)
-        // logProps.put(LogConfig.MaxMessageBytesProp, kafkaConfig.messageMaxBytes)
-        // logProps.put(LogConfig.IndexIntervalBytesProp, kafkaConfig.logIndexIntervalBytes)
-        // logProps.put(LogConfig.DeleteRetentionMsProp, kafkaConfig.logCleanerDeleteRetentionMs)
-        // logProps.put(LogConfig.MinCompactionLagMsProp, kafkaConfig.logCleanerMinCompactionLagMs)
-        // logProps.put(LogConfig.MaxCompactionLagMsProp, kafkaConfig.logCleanerMaxCompactionLagMs)
-        // logProps.put(LogConfig.FileDeleteDelayMsProp, kafkaConfig.logDeleteDelayMs)
-        // logProps.put(LogConfig.MinCleanableDirtyRatioProp, kafkaConfig.logCleanerMinCleanRatio)
-        // logProps.put(LogConfig.CleanupPolicyProp, kafkaConfig.logCleanupPolicy)
-        // logProps.put(LogConfig.MinInSyncReplicasProp, kafkaConfig.minInSyncReplicas)
-        // logProps.put(LogConfig.CompressionTypeProp, kafkaConfig.compressionType)
-        // logProps.put(LogConfig.UncleanLeaderElectionEnableProp,
-        // kafkaConfig.uncleanLeaderElectionEnable) logProps.put(LogConfig.
-        // PreAllocateEnableProp, kafkaConfig.logPreAllocateEnable) logProps.put(LogConfig.
-        // MessageFormatVersionProp, kafkaConfig.logMessageFormatVersion.version)
-        // logProps.put(LogConfig.MessageTimestampTypeProp,
-        // kafkaConfig.logMessageTimestampType.name) logProps.put(LogConfig.
-        // MessageTimestampDifferenceMaxMsProp, kafkaConfig.logMessageTimestampDifferenceMaxMs)
-        // logProps.put(LogConfig.MessageDownConversionEnableProp,
-        // kafkaConfig.logMessageDownConversionEnable)
-
+        let res = broker_defaults.build()?;
         res.validate_values()?;
         Ok(res)
     }
