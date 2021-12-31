@@ -12,11 +12,12 @@ use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use tracing::error;
 
 /// An ApiVersionDefinition contains a unified version of the original source code DefaultApiVersion
 /// and LegacyApiVersion traits. This seems to be mostly used for documentation (or parsing from
 /// config).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ApiVersionDefinition {
     id: i32,
     version: String,
@@ -420,7 +421,7 @@ impl From<ApiVersionDefinition> for KafkaApiVersion {
         // relationship, they both should be one type somehow. TODO.
         let mut res = KafkaApiVersion::default();
         for variant in KafkaApiVersion::into_enum_iter() {
-            if variant == KafkaApiVersion::from(version) {
+            if variant == KafkaApiVersion::from(version.clone()) {
                 res = variant;
             }
         }
@@ -483,7 +484,7 @@ impl FromStr for ApiVersionDefinition {
         let num_segments = if input.starts_with(&String::from("0.")) { 3 } else { 2 };
         let key = version_segments.iter().take(num_segments).join(".");
         match api_versions.version_map.get(&key) {
-            Some(val) => Ok(*val.clone()),
+            Some(val) => Ok(val.clone()),
             None => Err(KafkaConfigError::InvalidValue(format!(
                 "Version `{}` is not a valid version",
                 input
@@ -506,11 +507,13 @@ impl Default for ApiVersion {
         let all_versions = KafkaApiVersion::all_versions();
         let mut version_map = HashMap::new();
         for version in &all_versions {
-            version_map.insert(version.version, *version.clone());
+            version_map.insert(version.version.clone(), version.clone());
         }
-        for (key, group) in &all_versions.into_iter().group_by(|val| val.short_version) {
+        for (key, group) in
+            &KafkaApiVersion::all_versions().into_iter().group_by(|val| val.short_version.clone())
+        {
             version_map
-                .insert(key, *group.collect::<Vec<ApiVersionDefinition>>().last().unwrap().clone());
+                .insert(key, group.collect::<Vec<ApiVersionDefinition>>().last().unwrap().clone());
         }
 
         Self { version_map, all_versions }
@@ -519,7 +522,7 @@ impl Default for ApiVersion {
 
 impl ApiVersion {
     pub fn latest_version() -> ApiVersionDefinition {
-        *ApiVersion::default().all_versions.last().unwrap()
+        ApiVersion::default().all_versions.last().unwrap().clone()
     }
 
     // Return the minimum `KafkaApiVersion` that supports `RecordVersion`.
@@ -553,6 +556,12 @@ impl Validator for ApiVersionValidator {
     type Value = String;
 
     fn ensure_valid(name: &str, proposed: Self::Value) -> Result<(), KafkaConfigError> {
-        Ok(ApiVersionDefinition::from_str(&proposed).map(|_| ())?)
+        match ApiVersionDefinition::from_str(&proposed) {
+            Ok(_) => Ok(()),
+            Err(err) => {
+                error!("ApiVersionValidator for {} is not valid: {}", name, err);
+                Err(err)
+            },
+        }
     }
 }
