@@ -212,8 +212,8 @@ pub struct LogConfigProperties {
 
 impl Default for LogConfigProperties {
     fn default() -> Self {
-        let broker_default_log_properties = DefaultLogConfigProperties::default();
-        let general_properties = GeneralConfigProperties::default();
+        let mut broker_default_log_properties = DefaultLogConfigProperties::default();
+        let mut general_properties = GeneralConfigProperties::default();
         let replication_properties = ReplicationConfigProperties::default();
         Self {
             cleanup_policy: ConfigDef::default()
@@ -222,7 +222,6 @@ impl Default for LogConfigProperties {
                 .with_doc(CLEANUP_POLICY_DOC.to_string())
                 .with_default(LogCleanupPolicy::Delete.to_string())
                 .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
                     ConfigDef::value_in_list(
                         data,
                         vec![
@@ -236,18 +235,7 @@ impl Default for LogConfigProperties {
                 .with_key(COMPRESSION_TYPE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(COMPRESSION_TYPE_DOC.to_string())
-                .with_default(DEFAULT_COMPRESSION_TYPE.name.to_string())
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::value_in_list(
-                        data,
-                        BrokerCompressionCodec::broker_compression_options()
-                            .iter()
-                            .map(|val| &val.to_string())
-                            .collect(),
-                        COMPRESSION_TYPE_CONFIG,
-                    )
-                })),
+                .with_default(DEFAULT_COMPRESSION_TYPE.name.to_string()),
             delete_retention_ms: ConfigDef::default()
                 .with_key(DELETE_RETENTION_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
@@ -722,12 +710,13 @@ impl LogConfigProperties {
         BrokerCompressionCodec::from_str(&self.compression_type.build()?)
     }
 
-    pub fn resolve_message_format_version(&self) -> Result<KafkaApiVersion, KafkaConfigError> {
+    pub fn resolve_message_format_version(&mut self) -> Result<KafkaApiVersion, KafkaConfigError> {
         KafkaApiVersion::from_str(&self.message_format_version.build()?)
     }
 
     pub fn try_from(kafka_config: &KafkaConfig) -> Result<Self, KafkaConfigError> {
         // From KafkaServer copyKafkaConfigToLog
+        // RAFKA TODO: Could use set_value() and avoid the ToString->FromStr
         let mut res = Self::default();
 
         res.try_set_property(SEGMENT_BYTES_PROP, &kafka_config.log.log_segment_bytes.to_string())?;
@@ -797,7 +786,7 @@ impl LogConfigProperties {
         )?;
         res.try_set_property(
             COMPRESSION_TYPE_PROP,
-            &kafka_config.quota.compression_type.to_string(),
+            &kafka_config.log.compression_type.to_string(),
         )?;
         res.try_set_property(
             UNCLEAN_LEADER_ELECTION_ENABLE_PROP,
@@ -884,11 +873,11 @@ impl LogConfig {
     ) -> Result<Self, KafkaConfigError> {
         let mut broker_defaults = LogConfigProperties::try_from(&kafka_config)?;
 
-        for (property_name, property_value) in topic_overrides {
+        for (property_name, property_value) in &topic_overrides {
             broker_defaults.try_set_property(&property_name, &property_value);
         }
         let overridden_keys: Vec<String> =
-            topic_overrides.iter().map(|(&name, &val)| val.to_string()).collect();
+            topic_overrides.iter().map(|(&name, &val)| name.to_string()).collect();
         info!("Overridden Keys for topic: {:?}", overridden_keys);
         let res = broker_defaults.build()?;
         res.validate_values()?;
