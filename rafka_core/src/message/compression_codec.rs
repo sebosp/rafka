@@ -76,31 +76,31 @@ impl BrokerCompressionCodec {
         ]
     }
 
-    pub fn gen_gzip_compression_codec() -> Self {
+    pub const fn gen_gzip_compression_codec() -> Self {
         Self { codec: Some(1), name: GZIP_COMPRESSION_NAME }
     }
 
-    pub fn gen_snappy_compression_codec() -> Self {
+    pub const fn gen_snappy_compression_codec() -> Self {
         Self { codec: Some(2), name: SNAPPY_COMPRESSION_NAME }
     }
 
-    pub fn gen_lz4_compression_codec() -> Self {
+    pub const fn gen_lz4_compression_codec() -> Self {
         Self { codec: Some(3), name: LZ4_COMPRESSION_NAME }
     }
 
-    pub fn gen_zstd_compression_codec() -> Self {
+    pub const fn gen_zstd_compression_codec() -> Self {
         Self { codec: Some(4), name: ZSTD_COMPRESSION_NAME }
     }
 
-    pub fn gen_none_compression_codec() -> Self {
+    pub const fn gen_none_compression_codec() -> Self {
         Self { codec: Some(0), name: NONE_COMPRESSION_NAME }
     }
 
-    pub fn gen_uncompressed_codec() -> Self {
+    pub const fn gen_uncompressed_codec() -> Self {
         Self { codec: None, name: UNCOMPRESSED_NAME }
     }
 
-    pub fn gen_producer_compression_codec() -> Self {
+    pub const fn gen_producer_compression_codec() -> Self {
         Self { codec: None, name: PRODUCER_COMPRESSION_NAME }
     }
 }
