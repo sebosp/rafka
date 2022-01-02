@@ -4,14 +4,13 @@
 //! speed reasons or disk space exhausted.
 
 use crate::log::cleaner_config::CleanerConfig;
-use crate::log::log_config::LogConfig;
+use crate::log::log_config::{LogConfig, LogConfigProperties};
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_states::BrokerState;
-use crate::server::kafka_config::KafkaConfig;
+use crate::server::kafka_config::{ConfigSet, KafkaConfig};
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -101,14 +100,12 @@ impl LogManager {
         // RAFKA NOTE:
         // - broker_topic_stats has been removed for now.
         // - log_dirs was a String of absolute/canonicalized paths before.
-        let default_log_config: LogConfig = LogConfig::try_from(config.log.clone())?;
-
         let majordomo_tx_cp = majordomo_tx.clone();
         // read the log configurations from zookeeper
         let (topic_configs, failed) = KafkaZkClient::get_log_configs(
             majordomo_tx.clone(),
             KafkaZkClient::get_all_topics_in_cluster(majordomo_tx_cp).await?,
-            &default_log_config,
+            &config,
         )
         .await;
         if !failed.is_empty() {
@@ -117,6 +114,7 @@ impl LogManager {
 
         let cleaner_config = LogCleaner::cleaner_config(&config);
 
+        let broker_defaults = LogConfigProperties::try_from(&config)?.build()?;
         Ok(Self {
             log_dirs: config.log.log_dirs.iter().map(|path| PathBuf::from(path)).collect(),
             initial_offline_dirs: initial_offline_dirs
@@ -124,7 +122,7 @@ impl LogManager {
                 .map(|path| PathBuf::from(path))
                 .collect(),
             topic_configs,
-            initial_default_config: default_log_config,
+            initial_default_config: broker_defaults,
             cleaner_config,
             recovery_threads_per_data_dir: config.log.num_recovery_threads_per_data_dir,
             flush_check_ms: config.log.log_flush_scheduler_interval_ms,
