@@ -12,7 +12,7 @@ use itertools::Itertools;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
-use tracing::error;
+use tracing::{error, trace};
 
 /// An ApiVersionDefinition contains a unified version of the original source code DefaultApiVersion
 /// and LegacyApiVersion traits. This seems to be mostly used for documentation (or parsing from
@@ -418,10 +418,10 @@ impl From<ApiVersionDefinition> for KafkaApiVersion {
     fn from(version: ApiVersionDefinition) -> Self {
         // We set it to the default() version, but we know that it would be overwritten
         // by one of the variants as ApiVersionDefinition and KafkaApiVersion are a 1-to-1
-        // relationship, they both should be one type somehow. TODO.
+        // relationship, they both should be one type somehow. RAFKA TODO.
         let mut res = KafkaApiVersion::default();
         for variant in KafkaApiVersion::into_enum_iter() {
-            if variant == KafkaApiVersion::from(version.clone()) {
+            if ApiVersionDefinition::from(variant.clone()) == version {
                 res = variant;
             }
         }
@@ -479,6 +479,7 @@ impl FromStr for ApiVersionDefinition {
     /// Tries to create an `ApiVersionDefinition` instance from an input string,  formats can be
     /// like: "0.8.0", "0.8.0.x", "0.10.0", "0.10.0-IV1").
     fn from_str(input: &str) -> Result<Self, Self::Err> {
+        trace!("ApiVersionDefinition::from_str({})", input);
         let api_versions = ApiVersion::default();
         let version_segments: Vec<&str> = input.split('.').collect();
         let num_segments = if input.starts_with(&String::from("0.")) { 3 } else { 2 };
@@ -504,6 +505,7 @@ pub struct ApiVersion {
 
 impl Default for ApiVersion {
     fn default() -> Self {
+        trace!("ApiVersion::default()");
         let all_versions = KafkaApiVersion::all_versions();
         let mut version_map = HashMap::new();
         for version in &all_versions {
