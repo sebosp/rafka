@@ -17,7 +17,7 @@ use enum_iterator::IntoEnumIterator;
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
-use tracing::info;
+use tracing::{info, trace};
 
 // nvim .define() lines copied and translated like:
 // s/^\s*.define(\([^,]*\)Prop, \([^,]*\), .*\([LM][OE][^,]*\),.*/\="0pub const ".
@@ -214,7 +214,7 @@ impl Default for LogConfigProperties {
     fn default() -> Self {
         let mut broker_default_log_properties = DefaultLogConfigProperties::default();
         let mut general_properties = GeneralConfigProperties::default();
-        let replication_properties = ReplicationConfigProperties::default();
+        let mut replication_properties = ReplicationConfigProperties::default();
         Self {
             cleanup_policy: ConfigDef::default()
                 .with_key(CLEANUP_POLICY_CONFIG)
@@ -615,6 +615,7 @@ impl ConfigSet for LogConfigProperties {
     }
 
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("LogConfigProperties::build()");
         let segment_size = self.segment_bytes.build()?;
         let segment_ms = self.segment_ms.build()?;
         let segment_jitter_ms = self.segment_jitter_ms.build()?;
@@ -873,11 +874,11 @@ impl LogConfig {
     ) -> Result<Self, KafkaConfigError> {
         let mut broker_defaults = LogConfigProperties::try_from(&kafka_config)?;
 
+        let mut overridden_keys: Vec<String> = vec![];
         for (property_name, property_value) in &topic_overrides {
             broker_defaults.try_set_property(&property_name, &property_value);
+            overridden_keys.push(property_name.to_string());
         }
-        let overridden_keys: Vec<String> =
-            topic_overrides.iter().map(|(&name, &val)| name.to_string()).collect();
         info!("Overridden Keys for topic: {:?}", overridden_keys);
         let res = broker_defaults.build()?;
         res.validate_values()?;
