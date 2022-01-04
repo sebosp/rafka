@@ -41,8 +41,14 @@ async fn main() {
 
     let config_file = matches.value_of("INPUT").unwrap();
     println!("Using input file: {}", config_file);
+    let kafka_config = match KafkaConfig::get_kafka_config(config_file) {
+        Ok(config) => config,
+        Err(err) => {
+            error!("Unable to use config file {}: {:?}", config_file, err);
+            std::process::exit(1);
+        },
+    };
     let (kafka_server_tx, kafka_server_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-    let kafka_config = KafkaConfig::get_kafka_config(config_file).unwrap();
     let kafka_config_clone = kafka_config.clone();
     let mut kafka_zk = KafkaZkClientCoordinator::new(kafka_config.clone()).await.unwrap();
     let (majordomo_tx, majordomo_rx) = mpsc::channel(4096); // TODO: Magic number removal

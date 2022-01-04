@@ -7,6 +7,7 @@ use crate::common::record::records;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
+use tracing::trace;
 
 pub const BROKER_ID_GENERATION_ENABLE_PROP: &str = "broker.id.generation.enable";
 pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
@@ -126,6 +127,7 @@ impl ConfigSet for GeneralConfigProperties {
     }
 
     fn build(&mut self) -> Result<GeneralConfig, KafkaConfigError> {
+        trace!("GeneralConfigProperties::build()");
         let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
         let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
         let broker_id = self.broker_id.build()?;
