@@ -479,7 +479,6 @@ impl FromStr for ApiVersionDefinition {
     /// Tries to create an `ApiVersionDefinition` instance from an input string,  formats can be
     /// like: "0.8.0", "0.8.0.x", "0.10.0", "0.10.0-IV1").
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        trace!("ApiVersionDefinition::from_str({})", input);
         let api_versions = ApiVersion::default();
         let version_segments: Vec<&str> = input.split('.').collect();
         let num_segments = if input.starts_with(&String::from("0.")) { 3 } else { 2 };
