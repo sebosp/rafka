@@ -176,13 +176,13 @@ where
     {
         match data {
             Some(val) => {
-                if valid_list.iter().any(|item| val == *item) {
+                if valid_list.iter().any(|&item| val == item) {
+                    Ok(())
+                } else {
                     Err(KafkaConfigError::InvalidValue(format!(
                         "{}: '{}' should be in list {:?}",
                         key, val, valid_list
                     )))
-                } else {
-                    Ok(())
                 }
             },
             None => {
