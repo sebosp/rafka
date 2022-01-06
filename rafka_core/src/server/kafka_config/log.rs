@@ -10,14 +10,17 @@
 use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
 use super::{ConfigSet, KafkaConfigError};
 use crate::api::api_version::{ApiVersion, KafkaApiVersion};
-use crate::common::config::topic_config::MESSAGE_DOWNCONVERSION_ENABLE_DOC;
+use crate::common::config::topic_config::{
+    COMPRESSION_TYPE_CONFIG, COMPRESSION_TYPE_DOC, MESSAGE_DOWNCONVERSION_ENABLE_DOC,
+};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
+use crate::message::compression_codec::{BrokerCompressionCodec, PRODUCER_COMPRESSION_CODEC};
 use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
-use tracing::warn;
+use tracing::{trace, warn};
 
 pub const LOG_CONFIG_PREFIX: &str = "log.";
 
@@ -180,6 +183,7 @@ pub enum DefaultLogConfigKey {
     NumRecoveryThreadsPerDataDir,
     MinInSyncReplicas,
     LogMessageDownConversionEnable,
+    CompressionType,
 }
 
 impl fmt::Display for DefaultLogConfigKey {
@@ -250,6 +254,7 @@ impl fmt::Display for DefaultLogConfigKey {
             Self::LogMessageDownConversionEnable => {
                 write!(f, "{}", LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
             },
+            Self::CompressionType => write!(f, "{}", COMPRESSION_TYPE_CONFIG),
         }
     }
 }
@@ -306,6 +311,7 @@ impl FromStr for DefaultLogConfigKey {
             NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
             MIN_IN_SYNC_REPLICAS_PROP => Ok(Self::MinInSyncReplicas),
             LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP => Ok(Self::LogMessageDownConversionEnable),
+            COMPRESSION_TYPE_CONFIG => Ok(Self::CompressionType),
             _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
         }
     }
@@ -354,6 +360,7 @@ pub struct DefaultLogConfigProperties {
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
     pub min_in_sync_replicas: ConfigDef<i32>,
     pub log_message_down_conversion_enable: ConfigDef<bool>,
+    compression_type: ConfigDef<BrokerCompressionCodec>,
 }
 
 impl Default for DefaultLogConfigProperties {
@@ -750,6 +757,11 @@ impl Default for DefaultLogConfigProperties {
                 .with_importance(ConfigDefImportance::Low)
                 .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC.to_string())
                 .with_default(true),
+            compression_type: ConfigDef::default()
+                .with_key(COMPRESSION_TYPE_CONFIG)
+                .with_importance(ConfigDefImportance::High)
+                .with_doc(COMPRESSION_TYPE_DOC.to_string())
+                .with_default(PRODUCER_COMPRESSION_CODEC),
         }
     }
 }
@@ -788,6 +800,9 @@ impl ConfigSet for DefaultLogConfigProperties {
             },
             Self::ConfigKey::LogRetentionTimeMinutes => {
                 self.log_retention_time_minutes.try_set_parsed_value(property_value)?
+            },
+            Self::ConfigKey::LogRetentionTimeHours => {
+                self.log_retention_time_hours.try_set_parsed_value(property_value)?
             },
             Self::ConfigKey::LogRetentionBytes => {
                 self.log_retention_bytes.try_set_parsed_value(property_value)?
@@ -876,11 +891,15 @@ impl ConfigSet for DefaultLogConfigProperties {
             Self::ConfigKey::LogMessageDownConversionEnable => {
                 self.log_message_down_conversion_enable.try_set_parsed_value(property_value)?
             },
+            Self::ConfigKey::CompressionType => {
+                self.compression_type.try_set_parsed_value(property_value)?
+            },
         };
         Ok(())
     }
 
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("DefaultLogConfigProperties::build() INIT");
         let log_segment_bytes = self.log_segment_bytes.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
@@ -913,13 +932,16 @@ impl ConfigSet for DefaultLogConfigProperties {
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let log_pre_allocate_enable = self.log_pre_allocate_enable.build()?;
         let log_message_format_version = self.resolve_log_message_format_version()?;
+        trace!("DefaultLogConfigProperties::build() MEH");
         let log_message_timestamp_type = self.resolve_log_message_timestamp_type()?;
         let log_message_timestamp_difference_max_ms =
             self.log_message_timestamp_difference_max_ms.build()?;
         let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
         let min_in_sync_replicas = self.min_in_sync_replicas.build()?;
         let log_message_down_conversion_enable = self.log_message_down_conversion_enable.build()?;
+        let compression_type = self.compression_type.build()?;
         let log_dirs = self.resolve_log_dirs()?;
+        trace!("DefaultLogConfigProperties::build() DONE");
         Ok(Self::ConfigType {
             log_dirs,
             log_segment_bytes,
@@ -955,6 +977,7 @@ impl ConfigSet for DefaultLogConfigProperties {
             num_recovery_threads_per_data_dir,
             min_in_sync_replicas,
             log_message_down_conversion_enable,
+            compression_type,
         })
     }
 }
@@ -1084,6 +1107,7 @@ pub struct DefaultLogConfig {
     pub num_recovery_threads_per_data_dir: i32,
     pub min_in_sync_replicas: i32,
     pub log_message_down_conversion_enable: bool,
+    pub compression_type: BrokerCompressionCodec,
 }
 
 impl Default for DefaultLogConfig {
@@ -1142,6 +1166,7 @@ impl Default for DefaultLogConfig {
         let min_in_sync_replicas = config_properties.min_in_sync_replicas.build().unwrap();
         let log_message_down_conversion_enable =
             config_properties.log_message_down_conversion_enable.build().unwrap();
+        let compression_type = config_properties.compression_type.build().unwrap();
         Self {
             log_dirs,
             log_segment_bytes,
@@ -1177,6 +1202,7 @@ impl Default for DefaultLogConfig {
             num_recovery_threads_per_data_dir,
             min_in_sync_replicas,
             log_message_down_conversion_enable,
+            compression_type,
         }
     }
 }
