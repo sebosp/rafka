@@ -876,7 +876,7 @@ impl LogConfig {
 
         let mut overridden_keys: Vec<String> = vec![];
         for (property_name, property_value) in &topic_overrides {
-            broker_defaults.try_set_property(&property_name, &property_value);
+            broker_defaults.try_set_property(&property_name, &property_value)?;
             overridden_keys.push(property_name.to_string());
         }
         info!("Overridden Keys for topic: {:?}", overridden_keys);
