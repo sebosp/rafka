@@ -30,7 +30,7 @@ use std::io::{self, BufReader};
 use std::num;
 use std::str::FromStr;
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, trace};
 
 use self::socket_server::{SocketConfig, SocketConfigKey, SocketConfigProperties};
 
@@ -289,6 +289,7 @@ impl KafkaConfigProperties {
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
     pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
+        trace!("KafkaConfigProperties::build() INIT");
         let zookeeper = self.zookeeper.build()?;
         let general = self.general.build()?;
         let socket = self.socket.build()?;
@@ -299,6 +300,7 @@ impl KafkaConfigProperties {
         let kafka_config =
             KafkaConfig { zookeeper, general, socket, log, transaction, quota, replication };
         kafka_config.validate_values()?;
+        trace!("KafkaConfigProperties::build() DONE");
         Ok(kafka_config)
     }
 
