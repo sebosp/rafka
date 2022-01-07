@@ -10,6 +10,7 @@ use std::str::FromStr;
 pub const TRANSACTIONAL_ID_EXPIRATION_MS_PROP: &str = "transactional.id.expiration.ms";
 pub const DEFAULT_COMPRESSION_TYPE: BrokerCompressionCodec =
     BrokerCompressionCodec::gen_producer_compression_codec();
+use tracing::trace;
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum TransactionConfigKey {
@@ -86,6 +87,7 @@ impl ConfigSet for TransactionConfigProperties {
     }
 
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("TransactionConfigProperties::build()");
         Ok(Self::ConfigType {
             transactional_id_expiration_ms: self.transactional_id_expiration_ms.build()?,
         })

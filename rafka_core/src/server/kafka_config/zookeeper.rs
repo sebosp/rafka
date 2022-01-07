@@ -4,6 +4,7 @@ use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
+use tracing::trace;
 
 pub const ZK_CONNECT_PROP: &str = "zookeeper.connect";
 pub const ZK_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
@@ -119,6 +120,7 @@ impl ConfigSet for ZookeeperConfigProperties {
     }
 
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("ZookeeperConfigProperties::build()");
         let zk_connect = self.zk_connect.build()?;
         let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
         // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of

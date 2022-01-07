@@ -6,7 +6,7 @@ use crate::utils::core_utils;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
-use tracing::warn;
+use tracing::trace;
 
 pub const PORT_PROP: &str = "port";
 pub const HOST_NAME_PROP: &str = "host.name";
@@ -161,6 +161,7 @@ impl ConfigSet for SocketConfigProperties {
     }
 
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("SocketConfigProperties::build()");
         let port = self.port.build()?;
         let host_name = self.host_name.build()?;
         let listeners = self.resolve_listeners()?;
@@ -231,6 +232,7 @@ pub struct SocketConfig {
 }
 impl Default for SocketConfig {
     fn default() -> Self {
+        trace!("SocketConfig::default()");
         let mut config_properties = SocketConfigProperties::default();
         let port = config_properties.port.build().unwrap();
         let host_name = config_properties.host_name.build().unwrap();

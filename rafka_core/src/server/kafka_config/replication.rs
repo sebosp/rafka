@@ -5,6 +5,7 @@ use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
+use tracing::trace;
 
 pub const UNCLEAN_LEADER_ELECTION_ENABLE_PROP: &str = "unclean.leader.election.enable";
 
@@ -54,7 +55,7 @@ impl Default for ReplicationConfigProperties {
     }
 }
 impl ReplicationConfigProperties {
-    pub fn resolve_unclean_leader_election_enable(&self) -> Result<bool, KafkaConfigError> {
+    pub fn resolve_unclean_leader_election_enable(&mut self) -> Result<bool, KafkaConfigError> {
         self.unclean_leader_election_enable.build()
     }
 }
@@ -79,6 +80,7 @@ impl ConfigSet for ReplicationConfigProperties {
     }
 
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("ReplicationConfigProperties::build()");
         let unclean_leader_election_enable = self.unclean_leader_election_enable.build()?;
         Ok(Self::ConfigType { unclean_leader_election_enable })
     }
