@@ -361,8 +361,9 @@ impl Default for KafkaConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::general::{BROKER_ID_PROP, MESSAGE_MAX_BYTES_PROP, RESERVED_BROKER_MAX_ID_PROP};
+    use super::general::{BROKER_ID_PROP, RESERVED_BROKER_MAX_ID_PROP};
     use super::log::{LOG_DIRS_PROP, LOG_DIR_PROP};
+    use super::zookeeper::*;
     use super::*;
 
     #[test]
@@ -372,13 +373,13 @@ mod tests {
             .unwrap()
             .build()
             .unwrap_err();
-        assert_eq!(config_error, KafkaConfigError::MissingKey(ZOOKEEPER_CONNECT_PROP.to_string()));
+        assert_eq!(config_error, KafkaConfigError::MissingKey(ZK_CONNECT_PROP.to_string()));
         let mut unknown_key_config: HashMap<String, String> = HashMap::new();
         unknown_key_config.insert(String::from("not.a.known.key"), String::from("127.0.0.1:2181"));
-        assert_eq!(
-            KafkaConfigProperties::from_properties_hashmap(unknown_key_config),
-            Err(KafkaConfigError::UnknownKey(String::from("not.a.known.key")))
-        );
+        if let Err(actual_err) = KafkaConfigProperties::from_properties_hashmap(unknown_key_config)
+        {
+            assert_eq!(actual_err, KafkaConfigError::UnknownKey(String::from("not.a.known.key")));
+        }
         let mut missing_key_config: HashMap<String, String> = HashMap::new();
         missing_key_config
             .insert(String::from("zookeeper.session.timeout.ms"), String::from("1000"));
@@ -386,16 +387,16 @@ mod tests {
             .unwrap()
             .build()
             .unwrap_err();
-        assert_eq!(config_error, KafkaConfigError::MissingKey(ZOOKEEPER_CONNECT_PROP.to_string()));
+        assert_eq!(config_error, KafkaConfigError::MissingKey(ZK_CONNECT_PROP.to_string()));
         let mut full_config: HashMap<String, String> = HashMap::new();
-        full_config.insert(String::from(ZOOKEEPER_CONNECT_PROP), String::from("127.0.0.1:2181"));
-        full_config.insert(String::from(ZOOKEEPER_SESSION_TIMEOUT_PROP), String::from("1000"));
-        full_config.insert(String::from(ZOOKEEPER_CONNECTION_TIMEOUT_PROP), String::from("1000"));
+        full_config.insert(String::from(ZK_CONNECT_PROP), String::from("127.0.0.1:2181"));
+        full_config.insert(String::from(ZK_SESSION_TIMEOUT_PROP), String::from("1000"));
+        full_config.insert(String::from(ZK_CONNECTION_TIMEOUT_PROP), String::from("1000"));
         full_config.insert(String::from(LOG_DIRS_PROP), String::from("/some-dir/logs"));
         assert!(KafkaConfigProperties::from_properties_hashmap(full_config).is_ok());
         let mut multiple_log_dir_properties: HashMap<String, String> = HashMap::new();
         multiple_log_dir_properties
-            .insert(String::from(ZOOKEEPER_CONNECT_PROP), String::from("127.0.0.1:2181"));
+            .insert(String::from(ZK_CONNECT_PROP), String::from("127.0.0.1:2181"));
         multiple_log_dir_properties
             .insert(String::from(LOG_DIR_PROP), String::from("/single/log/dir"));
         multiple_log_dir_properties
@@ -405,13 +406,12 @@ mod tests {
         assert!(config_builder.is_ok());
         let mut config_builder = config_builder.unwrap();
         let config = config_builder.build().unwrap();
-        assert_eq!(config.log_dirs, vec![
+        assert_eq!(config.log.log_dirs, vec![
             String::from("/some-1/logs"),
             String::from("/some-2-logs")
         ]);
         let mut invalid_broker_id: HashMap<String, String> = HashMap::new();
-        invalid_broker_id
-            .insert(String::from(ZOOKEEPER_CONNECT_PROP), String::from("127.0.0.1:2181"));
+        invalid_broker_id.insert(String::from(ZK_CONNECT_PROP), String::from("127.0.0.1:2181"));
         invalid_broker_id.insert(String::from(BROKER_ID_PROP), String::from("-2"));
         let config_error = KafkaConfigProperties::from_properties_hashmap(invalid_broker_id)
             .unwrap()
