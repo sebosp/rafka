@@ -275,9 +275,8 @@ impl KafkaServer {
                 self.kafka_scheduler.clone(),
                 self.init_time, // should this be re-calculated?
                 //&self.broker_topic_stats,
-                self.async_task_tx.clone(), /* log_dir_failure_channel needs to be acquaired
-                                             * through
-                                             * the async_task_tx */
+                self.async_task_tx.clone(), /* RAFKA TODO: log_dir_failure_channel needs to be
+                                             * acquaired through the async_task_tx */
             )
             .await?,
         );
@@ -319,7 +318,7 @@ impl KafkaServer {
                     Err(err) => {
                         offline_dirs.push(log_dir.to_string());
                         error!(
-                            "Fail to read {} under log directory {}: {:?}",
+                            "Failed to read {} under log directory {}: {:?}",
                             self.broker_meta_props_file, log_dir, err
                         );
                     },
@@ -517,10 +516,11 @@ mod tests {
         let bm_b1 = BrokerMetadata::new(1, None);
         let bm_b2 = BrokerMetadata::new(2, None);
         let bm_b_unset = BrokerMetadata::new(-1, None);
-        let ks_b1 = KafkaServer {
-            dynamic_broker_config: DynamicBrokerConfig::new(KafkaConfig {
-                general: GeneralConfig { broker_id: 1, ..Default::default() }..Default::default(),
-            })..Default::default(),
+        let general = GeneralConfig { broker_id: 1, ..GeneralConfig::default() };
+        let kafka_config = KafkaConfig { general, ..KafkaConfig::default() };
+        let mut ks_b1 = KafkaServer {
+            dynamic_broker_config: DynamicBrokerConfig::new(kafka_config),
+            ..KafkaServer::default()
         };
         let same_broker_id = ks_b1.get_or_generate_broker_id(bm_b1.clone()).await;
         assert!(same_broker_id.is_ok());
@@ -532,7 +532,7 @@ mod tests {
         assert!(with_bm_b_unset.is_ok());
         let with_bm_b_unset = with_bm_b_unset.unwrap();
         assert_eq!(with_bm_b_unset, 1);
-        let ks_b_unset = KafkaServer::default();
+        let mut ks_b_unset = KafkaServer::default();
         let broker_1 = ks_b_unset.get_or_generate_broker_id(bm_b1).await.unwrap();
         assert_eq!(broker_1, 1);
         // NOTE: We cannot test with both KafaServer.config.broker_id being -1 and
