@@ -11,12 +11,13 @@
 
 // RAFKA TODO: The documentation may not be accurate anymore.
 
-use crate::log::log_config::{LogConfig, LogConfigProperties};
+use crate::log::log_config::LogConfig;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::server::dynamic_config_manager::ConfigType;
 use crate::server::kafka_config::KafkaConfig;
-use crate::zk::zk_data;
-use crate::zk::zk_data::ZNodeDecodeError;
-use crate::zk::zk_data::ZNodeHandle;
+use crate::zk::zk_data::{
+    self, ConfigEntityZNode, ConfigZNode, ZNodeDecodeError, ZNodeHandle, ZkData, ZkVersion,
+};
 use crate::zookeeper::zoo_keeper_client::ZKClientConfig;
 use crate::zookeeper::zoo_keeper_client::ZooKeeperClient;
 use std::collections::HashMap;
@@ -60,7 +61,7 @@ pub struct KafkaZkClient {
     // id changes over the time for 'Session expired'. This code is part of the work around
     // done in the KAFKA-7165, once ZOOKEEPER-2985 is complete, this code must be deleted.
     current_zookeeper_session_id: i32,
-    pub zk_data: zk_data::ZkData,
+    pub zk_data: ZkData,
 }
 
 impl Default for KafkaZkClient {
@@ -69,7 +70,7 @@ impl Default for KafkaZkClient {
             zoo_keeper_client: ZooKeeperClient::default(),
             time: Instant::now(),
             current_zookeeper_session_id: -1i32,
-            zk_data: zk_data::ZkData::default(),
+            zk_data: ZkData::default(),
         }
     }
 }
@@ -80,7 +81,7 @@ impl KafkaZkClient {
             zoo_keeper_client,
             time,
             current_zookeeper_session_id: -1i32,
-            zk_data: zk_data::ZkData::default(),
+            zk_data: ZkData::default(),
         }
     }
 
@@ -330,10 +331,9 @@ impl KafkaZkClient {
     ) -> Result<GetDataAndVersionResponse, AsyncTaskError> {
         let (data, stat) = self.get_data_and_stat(path).await?;
         match stat {
-            None => Ok(GetDataAndVersionResponse {
-                data,
-                version: zk_data::ZkVersion::UnknownVersion as i32,
-            }),
+            None => {
+                Ok(GetDataAndVersionResponse { data, version: ZkVersion::UnknownVersion as i32 })
+            },
             Some(zk_stat) => Ok(GetDataAndVersionResponse { data, version: zk_stat.version }),
         }
     }
@@ -521,14 +521,11 @@ impl KafkaZkClient {
         sanitized_entity_name: &str,
     ) -> Result<Option<Vec<u8>>, AsyncTaskError> {
         let (tx, rx) = oneshot::channel();
-        let config_znode = zk_data::ConfigZNode::build();
-        let root_entity_zk_node_path = zk_data::ConfigEntityZNode::build(
-            &config_znode,
-            root_entity_type,
-            sanitized_entity_name,
-        )
-        .path()
-        .to_string();
+        let config_znode = ConfigZNode::build();
+        let root_entity_zk_node_path =
+            ConfigEntityZNode::build(&config_znode, root_entity_type, sanitized_entity_name)
+                .path()
+                .to_string();
         Self::req_get_data_and_version(majordomo_tx, tx, root_entity_zk_node_path).await?;
         Ok(rx.await.unwrap().data)
     }
@@ -541,7 +538,37 @@ impl KafkaZkClient {
         majordomo_tx: mpsc::Sender<AsyncTask>,
         topics: Vec<String>,
     ) -> Vec<(String, Result<Option<Vec<u8>>, AsyncTaskError>)> {
-        unimplemented!()
+        let mut res: Vec<(String, Result<Option<Vec<u8>>, AsyncTaskError>)> = vec![];
+        let mut reply_channels: Vec<(String, oneshot::Receiver<GetDataAndVersionResponse>)> =
+            vec![];
+        let config_znode = zk_data::ConfigZNode::build();
+        let config_types = ConfigType::build(&config_znode);
+        for topic in topics {
+            let (tx, rx) = oneshot::channel();
+            reply_channels.push((topic.to_string(), rx));
+            let root_entity_zk_node_path =
+                zk_data::ConfigEntityZNode::build(&config_znode, &config_types.topic, &topic)
+                    .path()
+                    .to_string();
+            match Self::req_get_data_and_version(majordomo_tx.clone(), tx, root_entity_zk_node_path)
+                .await
+            {
+                Ok(()) => (),
+                Err(err) => res.push((topic.to_string(), Err(err))),
+            };
+        }
+        // RAFKA TODO: This should be batched, we could `peak` at the futures's completion and
+        // retry until they finished, instead of serially waiting for them...
+        // RAFKA NOTE: Could this block the executor's event loop?
+        // i.e.: Three topics [1,2,3] xist in zookeeper, we send the async requests, topic 2
+        // replies first and the executor tx.send() it, but we are waiting for topic 1...
+        for (topic, rx) in reply_channels {
+            match rx.await {
+                Ok(val) => res.push((topic, Ok(val.data))),
+                Err(err) => res.push((topic, Err(AsyncTaskError::OneShotRecvErrorRecv(err)))),
+            };
+        }
+        res
     }
 
     /// `get_log_configs` Get the log configs merging the general kafka config with the zookeeper
