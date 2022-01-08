@@ -1206,3 +1206,18 @@ impl Default for DefaultLogConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_sets_config() {
+        let mut conf_props = DefaultLogConfigProperties::default();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_dirs, vec!["/tmp/kafka-logs"]);
+        conf_props.try_set_property(LOG_DIRS_PROP, &String::from("/some-1/logs, /some-2-logs"));
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_dirs, vec![String::from("/some-1/logs"), String::from("/some-2-logs")]);
+    }
+}
