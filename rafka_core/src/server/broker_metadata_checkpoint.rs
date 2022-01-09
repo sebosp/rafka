@@ -145,7 +145,7 @@ where
 mod tests {
     use super::*;
 
-    // #[test_env_log::test]
+    // #[test_log::test]
     #[test]
     fn parse_config_string() {
         let filename = String::from("somepath");

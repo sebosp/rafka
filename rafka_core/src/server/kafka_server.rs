@@ -460,7 +460,7 @@ mod tests {
     use crate::server::kafka_config::general::GeneralConfig;
 
     use super::*;
-    // #[test_env_log::test]
+    // #[test_log::test]
     #[test]
     fn it_loads_brokermetadata() {
         let mut good_broker_metadata_set: HashSet<BrokerMetadata> = HashSet::new();

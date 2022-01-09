@@ -615,7 +615,7 @@ mod test {
     use crate::common::feature::finalized_version_range::FinalizedVersionRange;
     use tracing::info;
     // From core/src/test/scala/kafka/zk/FeatureZNodeTest.scala
-    #[test_env_log::test]
+    #[test_log::test]
     fn feature_znode_builder_decodes() {
         let valid_features = serde_json::json!({
             "version":1,
