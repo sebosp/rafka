@@ -3,12 +3,13 @@
 use crate::server::kafka_config::KafkaConfigError;
 use std::fmt;
 use std::str::FromStr;
-use tracing::{error, info};
+use tracing::{error, info, trace};
 
 /// Perform  validation of configuration read from .properties, zookeeper, etc
 pub trait Validator {
     type Value;
-    fn ensure_valid(name: &str, value: Self::Value) -> Result<(), KafkaConfigError> {
+    fn ensure_valid(name: &str, _value: Self::Value) -> Result<(), KafkaConfigError> {
+        trace!("Validator::ensure_valid no custom validator for {}. returning Ok(())", name);
         Ok(())
     }
 }
