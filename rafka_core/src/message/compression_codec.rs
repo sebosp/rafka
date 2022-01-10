@@ -9,7 +9,7 @@ pub const SNAPPY_COMPRESSION_NAME: &str = "snappy";
 pub const LZ4_COMPRESSION_NAME: &str = "lz4";
 pub const ZSTD_COMPRESSION_NAME: &str = "zstd";
 pub const NONE_COMPRESSION_NAME: &str = "none";
-pub const UNCOMPRESSED_NAME: &str = "uncompressed";
+pub const UNCOMPRESSED_COMPRESSION_NAME: &str = "uncompressed";
 pub const PRODUCER_COMPRESSION_NAME: &str = "producer";
 
 pub const GZIP_COMPRESSION_CODEC: BrokerCompressionCodec =
@@ -97,10 +97,34 @@ impl BrokerCompressionCodec {
     }
 
     pub const fn gen_uncompressed_codec() -> Self {
-        Self { codec: None, name: UNCOMPRESSED_NAME }
+        Self { codec: None, name: UNCOMPRESSED_COMPRESSION_NAME }
     }
 
     pub const fn gen_producer_compression_codec() -> Self {
         Self { codec: None, name: PRODUCER_COMPRESSION_NAME }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_transforms_from_str() {
+        let gzip_comp = BrokerCompressionCodec::from_str(GZIP_COMPRESSION_NAME).unwrap();
+        assert_eq!(gzip_comp.codec, Some(1i32));
+        let snappy_comp = BrokerCompressionCodec::from_str(SNAPPY_COMPRESSION_NAME).unwrap();
+        assert_eq!(snappy_comp.codec, Some(2i32));
+        let lz4_comp = BrokerCompressionCodec::from_str(LZ4_COMPRESSION_NAME).unwrap();
+        assert_eq!(lz4_comp.codec, Some(3i32));
+        let zstd_comp = BrokerCompressionCodec::from_str(ZSTD_COMPRESSION_NAME).unwrap();
+        assert_eq!(zstd_comp.codec, Some(4i32));
+        let none_comp = BrokerCompressionCodec::from_str(NONE_COMPRESSION_NAME).unwrap();
+        assert_eq!(none_comp.codec, Some(0i32));
+        let uncompressed_comp =
+            BrokerCompressionCodec::from_str(UNCOMPRESSED_COMPRESSION_NAME).unwrap();
+        assert_eq!(uncompressed_comp.codec, None);
+        let producer_comp = BrokerCompressionCodec::from_str(PRODUCER_COMPRESSION_NAME).unwrap();
+        assert_eq!(producer_comp.codec, None);
+        assert!(BrokerCompressionCodec::from_str("not-a-known-producer").is_err());
     }
 }
