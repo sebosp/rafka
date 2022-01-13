@@ -276,7 +276,7 @@ impl FromStr for DefaultLogConfigKey {
             LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
             LOG_RETENTION_BYTES_PROP => Ok(Self::LogRetentionBytes),
             LOG_CLEANUP_INTERVAL_MS_PROP => Ok(Self::LogCleanupIntervalMs),
-            LOG_CLEANUP_POLICY => Ok(Self::LogCleanupPolicy),
+            LOG_CLEANUP_POLICY_PROP => Ok(Self::LogCleanupPolicy),
             LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
             LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
             LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
@@ -285,7 +285,7 @@ impl FromStr for DefaultLogConfigKey {
             },
             LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP => Ok(Self::LogCleanerIoMaxBytesPerSecond),
             LOG_CLEANER_BACKOFF_MS_PROP => Ok(Self::LogCleanerBackoffMs),
-            LOG_CLEANER_MIN_CLEAN_RATIO => Ok(Self::LogCleanerMinCleanRatio),
+            LOG_CLEANER_MIN_CLEAN_RATIO_PROP => Ok(Self::LogCleanerMinCleanRatio),
             LOG_CLEANER_ENABLE_PROP => Ok(Self::LogCleanerEnable),
             LOG_CLEANER_DELETE_RETENTION_MS_PROP => Ok(Self::LogCleanerDeleteRetentionMs),
             LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMinCompactionLagMs),
@@ -1216,7 +1216,9 @@ mod tests {
         let mut conf_props = DefaultLogConfigProperties::default();
         let conf = conf_props.build().unwrap();
         assert_eq!(conf.log_dirs, vec!["/tmp/kafka-logs"]);
-        conf_props.try_set_property(LOG_DIRS_PROP, &String::from("/some-1/logs, /some-2-logs"));
+        conf_props
+            .try_set_property(LOG_DIRS_PROP, &String::from("/some-1/logs, /some-2-logs"))
+            .unwrap();
         let conf = conf_props.build().unwrap();
         assert_eq!(conf.log_dirs, vec![String::from("/some-1/logs"), String::from("/some-2-logs")]);
     }
