@@ -3,7 +3,7 @@
 //! configuration. A topic may be individually configured via zookeeper, see
 //! `crate::log::log_config`
 //! RAFKA TODO:
-//! In order to get a T out of ConfigDef<T> one may rely on the build() or customer resolve_<field>
+//! In order to get a T out of ConfigDef<T> one may rely on the build() or custom resolve_<field>
 //! It's possible and an error to use the build() unaware of the resolve_<field>, and with so many
 //! fields it's just a matter of time.
 

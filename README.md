@@ -53,9 +53,10 @@ $ cargo run -- -v info rafka-config
 - Finalized Feature Change Listeners
 - Dynamic Config can be recognized from zookeeper, but the reconfiguration is not done
 yet, that should be done later, will focus on functionality and deal with this later.
+- Dynamic Broker Configurations
 
 ## Next
-- Dynamic Broker Configurations
+- LogManager Start
 
 ## Current issues
 -  If zookeeper is not available, the CPU usage goes crazy, using connection timeout/etc doesn't seem to help.
