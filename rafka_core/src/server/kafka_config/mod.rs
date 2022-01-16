@@ -182,10 +182,19 @@ pub trait ConfigSet {
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError>;
-    /// `build` validates and resolves dependant properties from a ConfigKey into a
-    /// ConfigType. NOTE: This doesn't consume self, as a ConfigKey may be re-used after bootstrap,
+    /// `prebuild` resolves dependant properties from a ConfigKey into a ConfigType.
+    /// NOTE: This doesn't consume self, as a ConfigKey may be re-used after bootstrap,
     /// on-the-fly without the need to restart, for example via zookeeper
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError>;
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError>;
+    /// `build` calls the per-type `resolve`/`build` to transform From<ConfigDef<T>> -> T
+    /// And resolves/fallbacks to other properties and/or uses defaults.
+    /// Once value resolution is done, validate_values makes sure that variables are compatible
+    /// with each-other
+    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        let res = self.resolve()?;
+        self.validate_values(&res)?;
+        Ok(res)
+    }
     /// `config_names` returns a list of config keys used
     fn config_names() -> Vec<String>
     where
@@ -209,7 +218,11 @@ pub trait ConfigSet {
         }
         Ok(config_builder)
     }
-    // RAFKA TODO: Consider adding validate_values()
+    /// `validate_values` ensures values are compatible with others and within limits not provided
+    /// by the custom Validator types.
+    fn validate_values(&self, _cfg: &Self::ConfigType) -> Result<(), KafkaConfigError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -288,7 +301,7 @@ impl KafkaConfigProperties {
 
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
-    pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
+    fn resolve(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
         trace!("KafkaConfigProperties::build() INIT");
         let zookeeper = self.zookeeper.build()?;
         let general = self.general.build()?;
@@ -299,9 +312,15 @@ impl KafkaConfigProperties {
         let replication = self.replication.build()?;
         let kafka_config =
             KafkaConfig { zookeeper, general, socket, log, transaction, quota, replication };
-        kafka_config.validate_values()?;
         trace!("KafkaConfigProperties::build() DONE");
         Ok(kafka_config)
+    }
+
+    pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
+        let res = self.resolve()?;
+        // Internally every resolve call has call its sub-type validate values, so no need to call
+        // it again. unless we want to check consistency of all sub-configs as a whole.
+        Ok(res)
     }
 
     /// Transforms from a HashMap of configs into a KafkaConfigProperties object
@@ -336,11 +355,6 @@ impl KafkaConfig {
         let mut config_file_content = File::open(&filename)?;
         let input_config = java_properties::read(BufReader::new(&mut config_file_content))?;
         KafkaConfigProperties::from_properties_hashmap(input_config)?.build()
-    }
-
-    pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
-        self.general.validate_values()?;
-        Ok(())
     }
 }
 

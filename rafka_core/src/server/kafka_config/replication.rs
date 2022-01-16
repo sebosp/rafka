@@ -79,8 +79,8 @@ impl ConfigSet for ReplicationConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
-        trace!("ReplicationConfigProperties::build()");
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("ReplicationConfigProperties::resolve()");
         let unclean_leader_election_enable = self.unclean_leader_election_enable.build()?;
         Ok(Self::ConfigType { unclean_leader_election_enable })
     }

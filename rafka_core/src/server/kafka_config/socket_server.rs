@@ -160,8 +160,8 @@ impl ConfigSet for SocketConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
-        trace!("SocketConfigProperties::build()");
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("SocketConfigProperties::resolve()");
         let port = self.port.build()?;
         let host_name = self.host_name.build()?;
         let listeners = self.resolve_listeners()?;

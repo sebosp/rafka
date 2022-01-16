@@ -86,8 +86,8 @@ impl ConfigSet for TransactionConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
-        trace!("TransactionConfigProperties::build()");
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("TransactionConfigProperties::resolve()");
         Ok(Self::ConfigType {
             transactional_id_expiration_ms: self.transactional_id_expiration_ms.build()?,
         })

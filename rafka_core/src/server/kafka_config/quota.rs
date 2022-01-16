@@ -123,7 +123,7 @@ impl ConfigSet for QuotaConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         let consumer_quota_bytes_per_second_default =
             self.consumer_quota_bytes_per_second_default.build()?;
         let producer_quota_bytes_per_second_default =

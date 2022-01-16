@@ -898,7 +898,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("DefaultLogConfigProperties::build() INIT");
         let log_segment_bytes = self.log_segment_bytes.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;

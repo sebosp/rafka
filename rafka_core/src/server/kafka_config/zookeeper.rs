@@ -119,8 +119,8 @@ impl ConfigSet for ZookeeperConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
-        trace!("ZookeeperConfigProperties::build()");
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("ZookeeperConfigProperties::resolve()");
         let zk_connect = self.zk_connect.build()?;
         let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
         // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of

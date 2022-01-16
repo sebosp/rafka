@@ -614,8 +614,8 @@ impl ConfigSet for LogConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
-        trace!("LogConfigProperties::build()");
+    fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
+        trace!("LogConfigProperties::resolve()");
         let segment_size = self.segment_bytes.build()?;
         let segment_ms = self.segment_ms.build()?;
         let segment_jitter_ms = self.segment_jitter_ms.build()?;

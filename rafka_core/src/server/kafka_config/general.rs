@@ -126,7 +126,7 @@ impl ConfigSet for GeneralConfigProperties {
         Ok(())
     }
 
-    fn build(&mut self) -> Result<GeneralConfig, KafkaConfigError> {
+    fn resolve(&mut self) -> Result<GeneralConfig, KafkaConfigError> {
         trace!("GeneralConfigProperties::build()");
         let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
         let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
@@ -138,6 +138,23 @@ impl ConfigSet for GeneralConfigProperties {
             broker_id,
             message_max_bytes,
         })
+    }
+
+    fn validate_values(&self, cfg: &Self::ConfigType) -> Result<(), KafkaConfigError> {
+        if cfg.broker_id_generation_enable {
+            if cfg.broker_id < -1 || cfg.broker_id > cfg.reserved_broker_max_id {
+                return Err(KafkaConfigError::InvalidValue(format!(
+                    "{}: '{}' must be equal or greater than -1 and not greater than {}",
+                    BROKER_ID_PROP, cfg.broker_id, RESERVED_BROKER_MAX_ID_PROP
+                )));
+            }
+        } else if cfg.broker_id < 0 {
+            return Err(KafkaConfigError::InvalidValue(format!(
+                "{}: '{}' must be equal or greater than 0",
+                BROKER_ID_PROP, cfg.broker_id
+            )));
+        }
+        Ok(())
     }
 }
 #[derive(Debug, PartialEq, Clone)]
@@ -161,21 +178,20 @@ impl Default for GeneralConfig {
     }
 }
 
-impl GeneralConfig {
-    pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
-        if self.broker_id_generation_enable {
-            if self.broker_id < -1 || self.broker_id > self.reserved_broker_max_id {
-                return Err(KafkaConfigError::InvalidValue(format!(
-                    "{}: '{}' must be equal or greater than -1 and not greater than {}",
-                    BROKER_ID_PROP, self.broker_id, RESERVED_BROKER_MAX_ID_PROP
-                )));
-            }
-        } else if self.broker_id < 0 {
-            return Err(KafkaConfigError::InvalidValue(format!(
-                "{}: '{}' must be equal or greater than 0",
-                BROKER_ID_PROP, self.broker_id
-            )));
-        }
-        Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::server::kafka_config::KafkaConfigError;
+    #[test_log::test]
+    fn it_sets_config() {
+        let mut conf_props = GeneralConfigProperties::default();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.broker_id, -1);
+        conf_props.try_set_property(BROKER_ID_PROP, &String::from("1")).unwrap();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.broker_id, 1);
+        conf_props.try_set_property(BROKER_ID_PROP, &String::from("-2")).unwrap();
+        let conf_res = conf_props.build();
+        assert!(conf_res.is_err());
     }
 }
