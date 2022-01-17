@@ -181,7 +181,6 @@ impl Default for GeneralConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::kafka_config::KafkaConfigError;
     #[test_log::test]
     fn it_sets_config() {
         let mut conf_props = GeneralConfigProperties::default();
