@@ -42,6 +42,9 @@ pub struct ConfigDef<T> {
     value: Option<T>,
     /// A validator to ensure the new field value is correct
     validator: Option<Box<dyn Fn(Option<&T>) -> Result<(), KafkaConfigError>>>,
+    /// An specialized buider may be needed to unsure the value is built properly.
+    /// For example when several fields are checked in hierarchy to derive a value
+    has_custom_builder: bool,
 }
 
 impl<T> fmt::Debug for ConfigDef<T>
@@ -85,6 +88,7 @@ impl<T> Default for ConfigDef<T> {
             provided: false,
             value: None,
             validator: None,
+            has_custom_builder: false,
         }
     }
 }
@@ -107,11 +111,21 @@ where
         self
     }
 
+    /// Sets the documentation field for the current ConfigDef
     pub fn with_doc(mut self, doc: String) -> Self {
         self.doc = doc;
         self
     }
 
+    /// Marks the ConfigDef as requiring a specialzed resolver, this is needed so that `build()` is
+    /// not called by mistake on ConfigDef values that are special. Maybe a marker trait NoBuild
+    /// could be used for this somehow?
+    pub fn with_custom_builder(mut self) -> Self {
+        self.has_custom_builder = true;
+        self
+    }
+    
+    /// Sets the default vale for a ConfigDef
     pub fn with_default(mut self, default: T) -> Self
     where
         T: Clone,
@@ -274,6 +288,9 @@ where
     where
         T: Clone,
     {
+        if self.has_custom_builder {
+            panic!("build() may not be called on {}, use the specialized resolve_<field> for it", self. key);
+        }
         self.validate()?;
         match &self.value {
             Some(value) => Ok(value.clone()),
