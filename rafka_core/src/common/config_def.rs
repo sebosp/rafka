@@ -42,9 +42,6 @@ pub struct ConfigDef<T> {
     value: Option<T>,
     /// A validator to ensure the new field value is correct
     validator: Option<Box<dyn Fn(Option<&T>) -> Result<(), KafkaConfigError>>>,
-    /// An specialized buider may be needed to unsure the value is built properly.
-    /// For example when several fields are checked in hierarchy to derive a value
-    has_custom_builder: bool,
 }
 
 impl<T> fmt::Debug for ConfigDef<T>
@@ -88,7 +85,6 @@ impl<T> Default for ConfigDef<T> {
             provided: false,
             value: None,
             validator: None,
-            has_custom_builder: false,
         }
     }
 }
@@ -117,15 +113,6 @@ where
         self
     }
 
-    /// Marks the ConfigDef as requiring a specialzed resolver, this is needed so that `build()` is
-    /// not called by mistake on ConfigDef values that are special. Maybe a marker trait NoBuild
-    /// could be used for this somehow?
-    pub fn with_custom_builder(mut self) -> Self {
-        self.has_custom_builder = true;
-        self
-    }
-    
-    /// Sets the default vale for a ConfigDef
     pub fn with_default(mut self, default: T) -> Self
     where
         T: Clone,
@@ -288,9 +275,6 @@ where
     where
         T: Clone,
     {
-        if self.has_custom_builder {
-            panic!("build() may not be called on {}, use the specialized resolve_<field> for it", self. key);
-        }
         self.validate()?;
         match &self.value {
             Some(value) => Ok(value.clone()),
@@ -300,8 +284,7 @@ where
 
     /// `resolve` validates the current value if Some() variant, if None it fallbacks to `fallback`
     /// If the fallback property is None, a KafkaConfigError is returned.
-    /// TODO: rename to `get_or_fallback`
-    pub fn resolve(&mut self, fallback: &Self) -> Result<(), KafkaConfigError>
+    pub fn get_or_fallback(&mut self, fallback: &Self) -> Result<(), KafkaConfigError>
     where
         T: Clone,
     {
@@ -328,5 +311,118 @@ where
                 },
             }
         }
+    }
+}
+
+/// A ComplexConfigDef contains an internal ConfigDef, it can call all the functions from ConfigDef
+/// except for the build(), as it's easy to forget when a type is complex and needs to rely on
+/// a specialized resolve_<field>
+/// must have its own "resolve_()"
+pub struct ComplexConfigDef<T> {
+    pub config_def: ConfigDef<T>,
+}
+
+impl<T> ComplexConfigDef<T>
+where
+    T: FromStr,
+    KafkaConfigError: From<<T as FromStr>::Err>,
+    <T as FromStr>::Err: std::fmt::Display,
+    T: std::fmt::Debug,
+{
+
+    pub fn with_importance(mut self, importance: ConfigDefImportance) -> Self {
+        self.config_def = self.config_def.with_importance(importance);
+        self
+    }
+
+    /// Sets the `key` value, this comes from const &str values in the calling modules
+    pub fn with_key(mut self, key: &str) -> Self {
+        self.config_def = self.config_def.with_key(key);
+        self
+    }
+
+    /// Sets the documentation field for the current ConfigDef
+    pub fn with_doc(mut self, doc: String) -> Self {
+        self.config_def = self.config_def.with_doc(doc);
+        self
+    }
+
+    pub fn with_default(mut self, default: T) -> Self
+    where
+        T: Clone,
+    {
+        self.config_def = self.config_def.with_default(default);
+        self
+    }
+
+    pub fn with_validator(
+        mut self,
+        validator: Box<dyn Fn(Option<&T>) -> Result<(), KafkaConfigError>>,
+    ) -> Self {
+        self.config_def = self.config_def.with_validator(validator);
+        self
+    }
+
+    pub fn set_value(&mut self, value: T) {
+        self.config_def.set_value(value);
+    }
+
+    pub fn try_set_parsed_value(&mut self, value: &str) -> Result<(), KafkaConfigError> {
+        self.config_def.try_set_parsed_value(value)
+    }
+
+    pub fn get_value(&self) -> Option<&T> {
+        self.config_def.get_value()
+    }
+
+    pub fn get_importance(&self) -> &ConfigDefImportance {
+        &self.config_def.get_importance()
+    }
+
+    pub fn is_provided(&self) -> bool {
+        self.config_def.is_provided()
+    }
+
+    pub fn has_default(&self) -> bool {
+        self.config_def.has_default()
+    }
+
+    pub fn validate(&self) -> Result<(), KafkaConfigError> {
+        self.config_def.validate()
+    }
+
+    pub fn get_or_simple_fallback(&mut self, fallback: &ConfigDef<T>) -> Result<(), KafkaConfigError>
+    where
+        T: Clone,
+    {
+        self.config_def.get_or_fallback(fallback)
+    }
+
+    /// A wrapper for the internal ConfigDef build(), this allows for the caller to know it cannot
+    /// rely on the build() alone to build the final resulting type
+    pub fn simple_build(&mut self) -> Result<T, KafkaConfigError>
+    where
+        T: Clone,
+    {
+        self.config_def.build()
+    }
+}
+
+impl<T> Default for ComplexConfigDef<T> {
+    fn default() -> Self {
+        Self {
+            config_def: ConfigDef::default(),
+        }
+    }
+}
+
+impl<T> fmt::Debug for ComplexConfigDef<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ComplexConfigDef")
+            .field("config_def", &self.config_def)
+            .finish()
     }
 }
