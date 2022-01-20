@@ -2,10 +2,6 @@
 //! This configuration, read from server.properties, relates to the Default/General Broker-wide
 //! configuration. A topic may be individually configured via zookeeper, see
 //! `crate::log::log_config`
-//! RAFKA TODO:
-//! In order to get a T out of ConfigDef<T> one may rely on the build() or custom resolve_<field>
-//! It's possible and an error to use the build() unaware of the resolve_<field>, and with so many
-//! fields it's just a matter of time.
 
 use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
 use super::{ConfigSet, KafkaConfigError};
@@ -13,7 +9,7 @@ use crate::api::api_version::{ApiVersion, KafkaApiVersion};
 use crate::common::config::topic_config::{
     COMPRESSION_TYPE_CONFIG, COMPRESSION_TYPE_DOC, MESSAGE_DOWNCONVERSION_ENABLE_DOC,
 };
-use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use crate::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
 use crate::common::record::legacy_record;
 use crate::message::compression_codec::{BrokerCompressionCodec, PRODUCER_COMPRESSION_CODEC};
 use const_format::concatcp;
@@ -320,20 +316,20 @@ impl FromStr for DefaultLogConfigKey {
 #[derive(Debug)]
 pub struct DefaultLogConfigProperties {
     // Singular log.dir
-    log_dir: ConfigDef<String>,
+    log_dir: PartialConfigDef<String>,
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
-    log_dirs: ConfigDef<String>,
+    log_dirs: PartialConfigDef<String>,
     pub log_segment_bytes: ConfigDef<usize>,
-    log_roll_time_millis: ConfigDef<i64>,
-    log_roll_time_hours: ConfigDef<i32>,
-    log_roll_time_jitter_millis: ConfigDef<i64>,
-    pub log_roll_time_jitter_hours: ConfigDef<i32>,
-    log_retention_time_millis: ConfigDef<i64>,
+    log_roll_time_millis: PartialConfigDef<i64>,
+    log_roll_time_hours: PartialConfigDef<i32>,
+    log_roll_time_jitter_millis: PartialConfigDef<i64>,
+    pub log_roll_time_jitter_hours: PartialConfigDef<i32>,
+    log_retention_time_millis: PartialConfigDef<i64>,
     log_retention_time_minutes: ConfigDef<i32>,
     pub log_retention_time_hours: ConfigDef<i32>,
     pub log_retention_bytes: ConfigDef<i64>,
     log_cleanup_interval_ms: ConfigDef<i64>,
-    log_cleanup_policy: ConfigDef<String>,
+    log_cleanup_policy: PartialConfigDef<String>,
     log_cleaner_threads: ConfigDef<i32>,
     log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
     log_cleaner_io_buffer_size: ConfigDef<i32>,
@@ -354,8 +350,8 @@ pub struct DefaultLogConfigProperties {
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
     pub log_pre_allocate_enable: ConfigDef<bool>,
-    pub log_message_format_version: ConfigDef<String>,
-    pub log_message_timestamp_type: ConfigDef<String>,
+    pub log_message_format_version: PartialConfigDef<String>,
+    pub log_message_timestamp_type: PartialConfigDef<String>,
     pub log_message_timestamp_difference_max_ms: ConfigDef<i64>,
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
     pub min_in_sync_replicas: ConfigDef<i32>,
@@ -367,7 +363,7 @@ impl Default for DefaultLogConfigProperties {
     fn default() -> Self {
         let inter_broker_protocol_version = ApiVersion::latest_version();
         Self {
-            log_dir: ConfigDef::default()
+            log_dir: PartialConfigDef::default()
                 .with_key(LOG_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -375,7 +371,7 @@ impl Default for DefaultLogConfigProperties {
                     LOG_DIRS_PROP
                 ))
                 .with_default(String::from("/tmp/kafka-logs")),
-            log_dirs: ConfigDef::default()
+            log_dirs: PartialConfigDef::default()
                 .with_key(LOG_DIRS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -396,7 +392,7 @@ impl Default for DefaultLogConfigProperties {
                         LOG_SEGMENT_BYTES_PROP,
                     )
                 })),
-            log_roll_time_millis: ConfigDef::default()
+            log_roll_time_millis: PartialConfigDef::default()
                 .with_key(LOG_ROLL_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_validator(Box::new(|data| {
@@ -408,7 +404,7 @@ impl Default for DefaultLogConfigProperties {
                      If not set, the value in {} is used",
                     LOG_ROLL_TIME_HOURS_PROP
                 )),
-            log_roll_time_hours: ConfigDef::default()
+            log_roll_time_hours: PartialConfigDef::default()
                 .with_key(LOG_ROLL_TIME_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -421,7 +417,7 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &1, LOG_ROLL_TIME_HOURS_PROP)
                 })),
-            log_roll_time_jitter_millis: ConfigDef::default()
+            log_roll_time_jitter_millis: PartialConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -429,7 +425,7 @@ impl Default for DefaultLogConfigProperties {
                      not set, the value in {} is used",
                     LOG_ROLL_TIME_JITTER_HOURS_PROP
                 )),
-            log_roll_time_jitter_hours: ConfigDef::default()
+            log_roll_time_jitter_hours: PartialConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -442,7 +438,7 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, LOG_ROLL_TIME_JITTER_HOURS_PROP)
                 })),
-            log_retention_time_millis: ConfigDef::default()
+            log_retention_time_millis: PartialConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -485,7 +481,7 @@ impl Default for DefaultLogConfigProperties {
                      eligible for deletion",
                 ))
                 .with_default(5 * 60 * 1000),
-            log_cleanup_policy: ConfigDef::default()
+            log_cleanup_policy: PartialConfigDef::default()
                 .with_key(LOG_CLEANUP_POLICY_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(String::from(
@@ -690,7 +686,7 @@ impl Default for DefaultLogConfigProperties {
                      Windows, you probably need to set it to true.",
                 ))
                 .with_default(false),
-            log_message_format_version: ConfigDef::default()
+            log_message_format_version: PartialConfigDef::default()
                 .with_key(LOG_MESSAGE_FORMAT_VERSION_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(String::from(
@@ -703,7 +699,7 @@ impl Default for DefaultLogConfigProperties {
                      they will receive messages with a format that they don't understand.",
                 ))
                 .with_default(inter_broker_protocol_version.to_string()),
-            log_message_timestamp_type: ConfigDef::default()
+            log_message_timestamp_type: PartialConfigDef::default()
                 .with_key(LOG_MESSAGE_TIMESTAMP_TYPE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(String::from(
@@ -997,27 +993,27 @@ impl DefaultLogConfigProperties {
         }
     }
 
-    /// The `resolve()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
+    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
     /// be currently performed by the resolver.
     pub fn resolve_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
         if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
             Ok(*log_roll_time_millis)
         } else {
-            Ok(i64::from(self.log_roll_time_hours.build()?) * 60 * 60 * 1000)
+            Ok(i64::from(self.log_roll_time_hours.partial_build()?) * 60 * 60 * 1000)
         }
     }
 
-    /// The `resolve()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
+    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
     /// be currently performed by the resolver.
     pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
         if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
             Ok(*log_roll_time_jitter_millis)
         } else {
-            Ok(i64::from(self.log_roll_time_jitter_hours.build()?) * 60 * 60 * 1000)
+            Ok(i64::from(self.log_roll_time_jitter_hours.partial_build()?) * 60 * 60 * 1000)
         }
     }
 
-    /// The `resolve()` from `ConfigDef` cannot be used as we need to transform hours to minutes to
+    /// The `get_or_fallback()` from `ConfigDef` cannot be used as we need to transform hours to minutes to
     /// millis
     pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
         let millis_in_minute = 60 * 1000;
@@ -1064,7 +1060,7 @@ impl DefaultLogConfigProperties {
     pub fn resolve_log_message_format_version(
         &mut self,
     ) -> Result<KafkaApiVersion, KafkaConfigError> {
-        KafkaApiVersion::from_str(&self.log_message_format_version.build()?)
+        KafkaApiVersion::from_str(&self.log_message_format_version.get_value().unwrap())
     }
 }
 

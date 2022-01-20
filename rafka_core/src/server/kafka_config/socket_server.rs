@@ -1,7 +1,7 @@
 //! Kafka Config - Socket Server Configuration
 use super::{ConfigSet, KafkaConfigError};
 use crate::cluster::end_point::EndPoint;
-use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use crate::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
 use crate::utils::core_utils;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
@@ -57,10 +57,10 @@ impl FromStr for SocketConfigKey {
 pub struct SocketConfigProperties {
     port: ConfigDef<i32>,
     host_name: ConfigDef<String>,
-    listeners: ConfigDef<String>,
+    listeners: PartialConfigDef<String>,
     advertised_host_name: ConfigDef<String>,
     advertised_port: ConfigDef<i32>,
-    advertised_listeners: ConfigDef<String>,
+    advertised_listeners: PartialConfigDef<String>,
 }
 impl Default for SocketConfigProperties {
     fn default() -> Self {
@@ -84,7 +84,7 @@ impl Default for SocketConfigProperties {
                     LISTENERS_PROP
                 ))
                 .with_default(String::from("")),
-            listeners: ConfigDef::default()
+            listeners: PartialConfigDef::default()
                 .with_key(LISTENERS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -95,7 +95,7 @@ impl Default for SocketConfigProperties {
                      PLAINTEXT://myhost:9092,SSL://:9091 \
                      CLIENT://0.0.0.0:9092,REPLICATION://localhost:9093"
                 )),
-            advertised_listeners: ConfigDef::default()
+            advertised_listeners: PartialConfigDef::default()
                 .with_key(ADVERTISED_LISTENERS_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_doc(format!(
@@ -165,8 +165,8 @@ impl ConfigSet for SocketConfigProperties {
         let port = self.port.build()?;
         let host_name = self.host_name.build()?;
         let listeners = self.resolve_listeners()?;
-        self.advertised_host_name.resolve(&self.host_name)?;
-        self.advertised_port.resolve(&self.port)?;
+        self.advertised_host_name.get_or_fallback(&self.host_name)?;
+        self.advertised_port.get_or_fallback(&self.port)?;
         let advertised_host_name = self.advertised_host_name.build()?;
         let advertised_port = self.advertised_port.build()?;
         let advertised_listeners = self.resolve_advertised_listeners()?;
@@ -236,8 +236,8 @@ impl Default for SocketConfig {
         let mut config_properties = SocketConfigProperties::default();
         let port = config_properties.port.build().unwrap();
         let host_name = config_properties.host_name.build().unwrap();
-        config_properties.advertised_host_name.resolve(&config_properties.host_name).unwrap();
-        config_properties.advertised_port.resolve(&config_properties.port).unwrap();
+        config_properties.advertised_host_name.get_or_fallback(&config_properties.host_name).unwrap();
+        config_properties.advertised_port.get_or_fallback(&config_properties.port).unwrap();
         let listeners = config_properties.resolve_listeners().unwrap();
         let advertised_host_name = config_properties.advertised_host_name.build().unwrap();
         let advertised_port = config_properties.advertised_port.build().unwrap();

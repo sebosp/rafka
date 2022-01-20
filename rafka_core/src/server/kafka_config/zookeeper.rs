@@ -127,7 +127,7 @@ impl ConfigSet for ZookeeperConfigProperties {
         // zk_connection_timeout_ms will be used.
         // RAFKA NOTE: somehow the zk_session_timeout_ms build needs to be called before this,
         // maybe resolve can do it?
-        self.zk_connection_timeout_ms.resolve(&self.zk_session_timeout_ms)?;
+        self.zk_connection_timeout_ms.get_or_fallback(&self.zk_session_timeout_ms)?;
         let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
         let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
         Ok(Self::ConfigType {

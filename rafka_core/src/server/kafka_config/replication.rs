@@ -54,11 +54,6 @@ impl Default for ReplicationConfigProperties {
         }
     }
 }
-impl ReplicationConfigProperties {
-    pub fn resolve_unclean_leader_election_enable(&mut self) -> Result<bool, KafkaConfigError> {
-        self.unclean_leader_election_enable.build()
-    }
-}
 
 impl ConfigSet for ReplicationConfigProperties {
     type ConfigKey = ReplicationConfigKey;

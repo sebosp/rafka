@@ -314,15 +314,15 @@ where
     }
 }
 
-/// A ComplexConfigDef contains an internal ConfigDef, it can call all the functions from ConfigDef
-/// except for the build(), as it's easy to forget when a type is complex and needs to rely on
-/// a specialized resolve_<field>
-/// must have its own "resolve_()"
-pub struct ComplexConfigDef<T> {
+/// PartialConfigDef does not produce a usable Config by itself, several ConfigDefs interact with
+/// each other to produce a final value, the final/non-builder type usually has a resolve_<field>
+/// to produce the final value, combining factors from sometimes different PartialConfigDef 
+/// to create a final value.
+pub struct PartialConfigDef<T> {
     pub config_def: ConfigDef<T>,
 }
 
-impl<T> ComplexConfigDef<T>
+impl<T> PartialConfigDef<T>
 where
     T: FromStr,
     KafkaConfigError: From<<T as FromStr>::Err>,
@@ -400,7 +400,7 @@ where
 
     /// A wrapper for the internal ConfigDef build(), this allows for the caller to know it cannot
     /// rely on the build() alone to build the final resulting type
-    pub fn simple_build(&mut self) -> Result<T, KafkaConfigError>
+    pub fn partial_build(&mut self) -> Result<T, KafkaConfigError>
     where
         T: Clone,
     {
@@ -408,7 +408,7 @@ where
     }
 }
 
-impl<T> Default for ComplexConfigDef<T> {
+impl<T> Default for PartialConfigDef<T> {
     fn default() -> Self {
         Self {
             config_def: ConfigDef::default(),
@@ -416,12 +416,12 @@ impl<T> Default for ComplexConfigDef<T> {
     }
 }
 
-impl<T> fmt::Debug for ComplexConfigDef<T>
+impl<T> fmt::Debug for PartialConfigDef<T>
 where
     T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ComplexConfigDef")
+        f.debug_struct("PartialConfigDef")
             .field("config_def", &self.config_def)
             .finish()
     }
