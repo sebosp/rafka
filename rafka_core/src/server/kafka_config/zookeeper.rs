@@ -154,7 +154,7 @@ impl Default for ZookeeperConfig {
         let zk_session_timeout_ms = config_properties.zk_session_timeout_ms.build().unwrap();
         config_properties
             .zk_connection_timeout_ms
-            .resolve(&config_properties.zk_session_timeout_ms)
+            .get_or_fallback(&config_properties.zk_session_timeout_ms)
             .unwrap();
         let zk_connection_timeout_ms = config_properties.zk_connection_timeout_ms.build().unwrap();
         let zk_max_in_flight_requests =

@@ -2,7 +2,7 @@
 
 use crate::api::api_version::{ApiVersionValidator, KafkaApiVersion};
 use crate::common::config::topic_config::*;
-use crate::common::config_def::{ConfigDef, ConfigDefImportance, Validator};
+use crate::common::config_def::{ConfigDef, ConfigDefImportance, Validator, PartialConfigDef};
 use crate::common::record::legacy_record;
 use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
@@ -180,21 +180,21 @@ impl FromStr for LogConfigKey {
 
 #[derive(Debug)]
 pub struct LogConfigProperties {
-    cleanup_policy: ConfigDef<String>,
-    compression_type: ConfigDef<String>,
+    cleanup_policy: PartialConfigDef<String>,
+    compression_type: PartialConfigDef<String>,
     delete_retention_ms: ConfigDef<i64>,
     file_delete_delay_ms: ConfigDef<i64>,
     flush_messages: ConfigDef<i64>,
     flush_ms: ConfigDef<i64>,
     // TODO: transform Vec<> to String and build the resulting Vec<> on build()
-    follower_replication_throttled_replicas: ConfigDef<String>,
+    follower_replication_throttled_replicas: PartialConfigDef<String>,
     index_interval_bytes: ConfigDef<i32>,
     // TODO: transform Vec<> to String and build the resulting Vec<> on build()
-    leader_replication_throttled_replicas: ConfigDef<String>,
+    leader_replication_throttled_replicas: PartialConfigDef<String>,
     max_compaction_lag_ms: ConfigDef<i64>,
     max_message_bytes: ConfigDef<usize>,
     message_down_conversion_enable: ConfigDef<bool>,
-    message_format_version: ConfigDef<String>,
+    message_format_version: PartialConfigDef<String>,
     message_timestamp_difference_max_ms: ConfigDef<i64>,
     message_timestamp_type: ConfigDef<String>,
     min_cleanable_dirty_ratio: ConfigDef<f64>,
@@ -216,7 +216,7 @@ impl Default for LogConfigProperties {
         let mut general_properties = GeneralConfigProperties::default();
         let mut replication_properties = ReplicationConfigProperties::default();
         Self {
-            cleanup_policy: ConfigDef::default()
+            cleanup_policy: PartialConfigDef::default()
                 .with_key(CLEANUP_POLICY_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(CLEANUP_POLICY_DOC.to_string())
@@ -231,7 +231,7 @@ impl Default for LogConfigProperties {
                         CLEANUP_POLICY_CONFIG,
                     )
                 })),
-            compression_type: ConfigDef::default()
+            compression_type: PartialConfigDef::default()
                 .with_key(COMPRESSION_TYPE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(COMPRESSION_TYPE_DOC.to_string())
@@ -278,7 +278,7 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, FILE_DELETE_DELAY_MS_CONFIG)
                 })),
-            follower_replication_throttled_replicas: ConfigDef::default()
+            follower_replication_throttled_replicas: PartialConfigDef::default()
                 .with_key(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(String::from(
@@ -305,7 +305,7 @@ impl Default for LogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, INDEX_INTERVAL_BYTES_CONFIG)
                 })),
-            leader_replication_throttled_replicas: ConfigDef::default()
+            leader_replication_throttled_replicas: PartialConfigDef::default()
                 .with_key(LEADER_REPLICATION_THROTTLED_REPLICAS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(String::from(
@@ -355,7 +355,7 @@ impl Default for LogConfigProperties {
                         .build()
                         .unwrap(),
                 ),
-            message_format_version: ConfigDef::default()
+            message_format_version: PartialConfigDef::default()
                 .with_key(MESSAGE_FORMAT_VERSION_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(MESSAGE_FORMAT_VERSION_DOC.to_string())
@@ -518,7 +518,7 @@ impl Default for LogConfigProperties {
                 .with_importance(ConfigDefImportance::Medium)
                 .with_doc(UNCLEAN_LEADER_ELECTION_ENABLE_DOC.to_string())
                 .with_default(
-                    replication_properties.resolve_unclean_leader_election_enable().unwrap(),
+                    replication_properties.unclean_leader_election_enable.build().unwrap(),
                 ),
         }
     }
@@ -708,11 +708,11 @@ impl LogConfigProperties {
     }
 
     pub fn resolve_compression_type(&mut self) -> Result<BrokerCompressionCodec, KafkaConfigError> {
-        BrokerCompressionCodec::from_str(&self.compression_type.build()?)
+        BrokerCompressionCodec::from_str(&self.compression_type.partial_build()?)
     }
 
     pub fn resolve_message_format_version(&mut self) -> Result<KafkaApiVersion, KafkaConfigError> {
-        KafkaApiVersion::from_str(&self.message_format_version.build()?)
+        KafkaApiVersion::from_str(&self.message_format_version.partial_build()?)
     }
 
     pub fn try_from(kafka_config: &KafkaConfig) -> Result<Self, KafkaConfigError> {

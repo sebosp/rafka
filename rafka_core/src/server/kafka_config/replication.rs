@@ -37,7 +37,7 @@ impl FromStr for ReplicationConfigKey {
 
 #[derive(Debug)]
 pub struct ReplicationConfigProperties {
-    unclean_leader_election_enable: ConfigDef<bool>,
+    pub unclean_leader_election_enable: ConfigDef<bool>,
 }
 
 impl Default for ReplicationConfigProperties {
