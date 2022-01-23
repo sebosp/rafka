@@ -1,6 +1,6 @@
 use clap::{App, Arg};
 use rafka_core::majordomo::MajordomoCoordinator;
-use rafka_core::server::kafka_config::KafkaConfig;
+use rafka_core::server::kafka_config::KafkaConfigProperties;
 use rafka_core::server::kafka_server::KafkaServer;
 use rafka_core::zk::kafka_zk_client::KafkaZkClientCoordinator;
 use std::time::Instant;
@@ -9,24 +9,38 @@ use tokio::sync::mpsc;
 use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::FmtSubscriber;
+use anyhow::Result;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
+    match main_processor().await {
+        Ok(()) => info!("Exiting successfully."),
+        Err(err) => error!("Exiting with error: {:?}", err),
+    }
+}
+
+async fn main_processor() -> Result<()> {
     let matches = App::new("Rafka")
         .version("0.0")
         .author("Seb Ospina <kraige@gmail.com>")
         .about("A dive into kafka using rust")
         .arg(
-            Arg::with_name("INPUT")
+            Arg::new("INPUT")
                 .help("Sets the input config file to use")
                 .required(true)
                 .index(1),
         )
         .arg(
-            Arg::with_name("verbosity_level")
-                .short("v")
+            Arg::new("verbosity_level")
+                .short('v')
                 .default_value("trace")
                 .help("Sets the level of verbosity"),
+        )
+        .arg(
+            Arg::new("override")
+                .short('o')
+                .multiple_occurrences(true)
+                .help("Override properties defined in the config file"),
         )
         .get_matches();
     let verbosity = matches.value_of("verbosity_level").unwrap();
@@ -41,13 +55,21 @@ async fn main() {
 
     let config_file = matches.value_of("INPUT").unwrap();
     println!("Using input file: {}", config_file);
-    let kafka_config = match KafkaConfig::get_kafka_config(config_file) {
+    let mut kafka_config = match KafkaConfigProperties::read_config_file(config_file) {
         Ok(config) => config,
         Err(err) => {
             error!("Unable to use config file {}: {:?}", config_file, err);
             std::process::exit(1);
         },
     };
+    if let Some(property_overrides) = matches.values_of("overrides") {
+        for override_property in property_overrides {
+            if let Some((property_name, property_value)) = override_property.split_once('=') {
+                kafka_config.try_set_property(property_name, property_value)?;
+            }
+        }
+    }
+    let kafka_config = kafka_config.build()?;
     let (kafka_server_tx, kafka_server_rx) = mpsc::channel(4_096); // TODO: Magic number removal
     let kafka_config_clone = kafka_config.clone();
     let mut kafka_zk = KafkaZkClientCoordinator::new(kafka_config.clone()).await.unwrap();
@@ -87,8 +109,9 @@ async fn main() {
     kafka_zk.process_message_queue().await.unwrap();
     tokio::spawn(async {
         signal::ctrl_c().await.unwrap();
-        error!("ctrl-c received!");
+        info!("ctrl-c received!");
         rafka_core::majordomo::MajordomoCoordinator::shutdown(majordomo_tx).await;
         rafka_core::server::kafka_server::KafkaServer::shutdown(kafka_server_tx).await;
     });
+    Ok(())
 }

@@ -124,6 +124,7 @@ pub enum KafkaConfigError {
     DuplicateKey(String),
     #[error("Attempt to compare a value that is not provided and has no default: {0}")]
     ComparisonOnNone(String),
+    // RAFKA TODO: Move this to its sub-type Error (i.e. SocketConfigPropertiesError)
     #[error("ListenerMisconfig")]
     ListenerMisconfig(String),
     #[error("Unknown Cleanup Policy")]
@@ -301,7 +302,7 @@ impl KafkaConfigProperties {
 
     /// `build` validates and resolves dependant properties from a KafkaConfigProperties into a
     /// KafkaConfig
-    fn resolve(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
+    pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
         trace!("KafkaConfigProperties::build() INIT");
         let zookeeper = self.zookeeper.build()?;
         let general = self.general.build()?;
@@ -316,13 +317,6 @@ impl KafkaConfigProperties {
         Ok(kafka_config)
     }
 
-    pub fn build(&mut self) -> Result<KafkaConfig, KafkaConfigError> {
-        let res = self.resolve()?;
-        // Internally every resolve call has call its sub-type validate values, so no need to call
-        // it again. unless we want to check consistency of all sub-configs as a whole.
-        Ok(res)
-    }
-
     /// Transforms from a HashMap of configs into a KafkaConfigProperties object
     /// This may return KafkaConfigError::UnknownKey errors
     pub fn from_properties_hashmap(
@@ -335,6 +329,14 @@ impl KafkaConfigProperties {
         }
         Ok(config_builder)
     }
+
+    /// `read_config_file` Reads the kafka config.
+    pub fn read_config_file(filename: &str) -> Result<Self, KafkaConfigError> {
+        debug!("read_config_from: Reading {}", filename);
+        let mut config_file_content = File::open(&filename)?;
+        let input_config = java_properties::read(BufReader::new(&mut config_file_content))?;
+        Ok(KafkaConfigProperties::from_properties_hashmap(input_config)?)
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -346,16 +348,6 @@ pub struct KafkaConfig {
     pub transaction: TransactionConfig,
     pub quota: QuotaConfig,
     pub replication: ReplicationConfig,
-}
-
-impl KafkaConfig {
-    /// `get_kafka_config` Reads the kafka config.
-    pub fn get_kafka_config(filename: &str) -> Result<Self, KafkaConfigError> {
-        debug!("read_config_from: Reading {}", filename);
-        let mut config_file_content = File::open(&filename)?;
-        let input_config = java_properties::read(BufReader::new(&mut config_file_content))?;
-        KafkaConfigProperties::from_properties_hashmap(input_config)?.build()
-    }
 }
 
 impl Default for KafkaConfig {
