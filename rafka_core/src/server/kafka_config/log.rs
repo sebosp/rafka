@@ -1217,5 +1217,11 @@ mod tests {
             .unwrap();
         let conf = conf_props.build().unwrap();
         assert_eq!(conf.log_dirs, vec![String::from("/some-1/logs"), String::from("/some-2-logs")]);
+        conf_props.try_set_property("log.cleanup.policy", "compact").unwrap();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_cleanup_policy, vec![LogCleanupPolicy::Compact]);
+        conf_props.try_set_property("log.cleanup.policy", "compact,delete").unwrap();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_cleanup_policy, vec![LogCleanupPolicy::Compact, LogCleanupPolicy::Delete]);
     }
 }
