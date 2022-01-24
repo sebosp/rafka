@@ -1020,24 +1020,39 @@ impl DefaultLogConfigProperties {
         let millis_in_hour = 60 * millis_in_minute;
 
         let mut millis: i64 = match self.log_retention_time_millis.get_value() {
+            Some(0) =>
+                return Err(KafkaConfigError::InvalidValue(format!(
+                    "{} must be unlimited (-1) or, equal or greater than 1",
+                    LOG_RETENTION_TIME_MILLIS_PROP
+                ))),
             Some(millis) => *millis,
             None => match self.log_retention_time_minutes.get_value() {
+                Some(0) =>
+                    return Err(KafkaConfigError::InvalidValue(format!(
+                        "{} must be unlimited (-1) or, equal or greater than 1",
+                        LOG_RETENTION_TIME_MINUTES_PROP
+                    ))),
                 Some(mins) => i64::from(millis_in_minute) * i64::from(*mins),
                 None => {
-                    i64::from(*self.log_retention_time_hours.get_value().unwrap()) * millis_in_hour
+                    match self.log_retention_time_hours.get_value() {
+                        Some(0) => 
+                            return Err(KafkaConfigError::InvalidValue(format!(
+                                "{} must be unlimited (-1) or, equal or greater than 1",
+                            LOG_RETENTION_TIME_HOURS_PROP
+                        ))),
+                        Some(hours) => i64::from(*hours) * millis_in_hour,
+                        None => unreachable!("log_retention_time_hours has a default."),
+                    }
                 },
             },
         };
         if millis < 0 {
+            // RAFKA TODO: perhaps create an enum to represent LogRetentiontime(Unlimimited)
             warn!(
                 "Resolved Log Retention Time millis is below zero: '{}' Setting to -1 (unlimited)",
                 millis
             );
             millis = -1;
-        } else if millis == 0 {
-            return Err(KafkaConfigError::InvalidValue(String::from(
-                "log.retention.ms must be unlimited (-1) or, equal or greater than 1",
-            )));
         }
         Ok(millis)
     }
@@ -1223,5 +1238,98 @@ mod tests {
         conf_props.try_set_property("log.cleanup.policy", "compact,delete").unwrap();
         let conf = conf_props.build().unwrap();
         assert_eq!(conf.log_cleanup_policy, vec![LogCleanupPolicy::Compact, LogCleanupPolicy::Delete]);
+    }
+
+    #[test]
+    fn it_resolves_log_retention_time_hours_provided(){
+        let mut conf_props = DefaultLogConfigProperties::default();
+        conf_props.try_set_property("log.retention.hours", "1").unwrap();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_retention_time_millis, 60 * 60 * 1000);
+    }
+
+    #[test]
+    fn it_resolves_log_retention_time_minutes_provided(){
+        let mut conf_props = DefaultLogConfigProperties::default();
+        conf_props.try_set_property("log.retention.minutes", "30").unwrap();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_retention_time_millis, 30 * 60 * 1000);
+    }
+
+    #[test]
+    fn it_resolves_log_retention_time_no_config_provided(){
+        let mut conf_props = DefaultLogConfigProperties::default();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_retention_time_millis, 24 * 7 * 60 * 60 * 1000);
+    }
+
+    #[test]
+    fn it_resolves_log_retention_time_both_minutes_and_hours_provided(){
+        let mut conf_props = DefaultLogConfigProperties::default();
+        conf_props.try_set_property("log.retention.minutes", "30").unwrap();
+        conf_props.try_set_property("log.retention.hours", "1").unwrap();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_retention_time_millis, 30 * 60 * 1000);
+    }
+
+    #[test]
+    fn it_resolves_log_retention_time_both_minutes_and_ms_provided(){
+        let mut conf_props = DefaultLogConfigProperties::default();
+        conf_props.try_set_property("log.retention.ms", "1800000").unwrap();
+        conf_props.try_set_property("log.retention.minutes", "10").unwrap();
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.log_retention_time_millis, 30 * 60 * 1000);
+    }
+
+    #[test]
+    fn it_resolves_log_retention_unlimited(){
+        let mut conf_props_ms = DefaultLogConfigProperties::default();
+        let mut conf_props_mins = DefaultLogConfigProperties::default();
+        let mut conf_props_hours = DefaultLogConfigProperties::default();
+        let mut conf_props_ms_and_mins = DefaultLogConfigProperties::default();
+
+        conf_props_ms.try_set_property("log.retention.ms", "-1").unwrap();
+        conf_props_mins.try_set_property("log.retention.minutes", "-1").unwrap();
+        conf_props_hours.try_set_property("log.retention.hours", "-1").unwrap();
+        conf_props_ms_and_mins.try_set_property("log.retention.ms", "-1").unwrap();
+        conf_props_ms_and_mins.try_set_property("log.retention.minutes", "30").unwrap();
+
+        let conf_ms = conf_props_ms.build().unwrap();
+        let conf_mins = conf_props_mins.build().unwrap();
+        let conf_hours = conf_props_hours.build().unwrap();
+        let conf_ms_and_mins = conf_props_ms_and_mins.build().unwrap();
+
+        assert_eq!(conf_ms.log_retention_time_millis, -1);
+        assert_eq!(conf_mins.log_retention_time_millis, -1);
+        assert_eq!(conf_hours.log_retention_time_millis, -1);
+        assert_eq!(conf_ms_and_mins.log_retention_time_millis, -1);
+    }
+
+    #[test]
+    fn it_resolves_log_retention_invalid(){
+        let mut conf_props_error_ms = DefaultLogConfigProperties::default();
+        let mut conf_props_error_mins = DefaultLogConfigProperties::default();
+        let mut conf_props_error_hours = DefaultLogConfigProperties::default();
+
+        conf_props_error_ms.try_set_property("log.retention.ms", "0").unwrap();
+        conf_props_error_mins.try_set_property("log.retention.minutes", "0").unwrap();
+        conf_props_error_hours.try_set_property("log.retention.hours", "0").unwrap();
+
+        let conf_error_ms = conf_props_error_ms.build();
+        let conf_error_mins = conf_props_error_mins.build();
+        let conf_error_hours = conf_props_error_hours.build();
+
+        assert_eq!(conf_error_ms,
+            Err(KafkaConfigError::InvalidValue(String::from(
+                "log.retention.ms must be unlimited (-1) or, equal or greater than 1",
+            ))));
+        assert_eq!(conf_error_mins,
+            Err(KafkaConfigError::InvalidValue(String::from(
+                "log.retention.minutes must be unlimited (-1) or, equal or greater than 1",
+            ))));
+        assert_eq!(conf_error_hours,
+            Err(KafkaConfigError::InvalidValue(String::from(
+                "log.retention.hours must be unlimited (-1) or, equal or greater than 1",
+            ))));
     }
 }
