@@ -252,3 +252,72 @@ impl Default for SocketConfig {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_resolves_advertised_defaults() {
+        let host = "fake-host";
+        let port = 9999;
+
+        let mut conf_props = SocketConfigProperties::default();
+        conf_props.try_set_property("host.name", host).unwrap();
+        conf_props.try_set_property("port", &port.to_string()).unwrap();
+
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.advertised_listeners[0].host, host);
+        assert_eq!(conf.advertised_listeners[0].port, port);
+    }
+
+    #[test]
+    fn it_resolves_advertised_configured() {
+        let host = "routable-host";
+        let port = 1234;
+
+        let mut conf_props = SocketConfigProperties::default();
+        conf_props.try_set_property("advertised.host.name", host).unwrap();
+        conf_props.try_set_property("advertised.port", &port.to_string()).unwrap();
+
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.advertised_listeners[0].host, host);
+        assert_eq!(conf.advertised_listeners[0].port, port);
+    }
+
+    #[test]
+    fn it_resolves_advertised_port_default() {
+        let advertised_host = "routable-host";
+        let port = 9999;
+
+        let mut conf_props = SocketConfigProperties::default();
+        conf_props.try_set_property("advertised.host.name", advertised_host).unwrap();
+        conf_props.try_set_property("port", &port.to_string()).unwrap();
+
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.advertised_listeners[0].host, advertised_host);
+        assert_eq!(conf.advertised_listeners[0].port, port);
+    }
+
+    #[test]
+    fn it_resolves_advertised_hostname_default() {
+        let host = "routable-host";
+        let advertised_port = 9999;
+
+        let mut conf_props = SocketConfigProperties::default();
+        conf_props.try_set_property("host.name", host).unwrap();
+        conf_props.try_set_property("advertised.port", &advertised_port.to_string()).unwrap();
+
+        let conf = conf_props.build().unwrap();
+        assert_eq!(conf.advertised_listeners[0].host, host);
+        assert_eq!(conf.advertised_listeners[0].port, advertised_port);
+    }
+
+    #[test]
+    fn it_identifies_duplicate_listeners() {
+        let mut conf_props = SocketConfigProperties::default();
+
+        // Duplicate port
+        conf_props.try_set_property("listeners", "PLAINTEXT://localhost:9091,TRACE://localhost:9091").unwrap();
+        assert!(conf_props.build().is_err());
+    }
+}
