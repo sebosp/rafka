@@ -1,6 +1,7 @@
 //! From core/src/main/scala/kafka/cluster/EndPoint.scala
 
-use crate::{common::network::listener_name::ListenerName, server::kafka_config::KafkaConfigError};
+use crate::common::network::listener_name::ListenerName;
+use crate::server::kafka_config::KafkaConfigError;
 use regex::Regex;
 use tracing::error;
 
@@ -39,5 +40,20 @@ impl EndPoint {
                 input
             )))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_creates_endpoint() {
+        let res = EndPoint::create_end_point(&String::from("PLAINTEXT://localhost:9092")).unwrap();
+        assert_eq!(res, EndPoint {
+            host: String::from("localhost"),
+            port: 9092,
+            listener_name: ListenerName::new(String::from("PLAINTEXT")),
+        });
     }
 }

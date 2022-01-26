@@ -9,7 +9,7 @@ use tracing::{debug, error};
 /// Parses comma separated string into Vec
 /// The whitespaces \s around the commas are removed
 pub fn parse_csv_list(csv_list: &str) -> Vec<String> {
-    Regex::new(r"\\s*,\\s*")
+    Regex::new(r"\s*,\s*")
         .unwrap()
         .split(csv_list)
         .collect::<Vec<&str>>()
@@ -66,4 +66,16 @@ pub fn listener_list_to_end_points(listeners: &str) -> Result<Vec<EndPoint>, Kaf
     }
     validate_endpoint(&listeners, &end_points)?;
     Ok(end_points)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_parses_csv_list() {
+        let res =
+            parse_csv_list(&String::from("PLAINTEXT://localhost:9091,TRACE://localhost:9092"));
+        assert_eq!(res.len(), 2)
+    }
 }
