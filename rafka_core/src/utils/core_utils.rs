@@ -29,6 +29,7 @@ pub fn validate_endpoint(
     ports_excluding_zero.sort();
     let mut distinct_ports = ports_excluding_zero.clone();
     distinct_ports.sort();
+    distinct_ports.dedup();
     let mut distinct_listener_names: Vec<ListenerName> =
         end_points.iter().map(|x| x.listener_name.clone()).collect();
     distinct_listener_names.sort();
@@ -76,6 +77,20 @@ mod tests {
     fn it_parses_csv_list() {
         let res =
             parse_csv_list(&String::from("PLAINTEXT://localhost:9091,TRACE://localhost:9092"));
-        assert_eq!(res.len(), 2)
+        assert_eq!(res.len(), 2);
+        let expected_endpoints = vec![
+            EndPoint {
+                host: String::from("localhost"),
+                listener_name: ListenerName::new(String::from("PLAINTEXT")),
+                port: 9091,
+            },
+            EndPoint {
+                host: String::from("localhost"),
+                listener_name: ListenerName::new(String::from("TRACE")),
+                port: 9092,
+            },
+        ];
+        assert_eq!(EndPoint::create_end_point(&res[0]).unwrap(), expected_endpoints[0]);
+        assert_eq!(EndPoint::create_end_point(&res[1]).unwrap(), expected_endpoints[1]);
     }
 }
