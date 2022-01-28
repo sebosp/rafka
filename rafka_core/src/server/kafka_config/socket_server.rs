@@ -236,7 +236,10 @@ impl Default for SocketConfig {
         let mut config_properties = SocketConfigProperties::default();
         let port = config_properties.port.build().unwrap();
         let host_name = config_properties.host_name.build().unwrap();
-        config_properties.advertised_host_name.get_or_fallback(&config_properties.host_name).unwrap();
+        config_properties
+            .advertised_host_name
+            .get_or_fallback(&config_properties.host_name)
+            .unwrap();
         config_properties.advertised_port.get_or_fallback(&config_properties.port).unwrap();
         let listeners = config_properties.resolve_listeners().unwrap();
         let advertised_host_name = config_properties.advertised_host_name.build().unwrap();
@@ -316,8 +319,26 @@ mod tests {
     fn it_identifies_duplicate_listeners() {
         let mut conf_props = SocketConfigProperties::default();
 
-        // Duplicate port
-        conf_props.try_set_property("listeners", "PLAINTEXT://localhost:9091,TRACE://localhost:9091").unwrap();
+        // listeners with duplicate port
+        conf_props
+            .try_set_property("listeners", "PLAINTEXT://localhost:9091,TRACE://localhost:9091")
+            .unwrap();
+        assert!(conf_props.build().is_err());
+
+        // listeners with duplicate proto
+        conf_props
+            .try_set_property("listeners", "PLAINTEXT://localhost:9091,PLAINTEXT://localhost:9092")
+            .unwrap();
+        assert!(conf_props.build().is_err());
+
+        let mut conf_props = SocketConfigProperties::default();
+        // advertised liteners with uplicate port
+        conf_props
+            .try_set_property(
+                "advertised.listeners",
+                "PLAINTEXT://localhost:9091,TRACE://localhost:9091",
+            )
+            .unwrap();
         assert!(conf_props.build().is_err());
     }
 }

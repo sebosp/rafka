@@ -15,11 +15,3 @@ pub mod server;
 mod utils;
 pub mod zk;
 mod zookeeper;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
