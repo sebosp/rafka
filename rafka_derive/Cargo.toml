@@ -2,11 +2,19 @@
 name = "rafka_derive"
 version = "0.1.0"
 authors = ["Seb Ospina <kraige@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = "1.0"
+syn = { version = "1.0", features = ["extra-traits"] }
 quote = "1.0"
+
+[dev-dependencies]
+trybuild = { version = "1.0.49", features = ["diff"] }
+
+[[tests]]
+name = "tests"
+path = "tests/main.rs"
+
