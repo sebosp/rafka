@@ -341,4 +341,11 @@ mod tests {
             .unwrap();
         assert!(conf_props.build().is_err());
     }
+
+    #[test]
+    fn it_identifies_bad_listener_proto() {
+        let mut conf_props = SocketConfigProperties::default();
+        conf_props.try_set_property("listeners", "BAD://localhost:0").unwrap();
+        assert!(conf_props.build().is_err());
+    }
 }

@@ -57,9 +57,8 @@ pub fn subznode_data_derive(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(ConfigDef)]
 pub fn config_def_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
+    eprintln!("{:#?}", ast);
     let name = &ast.ident;
-    let bname = format!("{}Properties", name);
-    let bident = syn::Ident::new(&bname, name.span());
     let fields = if let syn::Data::Struct(syn::DataStruct {
         fields: syn::Fields::Named(syn::FieldsNamed { ref named, .. }),
         ..
@@ -70,11 +69,20 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         unimplemented!();
     };
     let expanded = quote! {
-        pub struct #bident {
-            #fields
-        }
-        impl #bident {
+        impl #name {
+            pub fn properties_builder() -> #name {
+            }
         }
     };
+    expanded.into()
+}
+
+#[proc_macro_attribute]
+pub fn config_def_attribute_derive(input: TokenStream, other: TokenStream) -> TokenStream {
+    let ast = parse_macro_input!(input as DeriveInput);
+    eprintln!("input1: {:#?}", ast);
+    let ast = parse_macro_input!(other as DeriveInput);
+    eprintln!("other: {:#?}", ast);
+    let expanded = quote! {};
     expanded.into()
 }
