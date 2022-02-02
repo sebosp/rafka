@@ -3,6 +3,7 @@ members = [
     "rafka",
     "rafka_core",
     "rafka_derive",
+    "deriver",
 ]
 
 [profile.release]

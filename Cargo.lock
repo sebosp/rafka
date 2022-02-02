@@ -163,6 +163,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "deriver"
+version = "0.1.0"
+dependencies = [
+ "rafka_derive",
+]
+
+[[package]]
 name = "dirs-next"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -774,6 +781,7 @@ dependencies = [
 name = "rafka_derive"
 version = "0.1.0"
 dependencies = [
+ "proc-macro2",
  "quote",
  "syn",
  "trybuild",
