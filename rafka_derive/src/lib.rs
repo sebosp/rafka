@@ -60,21 +60,63 @@ struct ConfigDefFieldAttrs {
     config_key: Option<proc_macro2::TokenStream>,
 }
 
+/// `remove_enclosing_double_quotes` when a field attribute is a string it's enclosed in ""
+/// And when read from the attributes it looks like "\"<value>\"", this removes one layer of ""
+fn remove_enclosing_double_quotes(input: &str) -> String {
+    let (_double_quote_start, partial_string_value) = input.split_at(1);
+    let (string_value, _double_quote_end) =
+        partial_string_value.split_at(partial_string_value.len() - 1);
+    string_value.to_string()
+}
+
+/// `attr_parser` Checks the fields' ConfigDef setup. A ConfigDef internal type must impl FromStr
+/// as required by the Trait Bounds.
+/// NOTE: We may support ConfigDef<OneMoreGeneric<internal_type>> (Two layers) but currently this
+/// process only iterates through the first layer. Maybe some recursion can do this in the future
+/// but not needed right now...
 fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFieldAttrs {
     let mut res = ConfigDefFieldAttrs { default_value: None, config_key: None };
     let mut config_key: Option<String> = None;
-    let mut default_value: Option<String> = None;
     let mut is_config_def_segment = false;
+    let mut default_value: Option<String> = None;
+    let mut internal_field_ty = String::from("");
     let field_ty = &field_ref.ty;
-    if let syn::Type::Path(path) = field_ty {
-        if path.path.segments.first().unwrap().ident.to_string() != "ConfigDef" {
+    if let syn::Type::Path(type_path) = field_ty {
+        if type_path.path.segments.first().unwrap().ident.to_string() != "ConfigDef" {
             panic!(
                 "Field {} must be enclosed by a ConfigDef as in 'pub some_field: ConfigDef<T>'",
                 field_ref.ident.clone().unwrap().to_string()
             );
         }
+        if let syn::PathArguments::AngleBracketed(ref bracketed) =
+            type_path.path.segments.first().unwrap().arguments
+        {
+            eprintln!("bracketed: {:?}", bracketed);
+            if bracketed.args.len() != 1 {
+                panic!(
+                    "Field {} only one argument expected as in 'pub some_field: ConfigDef<T>'",
+                    field_ref.ident.clone().unwrap().to_string()
+                );
+            }
+            if let syn::GenericArgument::Type(internal_ty) = &bracketed.args[0] {
+                if let syn::Type::Path(type_path) = internal_ty {
+                    internal_field_ty = type_path.path.segments.first().unwrap().ident.to_string();
+                }
+                if !type_path.path.segments.first().unwrap().arguments.is_empty() {
+                    panic!(
+                        "Field {} currently not supporting multiple levels inside ConfigDef<T>",
+                        field_ref.ident.clone().unwrap().to_string()
+                    );
+                }
+            } else {
+                panic!(
+                    "Field {} currently supporting only field structs, not unions/etc",
+                    field_ref.ident.clone().unwrap().to_string()
+                );
+            }
+        }
     } else {
-        panic!("Expected field type to be 'pub some_field: ConfigDef<T>'");
+        panic!("Expected a struct with field type to be like 'pub some_field: ConfigDef<T>'");
     }
     for attr in &field_ref.attrs {
         for segment in attr.path.segments.clone() {
@@ -100,6 +142,9 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                             },
                             proc_macro2::TokenTree::Literal(lit) => {
                                 if is_known_operation {
+                                    // match lit {
+                                    // Integer(val) => default_value_maybe_integer = val,
+                                    // };
                                     let lit_value = lit.to_string();
                                     eprintln!("{}='{}'", current_id, lit_value);
                                     match current_id.as_ref() {
@@ -113,30 +158,20 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                                                     field_ref.ident.clone().unwrap().to_string()
                                                 );
                                             } else {
-                                                let (_double_quote_start, partial_key_name) =
-                                                    lit_value.split_at(1);
-                                                let (key_name_ref, _double_quote_end) =
-                                                    partial_key_name
-                                                        .split_at(partial_key_name.len() - 1);
-                                                config_key = Some(key_name_ref.to_string());
+                                                config_key = Some(remove_enclosing_double_quotes(
+                                                    &lit_value,
+                                                ));
                                             }
                                         },
                                         "default" => {
-                                            if !lit_value.starts_with('"')
-                                                || !lit_value.ends_with('"')
+                                            if lit_value.starts_with('"')
+                                                && lit_value.ends_with('"')
                                             {
-                                                panic!(
-                                                    "Field {} \"default\" attribute must be \
-                                                     enclosed in double quotes.",
-                                                    field_ref.ident.clone().unwrap().to_string()
+                                                default_value = Some(
+                                                    remove_enclosing_double_quotes(&lit_value),
                                                 );
                                             } else {
-                                                let (_double_quote_start, partial_default_value) =
-                                                    lit_value.split_at(1);
-                                                let (default_value_ref, _double_quote_end) =
-                                                    partial_default_value
-                                                        .split_at(partial_default_value.len() - 1);
-                                                default_value = Some(default_value_ref.to_string());
+                                                default_value = Some(lit_value);
                                             }
                                         },
                                         _ => {},
@@ -164,7 +199,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
         res.default_value = Some(quote! {
             #field_name : ConfigDef::default()
                 .with_key(#prop_name)
-                .with_default(#default_value),
+                .with_default(#internal_field_ty::from_str(#default_value).unwrap()),
         });
     }
     res
