@@ -208,18 +208,6 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
         &format!("{}_PROP", field_ref.ident.clone().unwrap().to_string().to_uppercase()),
         name.span(),
     );
-    if let Some(config_key) = config_key {
-        let field_name = field_ref.ident.clone();
-        res.key_attr = Some(quote! {
-            pub const #prop_name: &str = #config_key
-        });
-        res.default_attr = Some(quote! {
-            #field_name : ConfigDef::default()
-                .with_key(#prop_name)
-        });
-    } else {
-        panic!("field {} Missing key=\"some.path\" as field attribute.", field_ref_name);
-    }
     if let Some(default_attr) = default_attr {
         res.add_to_default_impl(quote! {
             .with_default(#internal_field_ty::from_str(#default_attr).unwrap())
@@ -251,7 +239,6 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         unimplemented!();
     };
     let enum_key_name = syn::Ident::new(&format!("{}Key", name), name.span());
-    let mut prop_names = vec![];
     let mut defaults = vec![];
     let mut enum_keys = vec![];
     let mut enum_displays = vec![];
@@ -259,9 +246,6 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
     let mut try_set_parsed_entries = vec![];
     for field in fields {
         let field_attrs = attr_parser(field, name);
-        if let Some(key_attr) = field_attrs.key_attr {
-            prop_names.push(key_attr);
-        }
         if let Some(default_attr) = field_attrs.default_attr {
             defaults.push(default_attr);
         }
@@ -288,7 +272,6 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         });
     }
     let expanded = quote! {
-        #(#prop_names;)*
         impl #name {
             pub fn init(&self) {
                 println!("Hello");
@@ -332,7 +315,7 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
                 property_name: &str,
                 property_value: &str,
             ) -> Result<(), KafkaConfigError> {
-                let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+                let kafka_config_key = #enum_key_name::from_str(property_name)?;
                 match kafka_config_key {
                     #(#try_set_parsed_entries)*
                 };
