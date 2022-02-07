@@ -231,6 +231,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
             .with_importance(ConfigDefImportance::#importance_ident)
         });
     }
+    // Add the "," separator in the field initialization
     res.add_to_default_impl(quote! {,});
     res
 }
@@ -249,11 +250,13 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
     } else {
         unimplemented!();
     };
+    let enum_key_name = syn::Ident::new(&format!("{}Key", name), name.span());
     let mut prop_names = vec![];
     let mut defaults = vec![];
     let mut enum_keys = vec![];
     let mut enum_displays = vec![];
     let mut from_strs = vec![];
+    let mut try_set_parsed_entries = vec![];
     for field in fields {
         let field_attrs = attr_parser(field, name);
         if let Some(key_attr) = field_attrs.key_attr {
@@ -279,49 +282,64 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         from_strs.push(quote! {
             #prop_name => Ok(Self::#enum_name),
         });
+        let field_name = field.ident.clone().unwrap();
+        try_set_parsed_entries.push(quote! {
+            #enum_key_name::#enum_name => self.#field_name.try_set_parsed_value(property_value)?,
+        });
     }
-    let enum_key_name = syn::Ident::new(&format!("{}Key", name), name.span());
     let expanded = quote! {
-            #(#prop_names;)*
-            impl #name {
-                pub fn init(&self) {
-                    println!("Hello");
-                }
-            }
-
-            impl Default for #name {
-                fn default() -> #name {
-                    #name {
-                        #(#defaults)*
-                    }
-                }
-            }
-
-            #[derive(std::fmt::Debug, enum_iterator::IntoEnumIterator)]
-            pub enum #enum_key_name {
-                #(#enum_keys)*
-            }
-
-            impl std::fmt::Display for #enum_key_name {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    match self {
-                        #(#enum_displays)*
-                    }
-                }
-            }
-
-    impl core::str::FromStr for #enum_key_name {
-        type Err = KafkaConfigError;
-
-        fn from_str(input: &str) -> Result<Self, Self::Err> {
-            match input {
-                #(#from_strs)*
-                _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
+        #(#prop_names;)*
+        impl #name {
+            pub fn init(&self) {
+                println!("Hello");
             }
         }
-    }
 
-        };
+        impl Default for #name {
+            fn default() -> #name {
+                #name {
+                    #(#defaults)*
+                }
+            }
+        }
+
+        #[derive(std::fmt::Debug, enum_iterator::IntoEnumIterator)]
+        pub enum #enum_key_name {
+            #(#enum_keys)*
+        }
+
+        impl std::fmt::Display for #enum_key_name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                match self {
+                    #(#enum_displays)*
+                }
+            }
+        }
+
+        impl core::str::FromStr for #enum_key_name {
+            type Err = KafkaConfigError;
+
+            fn from_str(input: &str) -> Result<Self, Self::Err> {
+                match input {
+                    #(#from_strs)*
+                    _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
+                }
+            }
+        }
+        impl #name {
+            fn try_set_property(
+                &mut self,
+                property_name: &str,
+                property_value: &str,
+            ) -> Result<(), KafkaConfigError> {
+                let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+                match kafka_config_key {
+                    #(#try_set_parsed_entries)*
+                };
+                Ok(())
+            }
+        }
+    };
     eprintln!("{}", expanded);
     expanded.into()
 }
