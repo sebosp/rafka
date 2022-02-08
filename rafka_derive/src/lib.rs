@@ -55,9 +55,13 @@ pub fn subznode_data_derive(input: TokenStream) -> TokenStream {
     impl_subznode_data_macro(&ast)
 }
 
+#[derive(Default)]
 struct ConfigDefFieldAttrs {
     default_attr: Option<proc_macro2::TokenStream>,
-    key_attr: Option<proc_macro2::TokenStream>,
+    default_value: Option<String>,
+    key_const: Option<String>,
+    importance_value: Option<String>,
+    doc_const: Option<String>,
 }
 
 impl ConfigDefFieldAttrs {
@@ -67,6 +71,26 @@ impl ConfigDefFieldAttrs {
         } else {
             self.default_attr = Some(input);
         }
+    }
+
+    fn set(&mut self, field_name: &str, current_attr: &str, lit_value: String) {
+        match current_attr.as_ref() {
+            "key" => {
+                self.key_const = Some(remove_if_enclosing_double_quotes(lit_value));
+            },
+            "default" => {
+                self.default_value = Some(remove_if_enclosing_double_quotes(lit_value));
+            },
+            "importance" => {
+                self.importance_value = Some(remove_if_enclosing_double_quotes(lit_value));
+            },
+            "doc" => {
+                self.doc_const = Some(remove_if_enclosing_double_quotes(lit_value));
+            },
+            unknown_attr @ _ => {
+                panic!("set({}) Unknown attr: {}", field_name, unknown_attr);
+            },
+        };
     }
 }
 
@@ -89,11 +113,8 @@ fn remove_if_enclosing_double_quotes(input: String) -> String {
 /// process only iterates through the first layer. Maybe some recursion can do this in the future
 /// but not needed right now...
 fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFieldAttrs {
-    let mut res = ConfigDefFieldAttrs { default_attr: None, key_attr: None };
-    let mut config_key: Option<String> = None;
+    let mut res = ConfigDefFieldAttrs::default();
     let mut is_config_def_segment = false;
-    let mut default_attr: Option<String> = None;
-    let mut importance_attr: Option<String> = None;
     let mut internal_field_ty: Option<syn::Ident> = None;
     let field_ty = &field_ref.ty;
     let field_ref_name = field_ref.ident.clone().unwrap().to_string();
@@ -136,6 +157,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
             field_ref_name
         );
     }
+    let mut is_assign_operation = false;
     for attr in &field_ref.attrs {
         for segment in attr.path.segments.clone() {
             if segment.ident.to_string() == "config_def" {
@@ -149,16 +171,28 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                     for section in group.stream() {
                         match section {
                             proc_macro2::TokenTree::Ident(id) => {
-                                // Start of operation for a token?
-                                current_attr = id.to_string();
-                                match current_attr.as_ref() {
-                                    "key" | "default" | "importance" => {},
-                                    unknown_attr @ _ => {
-                                        panic!("Unknown attr: {}", unknown_attr);
-                                    },
-                                };
+                                if is_assign_operation {
+                                    // An Ident may be the right hand side of an operation.
+                                    res.set(&field_ref_name, current_attr.as_ref(), id.to_string());
+                                } else {
+                                    // But if there was no assignment, the ident is a new attribute
+                                    // key
+                                    current_attr = id.to_string();
+                                    match current_attr.as_ref() {
+                                        "key" | "default" | "importance" | "doc" => {},
+                                        unknown_attr @ _ => {
+                                            panic!("section Unknown attr: {}", unknown_attr);
+                                        },
+                                    };
+                                }
                             },
                             proc_macro2::TokenTree::Punct(punct) => {
+                                if punct.as_char() == '=' {
+                                    is_assign_operation = true;
+                                }
+                                if punct.as_char() == ',' {
+                                    is_assign_operation = false;
+                                }
                                 if punct.as_char() != '=' && punct.as_char() != ',' {
                                     panic!(
                                         "Only supporting assignment as in: \"attr '=' value,\" \
@@ -170,31 +204,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                             proc_macro2::TokenTree::Literal(lit) => {
                                 let lit_value = lit.to_string();
                                 eprintln!("{}='{}'", current_attr, lit_value);
-                                match current_attr.as_ref() {
-                                    "key" => {
-                                        if !lit_value.starts_with('"') || !lit_value.ends_with('"')
-                                        {
-                                            panic!(
-                                                "Field {} \"key\" attribute must be enclosed in \
-                                                 double quotes.",
-                                                field_ref.ident.clone().unwrap().to_string()
-                                            );
-                                        }
-                                        config_key =
-                                            Some(remove_if_enclosing_double_quotes(lit_value));
-                                    },
-                                    "default" => {
-                                        default_attr =
-                                            Some(remove_if_enclosing_double_quotes(lit_value));
-                                    },
-                                    "importance" => {
-                                        importance_attr =
-                                            Some(remove_if_enclosing_double_quotes(lit_value));
-                                    },
-                                    unknown_attr @ _ => {
-                                        panic!("Unknown attr: {}", unknown_attr);
-                                    },
-                                }
+                                res.set(&field_ref_name, current_attr.as_ref(), lit_value);
                             },
                             _ => {},
                         }
@@ -204,22 +214,37 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
         }
     }
     let internal_field_ty = internal_field_ty.unwrap();
-    let prop_name = syn::Ident::new(
-        &format!("{}_PROP", field_ref.ident.clone().unwrap().to_string().to_uppercase()),
-        name.span(),
-    );
-    if let Some(default_attr) = default_attr {
-        res.add_to_default_impl(quote! {
-            .with_default(#internal_field_ty::from_str(#default_attr).unwrap())
+    if let Some(ref key_const) = res.key_const {
+        let key_ident = syn::Ident::new(&key_const, name.span());
+        let field_name = field_ref.ident.clone();
+        res.default_attr = Some(quote! {
+            #field_name : ConfigDef::default()
+                .with_key(#key_ident)
+        });
+    } else {
+        panic!("field {} Missing key=\"some.path\" as field attribute.", field_ref_name);
+    }
+    if let Some(ref doc_const) = res.doc_const {
+        let doc_ident = syn::Ident::new(&doc_const, name.span());
+        let field_name = field_ref.ident.clone();
+        res.default_attr = Some(quote! {
+            #field_name : ConfigDef::default()
+                .with_doc(#doc_ident)
         });
     }
-    if let Some(importance_attr) = importance_attr {
+    if let Some(ref default_value) = res.default_value {
+        let default_value = default_value.clone();
+        res.add_to_default_impl(quote! {
+            .with_default(#internal_field_ty::from_str(#default_value).unwrap())
+        });
+    }
+    if let Some(ref importance_attr) = res.importance_value {
         let importance_ident = syn::Ident::new(&format!("{}", importance_attr), name.span());
         res.add_to_default_impl(quote! {
             .with_importance(ConfigDefImportance::#importance_ident)
         });
     }
-    // Add the "," separator in the field initialization
+    // Add the final "," separator in the field initialization
     res.add_to_default_impl(quote! {,});
     res
 }
