@@ -55,6 +55,16 @@ pub fn subznode_data_derive(input: TokenStream) -> TokenStream {
     impl_subznode_data_macro(&ast)
 }
 
+fn split_validator_args(input: &str) -> (String, String) {
+    let tokens: Vec<&str> = input.split(&['(', ')']).collect();
+    if tokens.len() < 2 {
+        panic!("Validator should be validator_name(args)");
+    }
+    let validator_name: String = tokens[0].to_string();
+    let validator_args: String = tokens[1..].join("");
+    (validator_name, validator_args)
+}
+
 #[derive(Default)]
 struct ConfigDefFieldAttrs {
     default_attr: Option<proc_macro2::TokenStream>,
@@ -62,6 +72,7 @@ struct ConfigDefFieldAttrs {
     key_const: Option<String>,
     importance_value: Option<String>,
     doc_const: Option<String>,
+    validator: Option<String>,
 }
 
 impl ConfigDefFieldAttrs {
@@ -86,6 +97,9 @@ impl ConfigDefFieldAttrs {
             },
             "doc" => {
                 self.doc_const = Some(remove_if_enclosing_double_quotes(lit_value));
+            },
+            "validator" => {
+                self.validator = Some(remove_if_enclosing_double_quotes(lit_value));
             },
             unknown_attr @ _ => {
                 panic!("set({}) Unknown attr: {}", field_name, unknown_attr);
@@ -179,7 +193,8 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                                     // key
                                     current_attr = id.to_string();
                                     match current_attr.as_ref() {
-                                        "key" | "default" | "importance" | "doc" => {},
+                                        "key" | "default" | "importance" | "doc" | "validator" => {
+                                        },
                                         unknown_attr @ _ => {
                                             panic!("section Unknown attr: {}", unknown_attr);
                                         },
@@ -189,11 +204,9 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                             proc_macro2::TokenTree::Punct(punct) => {
                                 if punct.as_char() == '=' {
                                     is_assign_operation = true;
-                                }
-                                if punct.as_char() == ',' {
+                                } else if punct.as_char() == ',' {
                                     is_assign_operation = false;
-                                }
-                                if punct.as_char() != '=' && punct.as_char() != ',' {
+                                } else {
                                     panic!(
                                         "Only supporting assignment as in: \"attr '=' value,\" \
                                          but found punct: '{}'",
@@ -269,6 +282,7 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
     let mut enum_displays = vec![];
     let mut from_strs = vec![];
     let mut try_set_parsed_entries = vec![];
+    let mut validators = vec![];
     for field in fields {
         let field_attrs = attr_parser(field, name);
         if let Some(default_attr) = field_attrs.default_attr {
@@ -288,6 +302,19 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         enum_displays.push(quote! {
             Self::#enum_name => write!(f, "{}", #prop_name),
         });
+        let validator_fn_name = syn::Ident::new(
+            &format!("validate_{}", field.ident.clone().unwrap().to_string().to_uppercase()),
+            name.span(),
+        );
+        validators.push(quote! {
+            pub fn #validator_fn_name(&self) -> bool {
+                    ConfigDef::#validator(
+                        self.#field_name.value_as_ref(),
+                        &#validator_rhs,
+                        #prop_name,
+                    )
+            }
+        });
         from_strs.push(quote! {
             #prop_name => Ok(Self::#enum_name),
         });
@@ -301,6 +328,7 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
             pub fn init(&self) {
                 println!("Hello");
             }
+            #(#validators)*
         }
 
         impl Default for #name {
