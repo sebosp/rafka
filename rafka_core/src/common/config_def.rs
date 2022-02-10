@@ -35,7 +35,7 @@ pub struct ConfigDef<T> {
     /// KafkaConfig
     default: Option<T>,
     /// The documentation of the field, used for showing errors
-    doc: String,
+    doc: &'static str,
     /// Whether or not this variable was provided by the configuration file.
     provided: bool,
     /// The current value, be it the default or overwritten by config
@@ -96,11 +96,6 @@ where
     <T as FromStr>::Err: std::fmt::Display,
     T: std::fmt::Debug,
 {
-    pub fn with_importance(mut self, importance: ConfigDefImportance) -> Self {
-        self.importance = importance;
-        self
-    }
-
     /// Sets the `key` value, this comes from const &str values in the calling modules
     pub fn with_key(mut self, key: &str) -> Self {
         self.key = key.to_string();
@@ -108,37 +103,24 @@ where
     }
 
     /// Sets the documentation field for the current ConfigDef
-    pub fn with_doc(mut self, doc: String) -> Self {
+    pub fn with_doc(mut self, doc: &'static str) -> Self {
         self.doc = doc;
         self
     }
 
+    /// Sets the importance field, to be used later for generating the manual HTML view
+    pub fn with_importance(mut self, importance: ConfigDefImportance) -> Self {
+        self.importance = importance;
+        self
+    }
+
+    /// Sets the default value
     pub fn with_default(mut self, default: T) -> Self
     where
         T: Clone,
     {
         self.value = Some(default.clone());
         self.default = Some(default);
-        self
-    }
-
-    pub fn with_parseable_default(mut self, default: String) -> Self
-    where
-        T: Clone,
-    {
-        // Pre-fill the value with the default, if it doesn't parse we should panic as that means
-        // a bug in our code, not the config params
-        // DEPRECATED: This is no longer used as we no longer take String'ed numbers/etc
-        match default.parse::<T>() {
-            Ok(val) => {
-                self.value = Some(val.clone());
-                self.default = Some(val);
-            },
-            Err(err) => {
-                error!("Unable to parse default property for {:?}: {}", self.key, err);
-                panic!();
-            },
-        }
         self
     }
 
@@ -248,6 +230,10 @@ where
         self.value.as_ref()
     }
 
+    pub fn value_as_ref(&self) -> Option<&T> {
+        self.value.as_ref()
+    }
+
     pub fn get_importance(&self) -> &ConfigDefImportance {
         &self.importance
     }
@@ -316,7 +302,7 @@ where
 
 /// PartialConfigDef does not produce a usable Config by itself, several ConfigDefs interact with
 /// each other to produce a final value, the final/non-builder type usually has a resolve_<field>
-/// to produce the final value, combining factors from sometimes different PartialConfigDef 
+/// to produce the final value, combining factors from sometimes different PartialConfigDef
 /// to create a final value.
 pub struct PartialConfigDef<T> {
     pub config_def: ConfigDef<T>,
@@ -329,7 +315,6 @@ where
     <T as FromStr>::Err: std::fmt::Display,
     T: std::fmt::Debug,
 {
-
     pub fn with_importance(mut self, importance: ConfigDefImportance) -> Self {
         self.config_def = self.config_def.with_importance(importance);
         self
@@ -342,7 +327,7 @@ where
     }
 
     /// Sets the documentation field for the current ConfigDef
-    pub fn with_doc(mut self, doc: String) -> Self {
+    pub fn with_doc(mut self, doc: &'static str) -> Self {
         self.config_def = self.config_def.with_doc(doc);
         self
     }
@@ -391,7 +376,10 @@ where
         self.config_def.validate()
     }
 
-    pub fn get_or_simple_fallback(&mut self, fallback: &ConfigDef<T>) -> Result<(), KafkaConfigError>
+    pub fn get_or_simple_fallback(
+        &mut self,
+        fallback: &ConfigDef<T>,
+    ) -> Result<(), KafkaConfigError>
     where
         T: Clone,
     {
@@ -410,9 +398,7 @@ where
 
 impl<T> Default for PartialConfigDef<T> {
     fn default() -> Self {
-        Self {
-            config_def: ConfigDef::default(),
-        }
+        Self { config_def: ConfigDef::default() }
     }
 }
 
@@ -421,8 +407,6 @@ where
     T: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PartialConfigDef")
-            .field("config_def", &self.config_def)
-            .finish()
+        f.debug_struct("PartialConfigDef").field("config_def", &self.config_def).finish()
     }
 }
