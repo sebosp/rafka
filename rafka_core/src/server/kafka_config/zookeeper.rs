@@ -1,15 +1,38 @@
 //! Kafka Config - Zookeeper Configuration
 use super::{ConfigSet, KafkaConfigError};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
+use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
 use tracing::trace;
 
+// Config Keys
 pub const ZK_CONNECT_PROP: &str = "zookeeper.connect";
 pub const ZK_SESSION_TIMEOUT_PROP: &str = "zookeeper.session.timeout.ms";
 pub const ZK_CONNECTION_TIMEOUT_PROP: &str = "zookeeper.connection.timeout.ms";
 pub const ZK_MAX_IN_FLIGHT_REQUESTS_PROP: &str = "zookeeper.max.in.flight.requests";
+
+// Documentation
+pub const ZK_CONNECT_DOC: &str =
+    "Specifies the ZooKeeper connection string in the form <code>hostname:port</code>where host \
+     and port are the host and port of a ZooKeeper server. To allow connecting through other \
+     ZooKeeper nodes when that ZooKeeper machine is down you can also specify multiple hosts in \
+     the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>. The server can also \
+     have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data \
+     under some path in the global ZooKeeper namespace. For example to give a chroot path of \
+     `/chroot/path` you would give the connection string as \
+     `hostname1:port1,hostname2:port2,hostname3:port3/chroot/path`.";
+pub const ZK_SESSION_TIMEOUT_DOC: &str = "Zookeeper session timeout";
+pub const ZK_CONNECTION_TIMEOUT_DOC: &str = concatcp!(
+    "The max time that the client waits to establish a connection to zookeeper. If not set, the \
+     value in ",
+    ZK_SESSION_TIMEOUT_PROP,
+    " is used"
+);
+pub const ZK_MAX_IN_FLIGHT_REQUESTS_DOC: &str = "The maximum number of unacknowledged requests \
+                                                 the client will send to Zookeeper before \
+                                                 blocking.";
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum ZookeeperConfigKey {
@@ -58,36 +81,25 @@ impl Default for ZookeeperConfigProperties {
             zk_connect: ConfigDef::default()
                 .with_key(ZK_CONNECT_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(r#"
-                    Specifies the ZooKeeper connection string in the form <code>hostname:port</code> where host and port are the
-                    host and port of a ZooKeeper server. To allow connecting through other ZooKeeper nodes when that ZooKeeper machine is
-                    down you can also specify multiple hosts in the form <code>hostname1:port1,hostname2:port2,hostname3:port3</code>.
-                    The server can also have a ZooKeeper chroot path as part of its ZooKeeper connection string which puts its data under some path in the global ZooKeeper namespace.
-                    For example to give a chroot path of `/chroot/path` you would give the connection string as `hostname1:port1,hostname2:port2,hostname3:port3/chroot/path`.
-                    "#
-                )),
+                .with_doc(ZK_CONNECT_DOC),
             zk_session_timeout_ms: ConfigDef::default()
                 .with_key(ZK_SESSION_TIMEOUT_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("Zookeeper session timeout"))
+                .with_doc(ZK_SESSION_TIMEOUT_DOC)
                 .with_default(18000),
             zk_connection_timeout_ms: ConfigDef::default()
                 .with_key(ZK_CONNECTION_TIMEOUT_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(
-                    format!("The max time that the client waits to establish a connection to zookeeper. If \
-                     not set, the value in {} is used", ZK_SESSION_TIMEOUT_PROP) // REQ-01
-                ),
+                .with_doc(ZK_CONNECTION_TIMEOUT_DOC),
             zk_max_in_flight_requests: ConfigDef::default()
+                .with_key(ZK_MAX_IN_FLIGHT_REQUESTS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The maximum number of unacknowledged requests the client will send to Zookeeper before blocking."
-                ))
+                .with_doc(ZK_MAX_IN_FLIGHT_REQUESTS_DOC)
                 .with_default(10)
                 .with_validator(Box::new(|data| {
                     // RAFKA TODO: This doesn't make much sense if it's u32...
                     ConfigDef::at_least(data, &1, ZK_MAX_IN_FLIGHT_REQUESTS_PROP)
-                    })),
+                })),
         }
     }
 }

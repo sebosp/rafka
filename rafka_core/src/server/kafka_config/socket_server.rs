@@ -3,11 +3,13 @@ use super::{ConfigSet, KafkaConfigError};
 use crate::cluster::end_point::EndPoint;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
 use crate::utils::core_utils;
+use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
 use tracing::trace;
 
+// Config Keys
 pub const PORT_PROP: &str = "port";
 pub const HOST_NAME_PROP: &str = "host.name";
 pub const LISTENERS_PROP: &str = "listeners";
@@ -15,6 +17,56 @@ pub const ADVERTISED_HOST_NAME_PROP: &str = "advertised.host.name";
 pub const ADVERTISED_PORT_PROP: &str = "advertised.port";
 pub const ADVERTISED_LISTENERS_PROP: &str = "advertised.listeners";
 pub const MAX_CONNECTIONS_PROP: &str = "max.connections";
+
+// Documentation
+pub const PORT_DOC: &str = concatcp!(
+    "DEPRECATED: only used when `listeners` is not set. Use `",
+    LISTENERS_PROP,
+    "` instead. the port to listen and accept connections on"
+);
+pub const HOST_NAME_DOC: &str = concatcp!(
+    "DEPRECATED: only used when `listeners` is not set. Use `",
+    LISTENERS_PROP,
+    "` instead. hostname of broker. If this is set, it will only bind to this address. If this is \
+     not set, it will bind to all interfaces"
+);
+pub const LISTENERS_DOC: &str =
+    "Listener List - Comma-separated list of URIs we will listen on and the listener names. NOTE: \
+     RAFKA does not implement listener security protocols Specify hostname as 0.0.0.0 to bind to \
+     all interfaces. Leave hostname empty to bind to default interface. Examples of legal \
+     listener lists: PLAINTEXT://myhost:9092,SSL://:9091 \
+     CLIENT://0.0.0.0:9092,REPLICATION://localhost:9093";
+pub const ADVERTISED_LISTENERS_DOC: &str = concatcp!(
+    "Listeners to publish to ZooKeeper for clients to use, if different than the `",
+    LISTENERS_PROP,
+    "` config property.In IaaS environments, this may need to be different from the interface to \
+     which the broker binds. If this is not set, the value for `listeners` will be used. Unlike \
+     `listeners` it is not valid to advertise the 0.0.0.0 meta-address "
+);
+pub const ADVERTISED_HOST_NAME_DOC: &str = concatcp!(
+    "DEPRECATED: only used when `",
+    ADVERTISED_LISTENERS_PROP,
+    "` or `",
+    LISTENERS_PROP,
+    "` are not set. Use `",
+    ADVERTISED_LISTENERS_PROP,
+    "` instead. Hostname to publish to ZooKeeper for clients to use. In IaaS environments, this \
+     may need to be different from the interface to which the broker binds. If this is not set, \
+     it will use the value for `",
+    HOST_NAME_PROP,
+    "` if configured. Otherwise it will use the value returned from gethostname"
+);
+pub const ADVERTISED_PORT_DOC: &str = concatcp!(
+    "DEPRECATED: only used when `",
+    ADVERTISED_LISTENERS_PROP,
+    "` or `",
+    LISTENERS_PROP,
+    "` are not set. Use `",
+    ADVERTISED_LISTENERS_PROP,
+    "` instead. The port to publish to ZooKeeper for clients to use. In IaaS environments, this \
+     may need to be different from the port to which the broker binds. If this is not set, it \
+     will publish the same port that the broker binds to."
+);
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum SocketConfigKey {
@@ -68,68 +120,29 @@ impl Default for SocketConfigProperties {
             port: ConfigDef::default()
                 .with_key(PORT_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "DEPRECATED: only used when `listeners` is not set. Use `{}` instead. the \
-                     port to listen and accept connections on",
-                    LISTENERS_PROP
-                ))
+                .with_doc(PORT_DOC)
                 .with_default(9092),
             host_name: ConfigDef::default()
                 .with_key(HOST_NAME_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "DEPRECATED: only used when `listeners` is not set. Use `{}` instead. \
-                     hostname of broker. If this is set, it will only bind to this address. If \
-                     this is not set, it will bind to all interfaces",
-                    LISTENERS_PROP
-                ))
+                .with_doc(HOST_NAME_DOC)
                 .with_default(String::from("")),
             listeners: PartialConfigDef::default()
                 .with_key(LISTENERS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "Listener List - Comma-separated list of URIs we will listen on and the \
-                     listener names. NOTE: RAFKA does not implement listener security protocols \
-                     Specify hostname as 0.0.0.0 to bind to all interfaces. Leave hostname empty \
-                     to bind to default interface. Examples of legal listener lists: \
-                     PLAINTEXT://myhost:9092,SSL://:9091 \
-                     CLIENT://0.0.0.0:9092,REPLICATION://localhost:9093"
-                )),
+                .with_doc(LISTENERS_DOC),
             advertised_listeners: PartialConfigDef::default()
                 .with_key(ADVERTISED_LISTENERS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "Listeners to publish to ZooKeeper for clients to use, if different than the \
-                     `{}` config property.In IaaS environments, this may need to be different \
-                     from the interface to which the broker binds. If this is not set, the value \
-                     for `listeners` will be used. Unlike `listeners` it is not valid to \
-                     advertise the 0.0.0.0 meta-address ",
-                    LISTENERS_PROP
-                )),
+                .with_doc(ADVERTISED_LISTENERS_DOC),
             advertised_host_name: ConfigDef::default()
                 .with_key(ADVERTISED_HOST_NAME_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "DEPRECATED: only used when `{}` or `{}` are not set. Use `{}` instead. \
-                     Hostname to publish to ZooKeeper for clients to use. In IaaS environments, \
-                     this may need to be different from the interface to which the broker binds. \
-                     If this is not set, it will use the value for `{}` if configured. Otherwise \
-                     it will use the value returned from gethostname",
-                    ADVERTISED_LISTENERS_PROP,
-                    LISTENERS_PROP,
-                    ADVERTISED_LISTENERS_PROP,
-                    HOST_NAME_PROP
-                )),
+                .with_doc(ADVERTISED_HOST_NAME_DOC),
             advertised_port: ConfigDef::default()
                 .with_key(ADVERTISED_PORT_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "DEPRECATED: only used when `{}` or `{}` are not set. Use `{}` instead. The \
-                     port to publish to ZooKeeper for clients to use. In IaaS environments, this \
-                     may need to be different from the port to which the broker binds. If this is \
-                     not set, it will publish the same port that the broker binds to.",
-                    ADVERTISED_LISTENERS_PROP, LISTENERS_PROP, ADVERTISED_LISTENERS_PROP
-                )),
+                .with_doc(ADVERTISED_PORT_DOC),
         }
     }
 }

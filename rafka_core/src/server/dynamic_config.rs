@@ -8,10 +8,27 @@ use crate::server::replication_quota_manager::ReplicationQuotaManagerConfig;
 use std::collections::HashMap;
 use tracing::error;
 
+// Config Keys
 pub const LEADER_REPLICATION_THROTTLED_RATE_PROP: &str = "leader.replication.throttled.rate";
 pub const FOLLOWER_REPLICATION_THROTTLED_RATE_PROP: &str = "follower.replication.throttled.rate";
 pub const REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP: &str =
     "replica.alter.log.dirs.io.max.bytes.per.second";
+
+// Documentation
+pub const LEADER_REPLICATION_THROTTLED_RATE_DOC: &str =
+    "A long representing the upper bound (bytes/sec) on replication traffic for leaders \
+     enumerated in the property ${LogConfig.LeaderReplicationThrottledReplicasProp} (for each \
+     topic). This property can be only set dynamically. It is suggested that the limit be kept \
+     above 1MB/s for accurate behaviour.";
+pub const FOLLOWER_REPLICATION_THROTTLED_RATE_DOC: &str =
+    "A long representing the upper bound (bytes/sec) on replication traffic for followers \
+     enumerated in the property ${LogConfig.FollowerReplicationThrottledReplicasProp} (for each \
+     topic). This property can be only set dynamically. It is suggested that the limit be kept \
+     above 1MB/s for accurate behaviour.";
+pub const REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_DOC: &str =
+    "A long representing the upper bound (bytes/sec) on disk IO used for moving replica between \
+     log directories on the same broker. This property can be only set dynamically. It is \
+     suggested that the limit be kept above 1MB/s for accurate behaviour.";
 
 #[derive(Debug, Default)]
 pub struct DynamicConfig {
@@ -48,35 +65,20 @@ impl Default for DynamicBrokerConfigDefs {
     fn default() -> Self {
         Self {
             leader_replication_throttled_rate_prop: ConfigDef::default()
+                .with_key(LEADER_REPLICATION_THROTTLED_RATE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "A long representing the upper bound (bytes/sec) on replication traffic for \
-                     leaders enumerated in the property \
-                     ${LogConfig.LeaderReplicationThrottledReplicasProp} (for each topic). This \
-                     property can be only set dynamically. It is suggested that the limit be kept \
-                     above 1MB/s for accurate behaviour.",
-                ))
+                .with_doc(LEADER_REPLICATION_THROTTLED_RATE_DOC)
                 .with_default(
                     ReplicationQuotaManagerConfig::default().quota_bytes_per_second_default,
                 ),
-
             follower_replication_throttled_rate_prop: ConfigDef::default()
+                .with_key(FOLLOWER_REPLICATION_THROTTLED_RATE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "A long representing the upper bound (bytes/sec) on replication traffic for \
-                     followers enumerated in the property \
-                     ${LogConfig.FollowerReplicationThrottledReplicasProp} (for each topic). This \
-                     property can be only set dynamically. It is suggested that the limit be kept \
-                     above 1MB/s for accurate behaviour.",
-                )),
+                .with_doc(FOLLOWER_REPLICATION_THROTTLED_RATE_DOC),
             replica_alter_log_dirs_io_max_bytes_per_second_prop: ConfigDef::default()
+                .with_key(REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "A long representing the upper bound (bytes/sec) on disk IO used for moving \
-                     replica between log directories on the same broker. This property can be \
-                     only set dynamically. It is suggested that the limit be kept above 1MB/s for \
-                     accurate behaviour.",
-                )),
+                .with_doc(REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_DOC),
         }
     }
 }

@@ -6,10 +6,21 @@ use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
 
+// Config Keys
 pub const PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.producer.default";
 pub const CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP: &str = "quota.consumer.default";
 pub const QUOTA_WINDOW_SIZE_SECONDS_PROP: &str = "quota.window.size.seconds";
 
+// Documentation
+pub const PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_DOC: &str =
+    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> \
+     or <user, client-id> in Zookeeper. Any consumer distinguished by clientId/consumer group \
+     will get throttled if it fetches more bytes than this value per-second";
+pub const CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_DOC: &str =
+    "DEPRECATED: Used only when dynamic default quotas are not configured for <user, <client-id> \
+     or <user, client-id> in Zookeeper. Any consumer distinguished by clientId/consumer group \
+     will get throttled if it fetches more bytes than this value per-second";
+pub const QUOTA_WINDOW_SIZE_SECONDS_DOC: &str = "The time span of each sample for client quotas";
 #[derive(Debug, IntoEnumIterator)]
 pub enum QuotaConfigKey {
     ProducerQuotaBytesPerSecondDefault,
@@ -61,26 +72,16 @@ impl Default for QuotaConfigProperties {
             producer_quota_bytes_per_second_default: ConfigDef::default()
                 .with_key(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "DEPRECATED: Used only when dynamic default quotas are not configured for \
-                     <user, <client-id> or <user, client-id> in Zookeeper. Any consumer \
-                     distinguished by clientId/consumer group will get throttled if it fetches \
-                     more bytes than this value per-second",
-                ))
+                .with_doc(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_DOC)
                 .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &1, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 })),
             consumer_quota_bytes_per_second_default: ConfigDef::default()
-                .with_key(PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
+                .with_key(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "DEPRECATED: Used only when dynamic default quotas are not configured for \
-                     <user, <client-id> or <user, client-id> in Zookeeper. Any consumer \
-                     distinguished by clientId/consumer group will get throttled if it fetches \
-                     more bytes than this value per-second",
-                ))
+                .with_doc(CONSUMER_QUOTA_BYTES_PER_SECOND_DEFAULT_DOC)
                 .with_default(client_quota_manager::QUOTA_BYTES_PER_SECOND_DEFAULT)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -89,7 +90,7 @@ impl Default for QuotaConfigProperties {
             quota_window_size_seconds: ConfigDef::default()
                 .with_key(QUOTA_WINDOW_SIZE_SECONDS_PROP)
                 .with_importance(ConfigDefImportance::Low)
-                .with_doc(String::from("The time span of each sample for client quotas"))
+                .with_doc(QUOTA_WINDOW_SIZE_SECONDS_DOC)
                 .with_default(client_quota_manager::QUOTA_WINDOW_SIZE_SECONDS_DEFAULT)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default

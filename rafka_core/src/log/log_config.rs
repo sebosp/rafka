@@ -2,7 +2,7 @@
 
 use crate::api::api_version::{ApiVersionValidator, KafkaApiVersion};
 use crate::common::config::topic_config::*;
-use crate::common::config_def::{ConfigDef, ConfigDefImportance, Validator, PartialConfigDef};
+use crate::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef, Validator};
 use crate::common::record::legacy_record;
 use crate::message::compression_codec::BrokerCompressionCodec;
 use crate::server::config_handler::ThrottledReplicaListValidator;
@@ -32,6 +32,7 @@ use tracing::{info, trace};
 // self.".Snakecase(submatch(1)).".try_set_parsed_val ue(property_value)?,\n9".
 // Snakecase(submatch(1)).": ".submatch(2).",
 
+// Config Keys
 pub const CLEANUP_POLICY_PROP: &str = CLEANUP_POLICY_CONFIG;
 pub const COMPRESSION_TYPE_PROP: &str = COMPRESSION_TYPE_CONFIG;
 pub const DELETE_RETENTION_MS_PROP: &str = DELETE_RETENTION_MS_CONFIG;
@@ -64,6 +65,19 @@ pub const SEGMENT_INDEX_BYTES_PROP: &str = SEGMENT_INDEX_BYTES_CONFIG;
 pub const SEGMENT_JITTER_MS_PROP: &str = SEGMENT_JITTER_MS_CONFIG;
 pub const SEGMENT_MS_PROP: &str = SEGMENT_MS_CONFIG;
 pub const UNCLEAN_LEADER_ELECTION_ENABLE_PROP: &str = UNCLEAN_LEADER_ELECTION_ENABLE_CONFIG;
+
+// Documentation
+pub const FOLLOWER_REPLICATION_THROTTLED_REPLICAS_DOC: &str =
+    "A list of replicas for which log replication should be throttled on the follower side. The \
+     list should describe a set of replicas in the form \
+     [PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the wildcard '*' can \
+     be used to throttle all replicas for this topic.";
+
+pub const LEADER_REPLICATION_THROTTLED_REPLICAS_DOC: &str =
+    "A list of replicas for which log replication should be throttled on the leader side. The \
+     list should describe a set of replicas in the form \
+     [PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the wildcard '*' can \
+     be used to throttle all replicas for this topic.";
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum LogConfigKey {
@@ -219,7 +233,7 @@ impl Default for LogConfigProperties {
             cleanup_policy: PartialConfigDef::default()
                 .with_key(CLEANUP_POLICY_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(CLEANUP_POLICY_DOC.to_string())
+                .with_doc(CLEANUP_POLICY_DOC)
                 .with_default(LogCleanupPolicy::Delete.to_string())
                 .with_validator(Box::new(|data| {
                     ConfigDef::value_in_list(
@@ -234,12 +248,12 @@ impl Default for LogConfigProperties {
             compression_type: PartialConfigDef::default()
                 .with_key(COMPRESSION_TYPE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(COMPRESSION_TYPE_DOC.to_string())
+                .with_doc(COMPRESSION_TYPE_DOC)
                 .with_default(DEFAULT_COMPRESSION_TYPE.name.to_string()),
             delete_retention_ms: ConfigDef::default()
                 .with_key(DELETE_RETENTION_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(DELETE_RETENTION_MS_DOC.to_string())
+                .with_doc(DELETE_RETENTION_MS_DOC)
                 .with_default(
                     broker_default_log_properties.log_cleaner_delete_retention_ms.build().unwrap(),
                 )
@@ -250,7 +264,7 @@ impl Default for LogConfigProperties {
             file_delete_delay_ms: ConfigDef::default()
                 .with_key(FILE_DELETE_DELAY_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(FILE_DELETE_DELAY_MS_DOC.to_string())
+                .with_doc(FILE_DELETE_DELAY_MS_DOC)
                 .with_default(broker_default_log_properties.log_delete_delay_ms.build().unwrap())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -259,7 +273,7 @@ impl Default for LogConfigProperties {
             flush_messages: ConfigDef::default()
                 .with_key(FLUSH_MESSAGES_INTERVAL_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(FLUSH_MESSAGES_INTERVAL_DOC.to_string())
+                .with_doc(FLUSH_MESSAGES_INTERVAL_DOC)
                 .with_default(
                     broker_default_log_properties.log_flush_interval_messages.build().unwrap(),
                 )
@@ -270,7 +284,7 @@ impl Default for LogConfigProperties {
             flush_ms: ConfigDef::default()
                 .with_key(FLUSH_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(FLUSH_MS_DOC.to_string())
+                .with_doc(FLUSH_MS_DOC)
                 .with_default(
                     broker_default_log_properties.log_flush_scheduler_interval_ms.build().unwrap(),
                 )
@@ -281,12 +295,7 @@ impl Default for LogConfigProperties {
             follower_replication_throttled_replicas: PartialConfigDef::default()
                 .with_key(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "A list of replicas for which log replication should be throttled on the \
-                     follower side. The list should describe a set of replicas in the form \
-                     [PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the \
-                     wildcard '*' can be used to throttle all replicas for this topic.",
-                ))
+                .with_doc(FOLLOWER_REPLICATION_THROTTLED_REPLICAS_DOC)
                 .with_validator(Box::new(|data| match data {
                     Some(val) => ThrottledReplicaListValidator::ensure_valid_string(
                         FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP,
@@ -297,7 +306,7 @@ impl Default for LogConfigProperties {
             index_interval_bytes: ConfigDef::default()
                 .with_key(INDEX_INTERVAL_BYTES_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(INDEX_INTERVAL_BYTES_DOCS.to_string())
+                .with_doc(INDEX_INTERVAL_BYTES_DOCS)
                 .with_default(
                     broker_default_log_properties.log_index_interval_bytes.build().unwrap(),
                 )
@@ -308,12 +317,7 @@ impl Default for LogConfigProperties {
             leader_replication_throttled_replicas: PartialConfigDef::default()
                 .with_key(LEADER_REPLICATION_THROTTLED_REPLICAS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "A list of replicas for which log replication should be throttled on the \
-                     leader side. The list should describe a set of replicas in the form \
-                     [PartitionId]:[BrokerId],[PartitionId]:[BrokerId]:... or alternatively the \
-                     wildcard '*' can be used to throttle all replicas for this topic.",
-                ))
+                .with_doc(LEADER_REPLICATION_THROTTLED_REPLICAS_DOC)
                 .with_validator(Box::new(|data| match data {
                     Some(val) => ThrottledReplicaListValidator::ensure_valid_string(
                         FOLLOWER_REPLICATION_THROTTLED_REPLICAS_PROP,
@@ -324,7 +328,7 @@ impl Default for LogConfigProperties {
             max_compaction_lag_ms: ConfigDef::default()
                 .with_key(MAX_COMPACTION_LAG_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MAX_COMPACTION_LAG_MS_DOC.to_string())
+                .with_doc(MAX_COMPACTION_LAG_MS_DOC)
                 .with_default(
                     broker_default_log_properties
                         .log_cleaner_max_compaction_lag_ms
@@ -338,7 +342,7 @@ impl Default for LogConfigProperties {
             max_message_bytes: ConfigDef::default()
                 .with_key(MAX_MESSAGE_BYTES_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MAX_MESSAGE_BYTES_DOC.to_string())
+                .with_doc(MAX_MESSAGE_BYTES_DOC)
                 .with_default(general_properties.message_max_bytes.build().unwrap())
                 .with_validator(Box::new(|data| {
                     // NOTE: This being a usize it cannot be lower than 0...
@@ -348,7 +352,7 @@ impl Default for LogConfigProperties {
             message_down_conversion_enable: ConfigDef::default()
                 .with_key(MESSAGE_DOWNCONVERSION_ENABLE_CONFIG)
                 .with_importance(ConfigDefImportance::Low)
-                .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC.to_string())
+                .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC)
                 .with_default(
                     broker_default_log_properties
                         .log_message_down_conversion_enable
@@ -358,7 +362,7 @@ impl Default for LogConfigProperties {
             message_format_version: PartialConfigDef::default()
                 .with_key(MESSAGE_FORMAT_VERSION_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MESSAGE_FORMAT_VERSION_DOC.to_string())
+                .with_doc(MESSAGE_FORMAT_VERSION_DOC)
                 .with_default(
                     // TODO: Calling build() is a bad idea from outside, because there might be a
                     // resolve_<field> and we may just forget to call it... Perhaps one option is
@@ -379,7 +383,7 @@ impl Default for LogConfigProperties {
             message_timestamp_difference_max_ms: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC.to_string())
+                .with_doc(MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC)
                 .with_default(
                     broker_default_log_properties
                         .log_message_timestamp_difference_max_ms
@@ -393,7 +397,7 @@ impl Default for LogConfigProperties {
             message_timestamp_type: ConfigDef::default()
                 .with_key(MESSAGE_TIMESTAMP_TYPE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MESSAGE_TIMESTAMP_TYPE_DOC.to_string())
+                .with_doc(MESSAGE_TIMESTAMP_TYPE_DOC)
                 .with_default(
                     broker_default_log_properties
                         .resolve_log_message_timestamp_type()
@@ -415,7 +419,7 @@ impl Default for LogConfigProperties {
             min_cleanable_dirty_ratio: ConfigDef::default()
                 .with_key(MIN_CLEANABLE_DIRTY_RATIO_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MIN_CLEANABLE_DIRTY_RATIO_DOC.to_string())
+                .with_doc(MIN_CLEANABLE_DIRTY_RATIO_DOC)
                 .with_default(
                     broker_default_log_properties.log_cleaner_min_clean_ratio.build().unwrap(),
                 )
@@ -425,7 +429,7 @@ impl Default for LogConfigProperties {
             min_compaction_lag_ms: ConfigDef::default()
                 .with_key(MIN_COMPACTION_LAG_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MIN_COMPACTION_LAG_MS_DOC.to_string())
+                .with_doc(MIN_COMPACTION_LAG_MS_DOC)
                 .with_default(
                     broker_default_log_properties
                         .log_cleaner_min_compaction_lag_ms
@@ -435,7 +439,7 @@ impl Default for LogConfigProperties {
             min_in_sync_replicas: ConfigDef::default()
                 .with_key(MIN_IN_SYNC_REPLICAS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(MIN_IN_SYNC_REPLICAS_DOC.to_string())
+                .with_doc(MIN_IN_SYNC_REPLICAS_DOC)
                 .with_default(broker_default_log_properties.min_in_sync_replicas.build().unwrap())
                 .with_validator(Box::new(|data| {
                     // NOTE: This being a usize it cannot be lower than 0...
@@ -445,20 +449,20 @@ impl Default for LogConfigProperties {
             pre_allocate_enable: ConfigDef::default()
                 .with_key(PREALLOCATE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(PREALLOCATE_DOC.to_string())
+                .with_doc(PREALLOCATE_DOC)
                 .with_default(
                     broker_default_log_properties.log_pre_allocate_enable.build().unwrap(),
                 ),
             retention_bytes: ConfigDef::default()
                 .with_key(RETENTION_BYTES_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(RETENTION_BYTES_DOC.to_string())
+                .with_doc(RETENTION_BYTES_DOC)
                 .with_default(broker_default_log_properties.log_retention_bytes.build().unwrap()),
             // can be negative. See kafka.log.LogManager.cleanupExpiredSegments
             retention_ms: ConfigDef::default()
                 .with_key(RETENTION_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(RETENTION_MS_DOC.to_string())
+                .with_doc(RETENTION_MS_DOC)
                 .with_default(
                     broker_default_log_properties.resolve_log_retention_time_millis().unwrap(),
                 )
@@ -469,7 +473,7 @@ impl Default for LogConfigProperties {
             segment_bytes: ConfigDef::default()
                 .with_key(SEGMENT_BYTES_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(SEGMENT_BYTES_DOC.to_string())
+                .with_doc(SEGMENT_BYTES_DOC)
                 .with_default(broker_default_log_properties.log_segment_bytes.build().unwrap())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -482,7 +486,7 @@ impl Default for LogConfigProperties {
             segment_index_bytes: ConfigDef::default()
                 .with_key(SEGMENT_INDEX_BYTES_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(SEGMENT_INDEX_BYTES_DOC.to_string())
+                .with_doc(SEGMENT_INDEX_BYTES_DOC)
                 .with_default(
                     broker_default_log_properties.log_index_size_max_bytes.build().unwrap(),
                 )
@@ -496,7 +500,7 @@ impl Default for LogConfigProperties {
             segment_jitter_ms: ConfigDef::default()
                 .with_key(SEGMENT_JITTER_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(SEGMENT_JITTER_MS_DOC.to_string())
+                .with_doc(SEGMENT_JITTER_MS_DOC)
                 .with_default(
                     broker_default_log_properties.resolve_log_roll_time_jitter_millis().unwrap(),
                 )
@@ -507,7 +511,7 @@ impl Default for LogConfigProperties {
             segment_ms: ConfigDef::default()
                 .with_key(SEGMENT_MS_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(SEGMENT_MS_DOC.to_string())
+                .with_doc(SEGMENT_MS_DOC)
                 .with_default(broker_default_log_properties.resolve_log_roll_time_millis().unwrap())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -516,7 +520,7 @@ impl Default for LogConfigProperties {
             unclean_leader_election_enable: ConfigDef::default()
                 .with_key(UNCLEAN_LEADER_ELECTION_ENABLE_CONFIG)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(UNCLEAN_LEADER_ELECTION_ENABLE_DOC.to_string())
+                .with_doc(UNCLEAN_LEADER_ELECTION_ENABLE_DOC)
                 .with_default(
                     replication_properties.unclean_leader_election_enable.build().unwrap(),
                 ),

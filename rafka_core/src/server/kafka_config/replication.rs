@@ -7,7 +7,13 @@ use std::fmt;
 use std::str::FromStr;
 use tracing::trace;
 
+// Config Keys
 pub const UNCLEAN_LEADER_ELECTION_ENABLE_PROP: &str = "unclean.leader.election.enable";
+
+// Documentation
+pub const UNCLEAN_LEADER_ELECTION_ENABLE_DOC: &str =
+    "Indicates whether to enable replicas not in the ISR set to be elected as leader as a last \
+     resort, even though doing so may result in data loss";
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum ReplicationConfigKey {
@@ -46,10 +52,7 @@ impl Default for ReplicationConfigProperties {
             unclean_leader_election_enable: ConfigDef::default()
                 .with_key(UNCLEAN_LEADER_ELECTION_ENABLE_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "Indicates whether to enable replicas not in the ISR set to be elected as \
-                     leader as a last resort, even though doing so may result in data loss",
-                ))
+                .with_doc(UNCLEAN_LEADER_ELECTION_ENABLE_DOC)
                 .with_default(false),
         }
     }

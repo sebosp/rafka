@@ -20,6 +20,7 @@ use tracing::{trace, warn};
 
 pub const LOG_CONFIG_PREFIX: &str = "log.";
 
+// Config Keys
 pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_DIRS_PROP: &str = "log.dirs";
 pub const LOG_SEGMENT_BYTES_PROP: &str = "log.segment.bytes";
@@ -65,6 +66,155 @@ pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP: &str = "num.recovery.threads.p
 pub const MIN_IN_SYNC_REPLICAS_PROP: &str = "min.insync.replicas";
 pub const LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP: &str =
     concatcp!(LOG_CONFIG_PREFIX, "message.downconversion.enable");
+
+// Documentation
+pub const LOG_DIR_DOC: &str = concatcp!(
+    "The directory in which the log data is kept (supplemental for ",
+    LOG_DIRS_PROP,
+    " property)"
+);
+pub const LOG_DIRS_DOC: &str = concatcp!(
+    "The directories in which the log data is kept. If not set, the value in ",
+    LOG_DIR_PROP,
+    " is used"
+);
+pub const LOG_SEGMENT_BYTES_DOC: &str = "The maximum size of a single log file";
+pub const LOG_ROLL_TIME_MILLIS_DOC: &str = concatcp!(
+    "The maximum time before a new log segment is rolled out (in milliseconds). If not set, the \
+     value in ",
+    LOG_ROLL_TIME_HOURS_PROP,
+    " is used"
+);
+pub const LOG_ROLL_TIME_HOURS_DOC: &str = concatcp!(
+    "The maximum time before a new log segment is rolled out (in hours), secondary to ",
+    LOG_ROLL_TIME_MILLIS_PROP,
+    " property"
+);
+pub const LOG_ROLL_TIME_JITTER_MILLIS_DOC: &str = concatcp!(
+    "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If not set, the \
+     value in ",
+    LOG_ROLL_TIME_JITTER_HOURS_PROP,
+    " is used"
+);
+pub const LOG_ROLL_TIME_JITTER_HOURS_DOC: &str = concatcp!(
+    "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary to ",
+    LOG_ROLL_TIME_JITTER_MILLIS_PROP,
+    " property"
+);
+pub const LOG_RETENTION_TIME_MILLIS_DOC: &str = concatcp!(
+    "The number of milliseconds to keep a log file before deleting it (in milliseconds), If not \
+     set, the value in ",
+    LOG_RETENTION_TIME_MINUTES_PROP,
+    " is used. If set to -1, no time limit is applied."
+);
+pub const LOG_RETENTION_TIME_MINUTES_DOC: &str = concatcp!(
+    "The number of minutes to keep a log file before deleting it (in minutes), secondary to ",
+    LOG_RETENTION_TIME_MILLIS_PROP,
+    " property. If not set, the value in ",
+    LOG_RETENTION_TIME_HOURS_PROP,
+    " is used"
+);
+pub const LOG_RETENTION_TIME_HOURS_DOC: &str = concatcp!(
+    "The number of hours to keep a log file before deleting it (in hours), tertiary to ",
+    LOG_RETENTION_TIME_MILLIS_PROP,
+    " property"
+);
+pub const LOG_RETENTION_BYTES_DOC: &str = "The maximum size of the log before deleting it";
+pub const LOG_CLEANUP_INTERVAL_MS_DOC: &str = "The frequency in milliseconds that the log cleaner \
+                                               checks whether any log is eligible for deletion";
+pub const LOG_CLEANUP_POLICY_DOC: &str = "The default cleanup policy for segments beyond the \
+                                          retention window. A comma separated list of valid \
+                                          policies. Valid policies are: \"delete\" and \"compact\"";
+pub const LOG_CLEANER_THREADS_DOC: &str =
+    "The number of background threads to use for log cleaning";
+pub const LOG_CLEANER_DEDUPE_BUFFER_SIZE_DOC: &str =
+    "The total memory used for log deduplication across all cleaner threads";
+pub const LOG_CLEANER_IO_BUFFER_SIZE_DOC: &str =
+    "The total memory used for log cleaner I/O buffers across all cleaner threads";
+pub const LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_DOC: &str =
+    "Log cleaner dedupe buffer load factor. The percentage full the dedupe buffer can become. A \
+     higher value will allow more log to be cleaned at once but will lead to more hash collisions";
+pub const LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_DOC: &str = "The log cleaner will be throttled so \
+                                                           that the sum of its read and write i/o \
+                                                           will be less than this value on average";
+pub const LOG_CLEANER_BACKOFF_MS_DOC: &str =
+    "The amount of time to sleep when there are no logs to clean";
+pub const LOG_CLEANER_MIN_CLEAN_RATIO_DOC: &str = concatcp!(
+    "The minimum ratio of dirty log to total log for a log to eligible for cleaning. If the ",
+    LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP,
+    "or the ",
+    LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP,
+    " configurations are also specified, then the log compactor considers the log eligible for \
+     compaction as soon as either: (i) the dirty ratio threshold has been met and the log has had \
+     dirty (uncompacted) records for at least the ",
+    LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP,
+    " duration, or (ii) if the log has had dirty (uncompacted) records for at most the ",
+    LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP,
+    " period."
+);
+pub const LOG_CLEANER_ENABLE_DOC: &str =
+    "Enable the log cleaner process to run on the server. Should be enabled if using any topics \
+     with a cleanup.policy=compact including the internal offsets topic. If disabled those topics \
+     will not be compacted and continually grow in size.";
+pub const LOG_CLEANER_DELETE_RETENTION_MS_DOC: &str = "How long are delete records retained?";
+pub const LOG_CLEANER_MIN_COMPACTION_LAG_MS_DOC: &str = "The minimum time a message will remain \
+                                                         uncompacted in the log. Only applicable \
+                                                         for logs that are being compacted.";
+pub const LOG_CLEANER_MAX_COMPACTION_LAG_MS_DOC: &str =
+    "The maximum time a message will remain ineligible for compaction in the log. Only applicable \
+     for logs that are being compacted.";
+pub const LOG_INDEX_INTERVAL_BYTES_DOC: &str =
+    "The interval with which we add an entry to the offset index";
+pub const LOG_INDEX_SIZE_MAX_BYTES_DOC: &str = "The maximum size in bytes of the offset index";
+pub const LOG_FLUSH_INTERVAL_MESSAGES_DOC: &str =
+    "The number of messages accumulated on a log partition before messages are flushed to disk ";
+pub const LOG_DELETE_DELAY_MS_DOC: &str =
+    "The amount of time to wait before deleting a file from the filesystem";
+pub const LOG_FLUSH_SCHEDULER_INTERVAL_MS_DOC: &str =
+    "The frequency in ms that the log flusher checks whether any log needs to be flushed to disk";
+pub const LOG_FLUSH_INTERVAL_MS_DOC: &str = concatcp!(
+    "The maximum time in ms that a message in any topic is kept in memory before flushed to disk. \
+     If not set, the value in ",
+    LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP,
+    " is used"
+);
+pub const LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_DOC: &str =
+    "The frequency with which we update the persistent record of the last flush which acts as the \
+     log recovery point";
+pub const LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_DOC: &str =
+    "The frequency with which we update the persistent record of log start offset";
+pub const LOG_PRE_ALLOCATE_DOC: &str = "Should pre allocate file when create new segment? If you \
+                                        are using Kafka on Windows, you probably need to set it \
+                                        to true.";
+pub const LOG_MESSAGE_FORMAT_VERSION_DOC: &str =
+    "Specify the message format version the broker will use to append messages to the logs. The \
+     value should be a valid ApiVersion. Some examples are: 0.8.2, 0.9.0.0, 0.10.0, check \
+     ApiVersion for more details. By setting a particular message format version, the user is \
+     certifying that all the existing messages on disk are smaller or equal than the specified \
+     version. Setting this value incorrectly will cause consumers with older versions to break as \
+     they will receive messages with a format that they don't understand.";
+pub const LOG_MESSAGE_TIMESTAMP_TYPE_DOC: &str =
+    "Define whether the timestamp in the message is message create time or log append time. The \
+     value should be either `CreateTime` or `LogAppendTime`";
+pub const LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC: &str =
+    "The maximum difference allowed between the timestamp when a broker receives a message and \
+     the timestamp specified in the message. If log.message.timestamp.type=CreateTime, a message \
+     will be rejected if the difference in timestamp exceeds this threshold. This configuration \
+     is ignored if log.message.timestamp.type=LogAppendTime.The maximum timestamp difference \
+     allowed should be no greater than log.retention.ms to avoid unnecessarily frequent log \
+     rolling.";
+pub const NUM_RECOVERY_THREADS_PER_DATA_DIR_DOC: &str = "The number of threads per data directory \
+                                                         to be used for log recovery at startup \
+                                                         and flushing at shutdown";
+pub const MIN_IN_SYNC_REPLICAS_DOC: &str =
+    "When a producer sets acks to \"all\" (or \"-1\"),  min.insync.replicas specifies the minimum \
+     number of replicas that must acknowledge  a write for the write to be considered successful. \
+     If this minimum cannot be met,  then the producer will raise an exception (either \
+     NotEnoughReplicas or  NotEnoughReplicasAfterAppend). When used together, min.insync.replicas \
+     and acks  allow you to enforce greater durability guarantees. A typical scenario would be to  \
+     create a topic with a replication factor of 3, set min.insync.replicas to 2, and  produce \
+     with acks of \"all\". This will ensure that the producer raises an exception  if a majority \
+     of replicas do not receive a write.";
 
 // RAFKA TODO: This is a topic property, should be moved to its proper place
 #[derive(Debug, Clone, PartialEq)]
@@ -366,23 +516,16 @@ impl Default for DefaultLogConfigProperties {
             log_dir: PartialConfigDef::default()
                 .with_key(LOG_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The directory in which the log data is kept (supplemental for {} property)",
-                    LOG_DIRS_PROP
-                ))
+                .with_doc(LOG_DIR_DOC)
                 .with_default(String::from("/tmp/kafka-logs")),
             log_dirs: PartialConfigDef::default()
                 .with_key(LOG_DIRS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The directories in which the log data is kept. If not set, the value in {} \
-                     is used",
-                    LOG_DIR_PROP
-                )),
+                .with_doc(LOG_DIRS_DOC),
             log_segment_bytes: ConfigDef::default()
                 .with_key(LOG_SEGMENT_BYTES_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("The maximum size of a single log file"))
+                .with_doc(LOG_SEGMENT_BYTES_DOC)
                 .with_default(1 * 1024 * 1024 * 1024)
                 .with_validator(Box::new(|data| {
                     // RAFKA TODO: This doesn't make much sense if it's u32...
@@ -399,19 +542,11 @@ impl Default for DefaultLogConfigProperties {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
                 }))
-                .with_doc(format!(
-                    "The maximum time before a new log segment is rolled out (in milliseconds). \
-                     If not set, the value in {} is used",
-                    LOG_ROLL_TIME_HOURS_PROP
-                )),
+                .with_doc(LOG_ROLL_TIME_MILLIS_DOC),
             log_roll_time_hours: PartialConfigDef::default()
                 .with_key(LOG_ROLL_TIME_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The maximum time before a new log segment is rolled out (in hours), \
-                     secondary to {} property",
-                    LOG_ROLL_TIME_MILLIS_PROP
-                ))
+                .with_doc(LOG_ROLL_TIME_HOURS_DOC)
                 .with_default(24 * 7)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -420,19 +555,11 @@ impl Default for DefaultLogConfigProperties {
             log_roll_time_jitter_millis: PartialConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The maximum jitter to subtract from logRollTimeMillis (in milliseconds). If \
-                     not set, the value in {} is used",
-                    LOG_ROLL_TIME_JITTER_HOURS_PROP
-                )),
+                .with_doc(LOG_ROLL_TIME_JITTER_MILLIS_DOC),
             log_roll_time_jitter_hours: PartialConfigDef::default()
                 .with_key(LOG_ROLL_TIME_JITTER_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The maximum jitter to subtract from logRollTimeMillis (in hours), secondary \
-                     to {} property",
-                    LOG_ROLL_TIME_JITTER_MILLIS_PROP
-                ))
+                .with_doc(LOG_ROLL_TIME_JITTER_HOURS_DOC)
                 .with_default(0)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -441,28 +568,15 @@ impl Default for DefaultLogConfigProperties {
             log_retention_time_millis: PartialConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The number of milliseconds to keep a log file before deleting it (in \
-                     milliseconds), If not set, the value in {} is used. If set to -1, no time \
-                     limit is applied.",
-                    LOG_RETENTION_TIME_MINUTES_PROP
-                )),
+                .with_doc(LOG_RETENTION_TIME_MILLIS_DOC),
             log_retention_time_minutes: ConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_MINUTES_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The number of minutes to keep a log file before deleting it (in minutes), \
-                     secondary to {} property. If not set, the value in {} is used",
-                    LOG_RETENTION_TIME_MILLIS_PROP, LOG_RETENTION_TIME_HOURS_PROP
-                )),
+                .with_doc(LOG_RETENTION_TIME_MINUTES_DOC),
             log_retention_time_hours: ConfigDef::default()
                 .with_key(LOG_RETENTION_TIME_HOURS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The number of hours to keep a log file before deleting it (in hours), \
-                     tertiary to {} property",
-                    LOG_RETENTION_TIME_MILLIS_PROP
-                ))
+                .with_doc(LOG_RETENTION_TIME_HOURS_DOC)
                 .with_default(24 * 7)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -471,24 +585,17 @@ impl Default for DefaultLogConfigProperties {
             log_retention_bytes: ConfigDef::default()
                 .with_key(LOG_RETENTION_BYTES_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from("The maximum size of the log before deleting it"))
+                .with_doc(LOG_RETENTION_BYTES_DOC)
                 .with_default(-1),
             log_cleanup_interval_ms: ConfigDef::default()
                 .with_key(LOG_CLEANUP_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The frequency in milliseconds that the log cleaner checks whether any log is \
-                     eligible for deletion",
-                ))
+                .with_doc(LOG_CLEANUP_INTERVAL_MS_DOC)
                 .with_default(5 * 60 * 1000),
             log_cleanup_policy: PartialConfigDef::default()
                 .with_key(LOG_CLEANUP_POLICY_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The default cleanup policy for segments beyond the retention window. A comma \
-                     separated list of valid policies. Valid policies are: \"delete\" and \
-                     \"compact\"",
-                ))
+                .with_doc(LOG_CLEANUP_POLICY_DOC)
                 .with_default(LogCleanupPolicy::Delete.to_string())
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -504,7 +611,7 @@ impl Default for DefaultLogConfigProperties {
             log_cleaner_threads: ConfigDef::default()
                 .with_key(LOG_CLEANER_THREADS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("The number of background threads to use for log cleaning"))
+                .with_doc(LOG_CLEANER_THREADS_DOC)
                 .with_default(1)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -513,40 +620,27 @@ impl Default for DefaultLogConfigProperties {
             log_cleaner_dedupe_buffer_size: ConfigDef::default()
                 .with_key(LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The total memory used for log deduplication across all cleaner threads",
-                ))
+                .with_doc(LOG_CLEANER_DEDUPE_BUFFER_SIZE_DOC)
                 .with_default(128 * 1024 * 1024),
             log_cleaner_io_buffer_size: ConfigDef::default()
                 .with_key(LOG_CLEANER_IO_BUFFER_SIZE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The total memory used for log cleaner I/O buffers across all cleaner threads",
-                ))
+                .with_doc(LOG_CLEANER_IO_BUFFER_SIZE_DOC)
                 .with_default(512 * 1024),
             log_cleaner_dedupe_buffer_load_factor: ConfigDef::default()
                 .with_key(LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "Log cleaner dedupe buffer load factor. The percentage full the dedupe buffer \
-                     can become. A higher value will allow more log to be cleaned at once but \
-                     will lead to more hash collisions",
-                ))
+                .with_doc(LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_DOC)
                 .with_default(0.9), // Contained a 0.9d before, double check
             log_cleaner_io_max_bytes_per_second: ConfigDef::default()
                 .with_key(LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The log cleaner will be throttled so that the sum of its read and write i/o \
-                     will be less than this value on average",
-                ))
+                .with_doc(LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_DOC)
                 .with_default(f64::MAX),
             log_cleaner_backoff_ms: ConfigDef::default()
                 .with_key(LOG_CLEANER_BACKOFF_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The amount of time to sleep when there are no logs to clean",
-                ))
+                .with_doc(LOG_CLEANER_BACKOFF_MS_DOC)
                 .with_default(15 * 1000)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -555,61 +649,37 @@ impl Default for DefaultLogConfigProperties {
             log_cleaner_min_clean_ratio: ConfigDef::default()
                 .with_key(LOG_CLEANER_MIN_CLEAN_RATIO_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(format!(
-                    "The minimum ratio of dirty log to total log for a log to eligible for \
-                     cleaning. If the {}  or the {} configurations are also specified, then the \
-                     log compactor considers the log eligible for compaction as soon as either: \
-                     (i) the dirty ratio threshold has been met and the log has had dirty \
-                     (uncompacted) records for at least the {} duration, or (ii) if the log has \
-                     had dirty (uncompacted) records for at most the {} period.",
-                    LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP,
-                    LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP,
-                    LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP,
-                    LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP
-                ))
+                .with_doc(LOG_CLEANER_MIN_CLEAN_RATIO_DOC)
                 .with_default(0.5),
             log_cleaner_enable: ConfigDef::default()
                 .with_key(LOG_CLEANER_ENABLE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "Enable the log cleaner process to run on the server. Should be enabled if \
-                     using any topics with a cleanup.policy=compact including the internal \
-                     offsets topic. If disabled those topics will not be compacted and \
-                     continually grow in size.",
-                ))
+                .with_doc(LOG_CLEANER_ENABLE_DOC)
                 .with_default(true),
             log_cleaner_delete_retention_ms: ConfigDef::default()
                 .with_key(LOG_CLEANER_DELETE_RETENTION_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("How long are delete records retained?"))
+                .with_doc(LOG_CLEANER_DELETE_RETENTION_MS_DOC)
                 .with_default(24 * 60 * 60 * 1000),
             log_cleaner_min_compaction_lag_ms: ConfigDef::default()
                 .with_key(LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The minimum time a message will remain uncompacted in the log. Only \
-                     applicable for logs that are being compacted.",
-                ))
+                .with_doc(LOG_CLEANER_MIN_COMPACTION_LAG_MS_DOC)
                 .with_default(0),
             log_cleaner_max_compaction_lag_ms: ConfigDef::default()
                 .with_key(LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The maximum time a message will remain ineligible for compaction in the log. \
-                     Only applicable for logs that are being compacted.",
-                ))
+                .with_doc(LOG_CLEANER_MAX_COMPACTION_LAG_MS_DOC)
                 .with_default(i64::MAX),
             log_index_interval_bytes: ConfigDef::default()
                 .with_key(LOG_INDEX_INTERVAL_BYTES_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The interval with which we add an entry to the offset index",
-                ))
+                .with_doc(LOG_INDEX_INTERVAL_BYTES_DOC)
                 .with_default(4096),
             log_index_size_max_bytes: ConfigDef::default()
                 .with_key(LOG_INDEX_SIZE_MAX_BYTES_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from("The maximum size in bytes of the offset index"))
+                .with_doc(LOG_INDEX_SIZE_MAX_BYTES_DOC)
                 .with_default(10 * 1024 * 1024)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -618,10 +688,7 @@ impl Default for DefaultLogConfigProperties {
             log_flush_interval_messages: ConfigDef::default()
                 .with_key(LOG_FLUSH_INTERVAL_MESSAGES_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The number of messages accumulated on a log partition before messages are \
-                     flushed to disk ",
-                ))
+                .with_doc(LOG_FLUSH_INTERVAL_MESSAGES_DOC)
                 .with_default(i64::MAX)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -630,9 +697,7 @@ impl Default for DefaultLogConfigProperties {
             log_delete_delay_ms: ConfigDef::default()
                 .with_key(LOG_DELETE_DELAY_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The amount of time to wait before deleting a file from the filesystem",
-                ))
+                .with_doc(LOG_DELETE_DELAY_MS_DOC)
                 .with_default(60000)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -641,27 +706,17 @@ impl Default for DefaultLogConfigProperties {
             log_flush_scheduler_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The frequency in ms that the log flusher checks whether any log needs to be \
-                     flushed to disk",
-                ))
+                .with_doc(LOG_FLUSH_SCHEDULER_INTERVAL_MS_DOC)
                 .with_default(i64::MAX),
             log_flush_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The maximum time in ms that a message in any topic is kept in memory before \
-                     flushed to disk. If not set, the value in {} is used",
-                    LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP
-                ))
+                .with_doc(LOG_FLUSH_INTERVAL_MS_DOC)
                 .with_default(i64::MAX),
             log_flush_offset_checkpoint_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The frequency with which we update the persistent record of the last flush \
-                     which acts as the log recovery point",
-                ))
+                .with_doc(LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_DOC)
                 .with_default(60000)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -670,9 +725,7 @@ impl Default for DefaultLogConfigProperties {
             log_flush_start_offset_checkpoint_interval_ms: ConfigDef::default()
                 .with_key(LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The frequency with which we update the persistent record of log start offset",
-                ))
+                .with_doc(LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_DOC)
                 .with_default(60000)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -681,68 +734,32 @@ impl Default for DefaultLogConfigProperties {
             log_pre_allocate_enable: ConfigDef::default()
                 .with_key(LOG_PRE_ALLOCATE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "Should pre allocate file when create new segment? If you are using Kafka on \
-                     Windows, you probably need to set it to true.",
-                ))
+                .with_doc(LOG_PRE_ALLOCATE_DOC)
                 .with_default(false),
             log_message_format_version: PartialConfigDef::default()
                 .with_key(LOG_MESSAGE_FORMAT_VERSION_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "Specify the message format version the broker will use to append messages to \
-                     the logs. The value should be a valid ApiVersion. Some examples are: 0.8.2, \
-                     0.9.0.0, 0.10.0, check ApiVersion for more details. By setting a particular \
-                     message format version, the user is certifying that all the existing \
-                     messages on disk are smaller or equal than the specified version. Setting \
-                     this value incorrectly will cause consumers with older versions to break as \
-                     they will receive messages with a format that they don't understand.",
-                ))
+                .with_doc(LOG_MESSAGE_FORMAT_VERSION_DOC)
                 .with_default(inter_broker_protocol_version.to_string()),
             log_message_timestamp_type: PartialConfigDef::default()
                 .with_key(LOG_MESSAGE_TIMESTAMP_TYPE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "Define whether the timestamp in the message is message create time or log \
-                     append time. The value should be either `CreateTime` or `LogAppendTime`",
-                ))
+                .with_doc(LOG_MESSAGE_TIMESTAMP_TYPE_DOC)
                 .with_default(LogMessageTimestampType::default().to_string()),
             log_message_timestamp_difference_max_ms: ConfigDef::default()
                 .with_key(LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(String::from(
-                    "The maximum difference allowed between the timestamp when a broker receives \
-                     a message and the timestamp specified in the message. If \
-                     log.message.timestamp.type=CreateTime, a message will be rejected if the \
-                     difference in timestamp exceeds this threshold. This configuration is \
-                     ignored if log.message.timestamp.type=LogAppendTime.The maximum timestamp \
-                     difference allowed should be no greater than log.retention.ms to avoid \
-                     unnecessarily frequent log rolling.",
-                ))
+                .with_doc(LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC)
                 .with_default(i64::MAX),
             num_recovery_threads_per_data_dir: ConfigDef::default()
                 .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The number of threads per data directory to be used for log recovery at \
-                     startup and flushing at shutdown",
-                ))
+                .with_doc(NUM_RECOVERY_THREADS_PER_DATA_DIR_DOC)
                 .with_default(1),
             min_in_sync_replicas: ConfigDef::default()
                 .with_key(MIN_IN_SYNC_REPLICAS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "When a producer sets acks to \"all\" (or \"-1\"),  min.insync.replicas \
-                     specifies the minimum number of replicas that must acknowledge  a write for \
-                     the write to be considered successful. If this minimum cannot be met,  then \
-                     the producer will raise an exception (either NotEnoughReplicas or  \
-                     NotEnoughReplicasAfterAppend). When used together, min.insync.replicas and \
-                     acks  allow you to enforce greater durability guarantees. A typical scenario \
-                     would be to  create a topic with a replication factor of 3, set \
-                     min.insync.replicas to 2, and  produce with acks of \"all\". This will \
-                     ensure that the producer raises an exception  if a majority of replicas do \
-                     not receive a write.",
-                ))
+                .with_doc(MIN_IN_SYNC_REPLICAS_DOC)
                 .with_default(1)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -751,12 +768,12 @@ impl Default for DefaultLogConfigProperties {
             log_message_down_conversion_enable: ConfigDef::default()
                 .with_key(LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
                 .with_importance(ConfigDefImportance::Low)
-                .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC.to_string())
+                .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC)
                 .with_default(true),
             compression_type: ConfigDef::default()
                 .with_key(COMPRESSION_TYPE_CONFIG)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(COMPRESSION_TYPE_DOC.to_string())
+                .with_doc(COMPRESSION_TYPE_DOC)
                 .with_default(PRODUCER_COMPRESSION_CODEC),
         }
     }
@@ -993,8 +1010,8 @@ impl DefaultLogConfigProperties {
         }
     }
 
-    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
-    /// be currently performed by the resolver.
+    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis)
+    /// cannot be currently performed by the resolver.
     pub fn resolve_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
         if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
             Ok(*log_roll_time_millis)
@@ -1003,8 +1020,8 @@ impl DefaultLogConfigProperties {
         }
     }
 
-    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis) cannot
-    /// be currently performed by the resolver.
+    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis)
+    /// cannot be currently performed by the resolver.
     pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
         if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
             Ok(*log_roll_time_jitter_millis)
@@ -1013,36 +1030,37 @@ impl DefaultLogConfigProperties {
         }
     }
 
-    /// The `get_or_fallback()` from `ConfigDef` cannot be used as we need to transform hours to minutes to
-    /// millis
+    /// The `get_or_fallback()` from `ConfigDef` cannot be used as we need to transform hours to
+    /// minutes to millis
     pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
         let millis_in_minute = 60 * 1000;
         let millis_in_hour = 60 * millis_in_minute;
 
         let mut millis: i64 = match self.log_retention_time_millis.get_value() {
-            Some(0) =>
+            Some(0) => {
                 return Err(KafkaConfigError::InvalidValue(format!(
                     "{} must be unlimited (-1) or, equal or greater than 1",
                     LOG_RETENTION_TIME_MILLIS_PROP
-                ))),
+                )))
+            },
             Some(millis) => *millis,
             None => match self.log_retention_time_minutes.get_value() {
-                Some(0) =>
+                Some(0) => {
                     return Err(KafkaConfigError::InvalidValue(format!(
                         "{} must be unlimited (-1) or, equal or greater than 1",
                         LOG_RETENTION_TIME_MINUTES_PROP
-                    ))),
+                    )))
+                },
                 Some(mins) => i64::from(millis_in_minute) * i64::from(*mins),
-                None => {
-                    match self.log_retention_time_hours.get_value() {
-                        Some(0) => 
-                            return Err(KafkaConfigError::InvalidValue(format!(
-                                "{} must be unlimited (-1) or, equal or greater than 1",
+                None => match self.log_retention_time_hours.get_value() {
+                    Some(0) => {
+                        return Err(KafkaConfigError::InvalidValue(format!(
+                            "{} must be unlimited (-1) or, equal or greater than 1",
                             LOG_RETENTION_TIME_HOURS_PROP
-                        ))),
-                        Some(hours) => i64::from(*hours) * millis_in_hour,
-                        None => unreachable!("log_retention_time_hours has a default."),
-                    }
+                        )))
+                    },
+                    Some(hours) => i64::from(*hours) * millis_in_hour,
+                    None => unreachable!("log_retention_time_hours has a default."),
                 },
             },
         };
@@ -1237,11 +1255,14 @@ mod tests {
         assert_eq!(conf.log_cleanup_policy, vec![LogCleanupPolicy::Compact]);
         conf_props.try_set_property("log.cleanup.policy", "compact,delete").unwrap();
         let conf = conf_props.build().unwrap();
-        assert_eq!(conf.log_cleanup_policy, vec![LogCleanupPolicy::Compact, LogCleanupPolicy::Delete]);
+        assert_eq!(conf.log_cleanup_policy, vec![
+            LogCleanupPolicy::Compact,
+            LogCleanupPolicy::Delete
+        ]);
     }
 
     #[test]
-    fn it_resolves_log_retention_time_hours_provided(){
+    fn it_resolves_log_retention_time_hours_provided() {
         let mut conf_props = DefaultLogConfigProperties::default();
         conf_props.try_set_property("log.retention.hours", "1").unwrap();
         let conf = conf_props.build().unwrap();
@@ -1249,7 +1270,7 @@ mod tests {
     }
 
     #[test]
-    fn it_resolves_log_retention_time_minutes_provided(){
+    fn it_resolves_log_retention_time_minutes_provided() {
         let mut conf_props = DefaultLogConfigProperties::default();
         conf_props.try_set_property("log.retention.minutes", "30").unwrap();
         let conf = conf_props.build().unwrap();
@@ -1257,14 +1278,14 @@ mod tests {
     }
 
     #[test]
-    fn it_resolves_log_retention_time_no_config_provided(){
+    fn it_resolves_log_retention_time_no_config_provided() {
         let mut conf_props = DefaultLogConfigProperties::default();
         let conf = conf_props.build().unwrap();
         assert_eq!(conf.log_retention_time_millis, 24 * 7 * 60 * 60 * 1000);
     }
 
     #[test]
-    fn it_resolves_log_retention_time_both_minutes_and_hours_provided(){
+    fn it_resolves_log_retention_time_both_minutes_and_hours_provided() {
         let mut conf_props = DefaultLogConfigProperties::default();
         conf_props.try_set_property("log.retention.minutes", "30").unwrap();
         conf_props.try_set_property("log.retention.hours", "1").unwrap();
@@ -1273,7 +1294,7 @@ mod tests {
     }
 
     #[test]
-    fn it_resolves_log_retention_time_both_minutes_and_ms_provided(){
+    fn it_resolves_log_retention_time_both_minutes_and_ms_provided() {
         let mut conf_props = DefaultLogConfigProperties::default();
         conf_props.try_set_property("log.retention.ms", "1800000").unwrap();
         conf_props.try_set_property("log.retention.minutes", "10").unwrap();
@@ -1282,7 +1303,7 @@ mod tests {
     }
 
     #[test]
-    fn it_resolves_log_retention_unlimited(){
+    fn it_resolves_log_retention_unlimited() {
         let mut conf_props_ms = DefaultLogConfigProperties::default();
         let mut conf_props_mins = DefaultLogConfigProperties::default();
         let mut conf_props_hours = DefaultLogConfigProperties::default();
@@ -1306,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    fn it_resolves_log_retention_invalid(){
+    fn it_resolves_log_retention_invalid() {
         let mut conf_props_error_ms = DefaultLogConfigProperties::default();
         let mut conf_props_error_mins = DefaultLogConfigProperties::default();
         let mut conf_props_error_hours = DefaultLogConfigProperties::default();
@@ -1319,17 +1340,23 @@ mod tests {
         let conf_error_mins = conf_props_error_mins.build();
         let conf_error_hours = conf_props_error_hours.build();
 
-        assert_eq!(conf_error_ms,
+        assert_eq!(
+            conf_error_ms,
             Err(KafkaConfigError::InvalidValue(String::from(
                 "log.retention.ms must be unlimited (-1) or, equal or greater than 1",
-            ))));
-        assert_eq!(conf_error_mins,
+            )))
+        );
+        assert_eq!(
+            conf_error_mins,
             Err(KafkaConfigError::InvalidValue(String::from(
                 "log.retention.minutes must be unlimited (-1) or, equal or greater than 1",
-            ))));
-        assert_eq!(conf_error_hours,
+            )))
+        );
+        assert_eq!(
+            conf_error_hours,
             Err(KafkaConfigError::InvalidValue(String::from(
                 "log.retention.hours must be unlimited (-1) or, equal or greater than 1",
-            ))));
+            )))
+        );
     }
 }

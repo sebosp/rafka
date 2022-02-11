@@ -22,6 +22,7 @@ use self::transaction_management::{
 };
 use self::zookeeper::{ZookeeperConfig, ZookeeperConfigKey, ZookeeperConfigProperties};
 use crate::common::config::config_exception;
+use crate::common::security::auth::security_protocol::SecurityProtocolError;
 use enum_iterator::IntoEnumIterator;
 use fs_err::File;
 use std::collections::HashMap;
@@ -135,6 +136,8 @@ pub enum KafkaConfigError {
     ConfigException(#[from] config_exception::ConfigException),
     #[error("Invalid Log Message Timestamp Type")]
     InvalidLogMessageTimestampType(String),
+    #[error("Security Protocol Config Error: {0}")]
+    SecurityProtocol(#[from] SecurityProtocolError),
 }
 
 /// This implementation is only for testing, for example any I/O error is considered equal
@@ -168,6 +171,7 @@ impl PartialEq for KafkaConfigError {
             Self::InvalidLogMessageTimestampType(lhs) => {
                 matches!(rhs, Self::InvalidLogMessageTimestampType(rhs) if lhs == rhs)
             },
+            Self::SecurityProtocol(lhs) => matches!(rhs, Self::SecurityProtocol(rhs) if lhs == rhs),
         }
     }
 }

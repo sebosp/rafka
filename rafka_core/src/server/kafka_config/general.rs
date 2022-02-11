@@ -4,15 +4,40 @@ use super::{ConfigSet, KafkaConfigError};
 use crate::common::config::topic_config;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::records;
+use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
 use tracing::trace;
 
+// Config Keys
 pub const BROKER_ID_GENERATION_ENABLE_PROP: &str = "broker.id.generation.enable";
 pub const RESERVED_BROKER_MAX_ID_PROP: &str = "reserved.broker.max.id";
 pub const BROKER_ID_PROP: &str = "broker.id";
 pub const MESSAGE_MAX_BYTES_PROP: &str = "message.max.bytes";
+
+// Documentation
+pub const BROKER_ID_GENERATION_ENABLE_DOC: &str = concatcp!(
+    "Enable automatic broker id generation on the server. When enabled the value configured for ",
+    RESERVED_BROKER_MAX_ID_PROP,
+    " should be reviewed."
+);
+pub const RESERVED_BROKER_MAX_ID_DOC: &str =
+    concatcp!("Max number that can be used for a ", BROKER_ID_PROP);
+pub const BROKER_ID_DOC: &str = concatcp!(
+    "The broker id for this server. If unset, a unique broker id will be generated. To avoid \
+     conflicts between zookeeper generated broker id's and user configured broker id's, generated \
+     broker ids start from ",
+    RESERVED_BROKER_MAX_ID_PROP,
+    " + 1."
+);
+
+pub const MESSAGE_MAX_BYTES_DOC: &str = concatcp!(
+    topic_config::MAX_MESSAGE_BYTES_DOC,
+    " This can be set per topic with the topic level `",
+    topic_config::MAX_MESSAGE_BYTES_CONFIG,
+    "` config."
+);
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum GeneralConfigKey {
@@ -59,16 +84,12 @@ impl Default for GeneralConfigProperties {
             broker_id_generation_enable: ConfigDef::default()
                 .with_key(BROKER_ID_GENERATION_ENABLE_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(format!(
-                    "Enable automatic broker id generation on the server. When enabled the value \
-                     configured for {} should be reviewed.",
-                    RESERVED_BROKER_MAX_ID_PROP
-                ))
+                .with_doc(BROKER_ID_GENERATION_ENABLE_DOC)
                 .with_default(true),
             reserved_broker_max_id: ConfigDef::default()
                 .with_key(RESERVED_BROKER_MAX_ID_PROP)
                 .with_importance(ConfigDefImportance::Medium)
-                .with_doc(format!("Max number that can be used for a {}", BROKER_ID_PROP))
+                .with_doc(BROKER_ID_GENERATION_ENABLE_DOC)
                 .with_default(1000)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
@@ -77,22 +98,13 @@ impl Default for GeneralConfigProperties {
             broker_id: ConfigDef::default()
                 .with_key(BROKER_ID_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(format!(
-                    "The broker id for this server. If unset, a unique broker id will be \
-                     generated. To avoid conflicts between zookeeper generated broker id's and \
-                     user configured broker id's, generated broker ids start from {} + 1.",
-                    RESERVED_BROKER_MAX_ID_PROP
-                ))
+                .with_doc(BROKER_ID_DOC)
                 .with_default(-1),
             message_max_bytes: ConfigDef::default()
                 .with_key(MESSAGE_MAX_BYTES_PROP)
                 .with_importance(ConfigDefImportance::High)
                 .with_default(1024 * 1024 + records::LOG_OVERHEAD)
-                .with_doc(format!(
-                    "{} This can be set per topic with the topic level `{}` config.",
-                    topic_config::MAX_MESSAGE_BYTES_DOC,
-                    topic_config::MAX_MESSAGE_BYTES_CONFIG
-                ))
+                .with_doc(MESSAGE_MAX_BYTES_DOC)
                 .with_validator(Box::new(|data| {
                     // Safe to unwrap, we have a default
                     ConfigDef::at_least(data, &0, MESSAGE_MAX_BYTES_PROP)

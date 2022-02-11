@@ -79,7 +79,7 @@ impl<T> Default for ConfigDef<T> {
     fn default() -> Self {
         Self {
             importance: ConfigDefImportance::Low,
-            doc: String::from("TODO: Missing Docs"),
+            doc: "TODO: Missing Docs",
             key: String::from("unset.key"),
             default: None,
             provided: false,

@@ -7,10 +7,21 @@ use crate::message::compression_codec::BrokerCompressionCodec;
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
 use std::str::FromStr;
+use tracing::trace;
+
+// Config Keys
 pub const TRANSACTIONAL_ID_EXPIRATION_MS_PROP: &str = "transactional.id.expiration.ms";
 pub const DEFAULT_COMPRESSION_TYPE: BrokerCompressionCodec =
     BrokerCompressionCodec::gen_producer_compression_codec();
-use tracing::trace;
+
+// Documentation
+pub const TRANSACTIONAL_ID_EXPIRATION_MS_DOC: &str =
+    "The time in ms that the transaction coordinator will wait without receiving any transaction  \
+     status updates for the current transaction before expiring its transactional id. This \
+     setting also influences producer id expiration - producer ids are expired once this time has \
+     elapsed  after the last write with the given producer id. Note that producer ids may expire \
+     sooner if the last write from the producer id is deleted due to the topic's retention \
+     settings.";
 
 #[derive(Debug, IntoEnumIterator)]
 pub enum TransactionConfigKey {
@@ -48,15 +59,7 @@ impl Default for TransactionConfigProperties {
             transactional_id_expiration_ms: ConfigDef::default()
                 .with_key(TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
                 .with_importance(ConfigDefImportance::High)
-                .with_doc(String::from(
-                    "The time in ms that the transaction coordinator will wait without receiving \
-                     any transaction  status updates for the current transaction before expiring \
-                     its transactional id. This setting also influences producer id expiration - \
-                     producer ids are expired once this time has elapsed  after the last write \
-                     with the given producer id. Note that producer ids may expire sooner if the \
-                     last write from the producer id is deleted due to the topic's retention \
-                     settings.",
-                ))
+                .with_doc(TRANSACTIONAL_ID_EXPIRATION_MS_DOC)
                 .with_default(
                     TransactionStateManager::default().default_transactional_id_expiration_ms,
                 )
