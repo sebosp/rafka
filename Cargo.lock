@@ -166,6 +166,8 @@ dependencies = [
 name = "deriver"
 version = "0.1.0"
 dependencies = [
+ "enum-iterator",
+ "rafka_core",
  "rafka_derive",
 ]
 
@@ -429,6 +431,12 @@ name = "hashbrown"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab5ef0d4909ef3724cc8cce6ccc8572c5c817592e9285f5464f8e86f8bd3726e"
+
+[[package]]
+name = "heck"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2540771e65fc8cb83cd6e8a237f70c319bd5c29f78ed1084ba5d50eeac86f7f9"
 
 [[package]]
 name = "hermit-abi"
@@ -781,6 +789,7 @@ dependencies = [
 name = "rafka_derive"
 version = "0.1.0"
 dependencies = [
+ "heck",
  "proc-macro2",
  "quote",
  "syn",
