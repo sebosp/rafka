@@ -55,24 +55,42 @@ pub fn subznode_data_derive(input: TokenStream) -> TokenStream {
     impl_subznode_data_macro(&ast)
 }
 
-fn split_validator_args(input: &str) -> (String, String) {
-    let tokens: Vec<&str> = input.split(&['(', ')']).collect();
-    if tokens.len() < 2 {
-        panic!("Validator should be validator_name(args)");
-    }
-    let validator_name: String = tokens[0].to_string();
-    let validator_args: String = tokens[1..].join("");
-    (validator_name, validator_args)
+struct ConfigDefFieldAttrs {
+    /// The Default::default() function body
+    default_attr: Option<proc_macro2::TokenStream>,
+    /// The default value for simple types
+    default_value: Option<String>,
+    /// A "key" to set values from HashMap, etc.
+    key_const: Option<String>,
+    /// A level of importance for a field
+    importance_value: Option<String>,
+    /// A reference to a &'static str containing the documentation for the field
+    doc_const: Option<String>,
+    /// A field may require a call to its validator fn validator_<field> -> Result<...>
+    with_validator_fn: bool,
+    /// A field may require a call to a default fn default_<field> -> Result<...>
+    with_default_fn: bool,
+    /// A field may require special code to handle its internal value, not just a build() on
+    /// ConfigDef but maybe inspect other fields for context/deriving
+    with_default_resolver: bool,
+    /// A field's internal type, i.e. i64 in ConfigDef<i64>
+    internal_field_ty: String,
 }
 
-#[derive(Default)]
-struct ConfigDefFieldAttrs {
-    default_attr: Option<proc_macro2::TokenStream>,
-    default_value: Option<String>,
-    key_const: Option<String>,
-    importance_value: Option<String>,
-    doc_const: Option<String>,
-    validator: Option<String>,
+impl Default for ConfigDefFieldAttrs {
+    fn default() -> Self {
+        Self {
+            default_attr: None,
+            default_value: None,
+            with_default_fn: false,
+            key_const: None,
+            importance_value: None,
+            doc_const: None,
+            internal_field_ty: String::from("UNSET"),
+            with_default_resolver: true,
+            with_validator_fn: false,
+        }
+    }
 }
 
 impl ConfigDefFieldAttrs {
@@ -87,7 +105,7 @@ impl ConfigDefFieldAttrs {
     fn set(&mut self, field_name: &str, current_attr: &str, lit_value: String) {
         match current_attr.as_ref() {
             "key" => {
-                self.key_const = Some(remove_if_enclosing_double_quotes(lit_value));
+                self.key_const = Some(lit_value);
             },
             "default" => {
                 self.default_value = Some(remove_if_enclosing_double_quotes(lit_value));
@@ -98,9 +116,6 @@ impl ConfigDefFieldAttrs {
             "doc" => {
                 self.doc_const = Some(remove_if_enclosing_double_quotes(lit_value));
             },
-            "validator" => {
-                self.validator = Some(remove_if_enclosing_double_quotes(lit_value));
-            },
             unknown_attr @ _ => {
                 panic!("set({}) Unknown attr: {}", field_name, unknown_attr);
             },
@@ -108,8 +123,8 @@ impl ConfigDefFieldAttrs {
     }
 }
 
-/// `remove_enclosing_double_quotes` when a field attribute is a string it's enclosed in ""
-/// And when read from the attributes it looks like "\"<value>\"", this removes one layer of ""
+/// `remove_enclosing_double_quotes` when a field attribute is a string it's enclosed in "" And when
+/// read from the attributes it looks like "\"<value>\"", this removes one layer of ""
 fn remove_if_enclosing_double_quotes(input: String) -> String {
     if input.starts_with('"') && input.ends_with('"') {
         let (_double_quote_start, partial_string_value) = input.split_at(1);
@@ -193,8 +208,11 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                                     // key
                                     current_attr = id.to_string();
                                     match current_attr.as_ref() {
-                                        "key" | "default" | "importance" | "doc" | "validator" => {
+                                        "key" | "default" | "default_fn" | "importance" | "doc" => {
                                         },
+                                        "with_validator_fn" => res.with_validator_fn = true,
+                                        "with_default_fn" => res.with_default_fn = true,
+                                        "no_default_resolver" => res.with_default_resolver = false,
                                         unknown_attr @ _ => {
                                             panic!("section Unknown attr: {}", unknown_attr);
                                         },
@@ -227,6 +245,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
         }
     }
     let internal_field_ty = internal_field_ty.unwrap();
+    res.internal_field_ty = internal_field_ty.to_string();
     if let Some(ref key_const) = res.key_const {
         let key_ident = syn::Ident::new(&key_const, name.span());
         let field_name = field_ref.ident.clone();
@@ -239,9 +258,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
     }
     if let Some(ref doc_const) = res.doc_const {
         let doc_ident = syn::Ident::new(&doc_const, name.span());
-        let field_name = field_ref.ident.clone();
-        res.default_attr = Some(quote! {
-            #field_name : ConfigDef::default()
+        res.add_to_default_impl(quote! {
                 .with_doc(#doc_ident)
         });
     }
@@ -249,6 +266,14 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
         let default_value = default_value.clone();
         res.add_to_default_impl(quote! {
             .with_default(#internal_field_ty::from_str(#default_value).unwrap())
+        });
+        if res.with_default_fn {
+            panic!("field {} Cannot use both default and default_fn attrs.", field_ref_name);
+        }
+    } else if res.with_default_fn {
+        let default_fn_name = syn::Ident::new(&format!("default_{}", field_ref_name), name.span());
+        res.add_to_default_impl(quote! {
+            .with_default(#name::#default_fn_name())
         });
     }
     if let Some(ref importance_attr) = res.importance_value {
@@ -277,50 +302,77 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         unimplemented!();
     };
     let enum_key_name = syn::Ident::new(&format!("{}Key", name), name.span());
+    // The fields built will have defaults for builders such as
+    // ConfigDef::default().with_key(SOMETHING_PROP).with_doc(SOMETHING_DOC)
     let mut defaults = vec![];
+    // For each field, we create an enum variant, log_dir becomes LogDir
     let mut enum_keys = vec![];
+    // The enum impls Display which turn the LogDir => SOMETHING_PROP
     let mut enum_displays = vec![];
+    // The enum impls FromStr turning SOMETHING_PROP => LogDir
     let mut from_strs = vec![];
+    // When a FromStr matches the Enum, it calls the log_dir.try_set_parsed_value(x,y)
     let mut try_set_parsed_entries = vec![];
+    // A field log_dir may have a validator function, i.e. more than X, etc.
     let mut validators = vec![];
+    // A field may also need a specialized resolver that turns the type into another type and may
+    // use other fields for computations, i.e. turn different HOURS/MINUTES/SECONDS into properties
+    // into a unified MILLIS, when a custom resolver is wanted, the field contains an attribute
+    // no_default_resolver, when such attribute does not exist, this method is implemented and
+    // calls the internal ConfigDef::build(). When the attribute does exist, such method is not
+    // created.
+    let mut resolvers = vec![];
+    // A reference to all the resolvers so that the compiler generates friendly messages on missing
+    // methods.
+    let mut resolver_refs = vec![];
+    let mut all_keys = vec![];
     for field in fields {
+        let field_name = field.ident.clone().unwrap();
         let field_attrs = attr_parser(field, name);
+        let field_key = field_attrs.key_const.unwrap();
+        if all_keys.contains(&field_key) {
+            panic!("field {} key {} is repeated", field_name, field_key);
+        }
+        all_keys.push(field_key.clone());
         if let Some(default_attr) = field_attrs.default_attr {
             defaults.push(default_attr);
         }
         let enum_name = syn::Ident::new(
-            &format!("{}", field.ident.clone().unwrap().to_string().to_upper_camel_case()),
+            &format!("{}", field_name.to_string().to_upper_camel_case()),
             name.span(),
         );
         enum_keys.push(quote! {
             #enum_name,
         });
-        let prop_name = syn::Ident::new(
-            &format!("{}_PROP", field.ident.clone().unwrap().to_string().to_uppercase()),
-            name.span(),
-        );
+        let prop_name = syn::Ident::new(&field_key, name.span());
         enum_displays.push(quote! {
             Self::#enum_name => write!(f, "{}", #prop_name),
-        });
-        let validator_fn_name = syn::Ident::new(
-            &format!("validate_{}", field.ident.clone().unwrap().to_string().to_uppercase()),
-            name.span(),
-        );
-        validators.push(quote! {
-            pub fn #validator_fn_name(&self) -> bool {
-                    ConfigDef::#validator(
-                        self.#field_name.value_as_ref(),
-                        &#validator_rhs,
-                        #prop_name,
-                    )
-            }
         });
         from_strs.push(quote! {
             #prop_name => Ok(Self::#enum_name),
         });
-        let field_name = field.ident.clone().unwrap();
         try_set_parsed_entries.push(quote! {
             #enum_key_name::#enum_name => self.#field_name.try_set_parsed_value(property_value)?,
+        });
+        if field_attrs.with_validator_fn {
+            let validator_fn_name =
+                syn::Ident::new(&format!("validate_{}", field_name.to_string()), name.span());
+            validators.push(quote! {
+                self.#validator_fn_name()?;
+            });
+        }
+        let internal_field_ty = syn::Ident::new(&field_attrs.internal_field_ty, name.span());
+        let resolver_fn_name =
+            syn::Ident::new(&format!("resolver_{}", field_name.to_string()), name.span());
+        if field_attrs.with_default_resolver {
+            resolvers.push(quote! {
+                pub fn #resolver_fn_name(&mut self) -> Result<#internal_field_ty, KafkaConfigError> {
+                    self.#field_name.build()
+                }
+            });
+        }
+        resolver_refs.push(quote! {
+            let _ = self.#resolver_fn_name();
         });
     }
     let expanded = quote! {
@@ -328,7 +380,16 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
             pub fn init(&self) {
                 println!("Hello");
             }
-            #(#validators)*
+            pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
+                #(#validators)*
+                Ok(())
+            }
+            #(#resolvers)*
+
+            #[allow(dead_code)]
+            pub fn resolver_references(&mut self) {
+                #(#resolver_refs)*
+            }
         }
 
         impl Default for #name {
