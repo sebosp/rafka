@@ -1,5 +1,5 @@
 use rafka_core::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
-use rafka_core::server::kafka_config::{ConfigSet, KafkaConfigError};
+use rafka_core::server::kafka_config::{ConfigSet, KafkaConfigError, TrySetProperty};
 use rafka_derive::ConfigDef;
 use std::str::FromStr;
 
@@ -7,6 +7,7 @@ pub const LOG_DIR_PROP: &str = "log.dir";
 pub const LOG_DIRS_PROP: &str = "log.dirs";
 pub const LOG_ROLL_TIME_MILLIS_PROP: &str = "log.roll.ms";
 pub const LOG_DIR_DOC: &str = "Some Docs";
+pub const A_BOOL: &str = "a.bool";
 pub const CUST_TYPE_PROP: &str = "Meh";
 
 #[derive(Debug, Clone)]
@@ -35,8 +36,10 @@ pub struct Test1Properties {
     pub log_dirs: ConfigDef<String>,
     #[config_def(key = CUST_TYPE_PROP, with_default_fn, importance = "High")]
     pub custom_type: ConfigDef<CustType>,
-    #[config_def(key = LOG_ROLL_TIME_MILLIS_PROP, default = 32)]
+    #[config_def(key = LOG_ROLL_TIME_MILLIS_PROP, default = -32)]
     pub log_roll_time_millis: ConfigDef<i64>,
+    #[config_def(key = A_BOOL, default = true)]
+    pub a_bool: ConfigDef<bool>,
 }
 
 impl Test1Properties {
@@ -44,7 +47,7 @@ impl Test1Properties {
         Ok(())
     }
 
-    pub fn resolver_log_dir(&mut self) -> Result<String, KafkaConfigError> {
+    pub fn resolve_log_dir(&mut self) -> Result<String, KafkaConfigError> {
         Ok(String::from("meh"))
     }
 

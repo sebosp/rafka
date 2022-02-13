@@ -37,7 +37,7 @@ pub struct ConfigDef<T> {
     /// The documentation of the field, used for showing errors
     doc: &'static str,
     /// Whether or not this variable was provided by the configuration file.
-    provided: bool,
+    is_provided: bool,
     /// The current value, be it the default or overwritten by config
     value: Option<T>,
     /// A validator to ensure the new field value is correct
@@ -54,7 +54,7 @@ where
             .field("importance", &self.importance)
             .field("default", &self.default)
             .field("doc", &self.doc)
-            .field("provided", &self.provided)
+            .field("is_irovided", &self.is_provided)
             .field("value", &self.value)
             .field("validator_exists", &self.validator.is_some())
             .finish()
@@ -70,7 +70,7 @@ where
             && self.importance == other.importance
             && self.default == other.default
             && self.doc == other.doc
-            && self.provided == other.provided
+            && self.is_provided == other.is_provided
             && self.value == other.value
     }
 }
@@ -82,7 +82,7 @@ impl<T> Default for ConfigDef<T> {
             doc: "TODO: Missing Docs",
             key: String::from("unset.key"),
             default: None,
-            provided: false,
+            is_provided: false,
             value: None,
             validator: None,
         }
@@ -134,7 +134,7 @@ where
 
     pub fn set_value(&mut self, value: T) {
         self.value = Some(value);
-        self.provided = true;
+        self.is_provided = true;
     }
 
     pub fn try_set_parsed_value(&mut self, value: &str) -> Result<(), KafkaConfigError> {
@@ -176,6 +176,32 @@ where
         }
     }
 
+    pub fn validate_at_least(&self, rhs: T) -> Result<(), KafkaConfigError>
+    where
+        T: PartialEq + PartialOrd + fmt::Display,
+    {
+        match &self.value {
+            Some(val) => {
+                if *val < rhs {
+                    Err(KafkaConfigError::InvalidValue(format!(
+                        "{}: '{}' should be at least {}",
+                        self.key, val, rhs
+                    )))
+                } else {
+                    Ok(())
+                }
+            },
+            None => {
+                error!(
+                    "Running validate_at_least() with no value provided for ConfigDef {:?}",
+                    self.key
+                );
+                Err(KafkaConfigError::ComparisonOnNone(self.key.to_string()))
+            },
+        }
+    }
+
+    #[deprecated(note = "please use `validate_at_least` instead")]
     pub fn at_least(data: Option<&T>, rhs: &T, key: &str) -> Result<(), KafkaConfigError>
     where
         T: PartialEq + PartialOrd + fmt::Display,
@@ -239,7 +265,7 @@ where
     }
 
     pub fn is_provided(&self) -> bool {
-        self.provided
+        self.is_provided
     }
 
     pub fn has_default(&self) -> bool {
@@ -268,9 +294,8 @@ where
         }
     }
 
-    /// `resolve` validates the current value if Some() variant, if None it fallbacks to `fallback`
-    /// If the fallback property is None, a KafkaConfigError is returned.
-    pub fn get_or_fallback(&mut self, fallback: &Self) -> Result<(), KafkaConfigError>
+    /// `or_set_fallback` if current value is None it copies the value from a fallback property.
+    pub fn or_set_fallback(&mut self, fallback: &Self) -> Result<(), KafkaConfigError>
     where
         T: Clone,
     {
@@ -374,16 +399,6 @@ where
 
     pub fn validate(&self) -> Result<(), KafkaConfigError> {
         self.config_def.validate()
-    }
-
-    pub fn get_or_simple_fallback(
-        &mut self,
-        fallback: &ConfigDef<T>,
-    ) -> Result<(), KafkaConfigError>
-    where
-        T: Clone,
-    {
-        self.config_def.get_or_fallback(fallback)
     }
 
     /// A wrapper for the internal ConfigDef build(), this allows for the caller to know it cannot

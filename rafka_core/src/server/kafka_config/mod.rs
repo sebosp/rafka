@@ -176,28 +176,33 @@ impl PartialEq for KafkaConfigError {
     }
 }
 
-/// A set of functions that the different configuration sets must implement, including building,
-/// parsing, returning keys, etc.
-pub trait ConfigSet {
-    type ConfigKey;
-    type ConfigType;
+/// A type may implement TrySetProperty which receives a "key" that is tied to a specific field and
+/// a value to set it that impls FromStr, usually read from config files, zookeeper, etc
+pub trait TrySetProperty {
     /// `try_from_config_property` transforms a string value from the config into our actual types
     fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError>;
-    /// `prebuild` resolves dependant properties from a ConfigKey into a ConfigType.
+}
+
+/// A set of methods that the different configuration-sets must implement, including building,
+/// validating, etc.
+pub trait ConfigSet {
+    type ConfigKey;
+    type ConfigType;
+    /// `resolve` dependant properties from a ConfigKey into a ConfigType.
     /// NOTE: This doesn't consume self, as a ConfigKey may be re-used after bootstrap,
     /// on-the-fly without the need to restart, for example via zookeeper
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError>;
     /// `build` calls the per-type `resolve`/`build` to transform From<ConfigDef<T>> -> T
-    /// And resolves/fallbacks to other properties and/or uses defaults.
-    /// Once value resolution is done, validate_values makes sure that variables are compatible
+    /// Which resolves/fallbacks to other properties and/or uses defaults.
+    /// Once value resolution is done, validate_set makes sure that variables are compatible
     /// with each-other
     fn build(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         let res = self.resolve()?;
-        self.validate_values(&res)?;
+        self.validate_set(&res)?;
         Ok(res)
     }
     /// `config_names` returns a list of config keys used
@@ -214,7 +219,7 @@ pub trait ConfigSet {
         input_config: HashMap<String, String>,
     ) -> Result<Self, KafkaConfigError>
     where
-        Self: Default,
+        Self: Default + TrySetProperty,
     {
         let mut config_builder = Self::default();
         for (property, property_value) in &input_config {
@@ -223,9 +228,10 @@ pub trait ConfigSet {
         }
         Ok(config_builder)
     }
-    /// `validate_values` ensures values are compatible with others and within limits not provided
+    /// `validate_set` ensures values are compatible with each other and within limits not provided
     /// by the custom Validator types.
-    fn validate_values(&self, _cfg: &Self::ConfigType) -> Result<(), KafkaConfigError> {
+    /// The ConfigDef deriver creates a validate_values that calls *per*-field validator
+    fn validate_set(&self, _cfg: &Self::ConfigType) -> Result<(), KafkaConfigError> {
         Ok(())
     }
 }

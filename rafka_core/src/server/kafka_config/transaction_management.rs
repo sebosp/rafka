@@ -1,6 +1,6 @@
 //! Kafka Config - Transaction Management Configuration
 
-use super::{ConfigSet, KafkaConfigError};
+use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::coordinator::transaction::transaction_state_manager::TransactionStateManager;
 use crate::message::compression_codec::BrokerCompressionCodec;
@@ -71,23 +71,25 @@ impl Default for TransactionConfigProperties {
     }
 }
 
-impl ConfigSet for TransactionConfigProperties {
-    type ConfigKey = TransactionConfigKey;
-    type ConfigType = TransactionConfig;
-
+impl TrySetProperty for TransactionConfigProperties {
     fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+        let kafka_config_key = TransactionConfigKey::from_str(property_name)?;
         match kafka_config_key {
-            Self::ConfigKey::TransactionalIdExpirationMs => {
+            TransactionConfigKey::TransactionalIdExpirationMs => {
                 self.transactional_id_expiration_ms.try_set_parsed_value(property_value)?
             },
         };
         Ok(())
     }
+}
+
+impl ConfigSet for TransactionConfigProperties {
+    type ConfigKey = TransactionConfigKey;
+    type ConfigType = TransactionConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("TransactionConfigProperties::resolve()");
@@ -104,8 +106,6 @@ pub struct TransactionConfig {
 impl Default for TransactionConfig {
     fn default() -> Self {
         let mut config_properties = TransactionConfigProperties::default();
-        let transactional_id_expiration_ms =
-            config_properties.transactional_id_expiration_ms.build().unwrap();
-        Self { transactional_id_expiration_ms }
+        config_properties.build().unwrap()
     }
 }

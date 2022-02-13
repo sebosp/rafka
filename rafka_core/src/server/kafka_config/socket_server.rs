@@ -1,5 +1,5 @@
 //! Kafka Config - Socket Server Configuration
-use super::{ConfigSet, KafkaConfigError};
+use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::cluster::end_point::EndPoint;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
 use crate::utils::core_utils;
@@ -146,40 +146,42 @@ impl Default for SocketConfigProperties {
         }
     }
 }
-impl ConfigSet for SocketConfigProperties {
-    type ConfigKey = SocketConfigKey;
-    type ConfigType = SocketConfig;
-
+impl TrySetProperty for SocketConfigProperties {
     fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+        let kafka_config_key = SocketConfigKey::from_str(property_name)?;
         match kafka_config_key {
-            Self::ConfigKey::Port => self.port.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::HostName => self.host_name.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::Listeners => self.listeners.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::AdvertisedHostName => {
+            SocketConfigKey::Port => self.port.try_set_parsed_value(property_value)?,
+            SocketConfigKey::HostName => self.host_name.try_set_parsed_value(property_value)?,
+            SocketConfigKey::Listeners => self.listeners.try_set_parsed_value(property_value)?,
+            SocketConfigKey::AdvertisedHostName => {
                 self.advertised_host_name.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::AdvertisedPort => {
+            SocketConfigKey::AdvertisedPort => {
                 self.advertised_port.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::AdvertisedListeners => {
+            SocketConfigKey::AdvertisedListeners => {
                 self.advertised_listeners.try_set_parsed_value(property_value)?
             },
         };
         Ok(())
     }
+}
+
+impl ConfigSet for SocketConfigProperties {
+    type ConfigKey = SocketConfigKey;
+    type ConfigType = SocketConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("SocketConfigProperties::resolve()");
         let port = self.port.build()?;
         let host_name = self.host_name.build()?;
         let listeners = self.resolve_listeners()?;
-        self.advertised_host_name.get_or_fallback(&self.host_name)?;
-        self.advertised_port.get_or_fallback(&self.port)?;
+        self.advertised_host_name.or_set_fallback(&self.host_name)?;
+        self.advertised_port.or_set_fallback(&self.port)?;
         let advertised_host_name = self.advertised_host_name.build()?;
         let advertised_port = self.advertised_port.build()?;
         let advertised_listeners = self.resolve_advertised_listeners()?;
@@ -247,25 +249,7 @@ impl Default for SocketConfig {
     fn default() -> Self {
         trace!("SocketConfig::default()");
         let mut config_properties = SocketConfigProperties::default();
-        let port = config_properties.port.build().unwrap();
-        let host_name = config_properties.host_name.build().unwrap();
-        config_properties
-            .advertised_host_name
-            .get_or_fallback(&config_properties.host_name)
-            .unwrap();
-        config_properties.advertised_port.get_or_fallback(&config_properties.port).unwrap();
-        let listeners = config_properties.resolve_listeners().unwrap();
-        let advertised_host_name = config_properties.advertised_host_name.build().unwrap();
-        let advertised_port = config_properties.advertised_port.build().unwrap();
-        let advertised_listeners = config_properties.resolve_advertised_listeners().unwrap();
-        Self {
-            port,
-            host_name,
-            listeners,
-            advertised_host_name,
-            advertised_port,
-            advertised_listeners,
-        }
+        config_properties.build().unwrap()
     }
 }
 #[cfg(test)]

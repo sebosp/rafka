@@ -4,7 +4,7 @@
 //! `crate::log::log_config`
 
 use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
-use super::{ConfigSet, KafkaConfigError};
+use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::api::api_version::{ApiVersion, KafkaApiVersion};
 use crate::common::config::topic_config::{
     COMPRESSION_TYPE_CONFIG, COMPRESSION_TYPE_DOC, MESSAGE_DOWNCONVERSION_ENABLE_DOC,
@@ -779,140 +779,142 @@ impl Default for DefaultLogConfigProperties {
     }
 }
 
-impl ConfigSet for DefaultLogConfigProperties {
-    type ConfigKey = DefaultLogConfigKey;
-    type ConfigType = DefaultLogConfig;
-
+impl TrySetProperty for DefaultLogConfigProperties {
     /// `try_from_config_property` transforms a string value from the config into our actual types
     fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+        let kafka_config_key = DefaultLogConfigKey::from_str(property_name)?;
         match kafka_config_key {
-            Self::ConfigKey::LogDir => self.log_dir.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::LogDirs => self.log_dirs.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::LogSegmentBytes => {
+            DefaultLogConfigKey::LogDir => self.log_dir.try_set_parsed_value(property_value)?,
+            DefaultLogConfigKey::LogDirs => self.log_dirs.try_set_parsed_value(property_value)?,
+            DefaultLogConfigKey::LogSegmentBytes => {
                 self.log_segment_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRollTimeMillis => {
+            DefaultLogConfigKey::LogRollTimeMillis => {
                 self.log_roll_time_millis.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRollTimeHours => {
+            DefaultLogConfigKey::LogRollTimeHours => {
                 self.log_roll_time_hours.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRollTimeJitterMillis => {
+            DefaultLogConfigKey::LogRollTimeJitterMillis => {
                 self.log_roll_time_jitter_millis.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRollTimeJitterHours => {
+            DefaultLogConfigKey::LogRollTimeJitterHours => {
                 self.log_roll_time_jitter_hours.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRetentionTimeMillis => {
+            DefaultLogConfigKey::LogRetentionTimeMillis => {
                 self.log_retention_time_millis.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRetentionTimeMinutes => {
+            DefaultLogConfigKey::LogRetentionTimeMinutes => {
                 self.log_retention_time_minutes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRetentionTimeHours => {
+            DefaultLogConfigKey::LogRetentionTimeHours => {
                 self.log_retention_time_hours.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogRetentionBytes => {
+            DefaultLogConfigKey::LogRetentionBytes => {
                 self.log_retention_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanupIntervalMs => {
+            DefaultLogConfigKey::LogCleanupIntervalMs => {
                 self.log_cleanup_interval_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanupPolicy => {
+            DefaultLogConfigKey::LogCleanupPolicy => {
                 self.log_cleanup_policy.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerThreads => {
+            DefaultLogConfigKey::LogCleanerThreads => {
                 self.log_cleaner_threads.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerDedupeBufferSize => {
+            DefaultLogConfigKey::LogCleanerDedupeBufferSize => {
                 self.log_cleaner_dedupe_buffer_size.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerIoBufferSize => {
+            DefaultLogConfigKey::LogCleanerIoBufferSize => {
                 self.log_cleaner_io_buffer_size.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerDedupeBufferLoadFactor => {
+            DefaultLogConfigKey::LogCleanerDedupeBufferLoadFactor => {
                 self.log_cleaner_dedupe_buffer_load_factor.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerIoMaxBytesPerSecond => {
+            DefaultLogConfigKey::LogCleanerIoMaxBytesPerSecond => {
                 self.log_cleaner_io_max_bytes_per_second.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerBackoffMs => {
+            DefaultLogConfigKey::LogCleanerBackoffMs => {
                 self.log_cleaner_backoff_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerMinCleanRatio => {
+            DefaultLogConfigKey::LogCleanerMinCleanRatio => {
                 self.log_cleaner_min_clean_ratio.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerEnable => {
+            DefaultLogConfigKey::LogCleanerEnable => {
                 self.log_cleaner_enable.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerDeleteRetentionMs => {
+            DefaultLogConfigKey::LogCleanerDeleteRetentionMs => {
                 self.log_cleaner_delete_retention_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerMinCompactionLagMs => {
+            DefaultLogConfigKey::LogCleanerMinCompactionLagMs => {
                 self.log_cleaner_min_compaction_lag_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogCleanerMaxCompactionLagMs => {
+            DefaultLogConfigKey::LogCleanerMaxCompactionLagMs => {
                 self.log_cleaner_max_compaction_lag_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogIndexIntervalBytes => {
+            DefaultLogConfigKey::LogIndexIntervalBytes => {
                 self.log_index_interval_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogIndexSizeMaxBytes => {
+            DefaultLogConfigKey::LogIndexSizeMaxBytes => {
                 self.log_index_size_max_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogFlushIntervalMessages => {
+            DefaultLogConfigKey::LogFlushIntervalMessages => {
                 self.log_flush_interval_messages.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogDeleteDelayMs => {
+            DefaultLogConfigKey::LogDeleteDelayMs => {
                 self.log_delete_delay_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogFlushSchedulerIntervalMs => {
+            DefaultLogConfigKey::LogFlushSchedulerIntervalMs => {
                 self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogFlushIntervalMs => {
+            DefaultLogConfigKey::LogFlushIntervalMs => {
                 self.log_flush_interval_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogFlushOffsetCheckpointIntervalMs => {
+            DefaultLogConfigKey::LogFlushOffsetCheckpointIntervalMs => {
                 self.log_flush_offset_checkpoint_interval_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogFlushStartOffsetCheckpointIntervalMs => self
+            DefaultLogConfigKey::LogFlushStartOffsetCheckpointIntervalMs => self
                 .log_flush_start_offset_checkpoint_interval_ms
                 .try_set_parsed_value(property_value)?,
-            Self::ConfigKey::LogPreAllocateEnable => {
+            DefaultLogConfigKey::LogPreAllocateEnable => {
                 self.log_pre_allocate_enable.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogMessageFormatVersion => {
+            DefaultLogConfigKey::LogMessageFormatVersion => {
                 self.log_message_format_version.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogMessageTimestampType => {
+            DefaultLogConfigKey::LogMessageTimestampType => {
                 self.log_message_timestamp_type.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogMessageTimestampDifferenceMaxMs => {
+            DefaultLogConfigKey::LogMessageTimestampDifferenceMaxMs => {
                 self.log_message_timestamp_difference_max_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::NumRecoveryThreadsPerDataDir => {
+            DefaultLogConfigKey::NumRecoveryThreadsPerDataDir => {
                 self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MinInSyncReplicas => {
+            DefaultLogConfigKey::MinInSyncReplicas => {
                 self.min_in_sync_replicas.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LogMessageDownConversionEnable => {
+            DefaultLogConfigKey::LogMessageDownConversionEnable => {
                 self.log_message_down_conversion_enable.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::CompressionType => {
+            DefaultLogConfigKey::CompressionType => {
                 self.compression_type.try_set_parsed_value(property_value)?
             },
         };
         Ok(())
     }
+}
+
+impl ConfigSet for DefaultLogConfigProperties {
+    type ConfigKey = DefaultLogConfigKey;
+    type ConfigType = DefaultLogConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
-        trace!("DefaultLogConfigProperties::build() INIT");
+        trace!("DefaultLogConfigProperties::resolve() INIT");
         let log_segment_bytes = self.log_segment_bytes.build()?;
         let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
         let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
@@ -945,7 +947,6 @@ impl ConfigSet for DefaultLogConfigProperties {
             self.log_flush_start_offset_checkpoint_interval_ms.build()?;
         let log_pre_allocate_enable = self.log_pre_allocate_enable.build()?;
         let log_message_format_version = self.resolve_log_message_format_version()?;
-        trace!("DefaultLogConfigProperties::build() MEH");
         let log_message_timestamp_type = self.resolve_log_message_timestamp_type()?;
         let log_message_timestamp_difference_max_ms =
             self.log_message_timestamp_difference_max_ms.build()?;
@@ -954,7 +955,7 @@ impl ConfigSet for DefaultLogConfigProperties {
         let log_message_down_conversion_enable = self.log_message_down_conversion_enable.build()?;
         let compression_type = self.compression_type.build()?;
         let log_dirs = self.resolve_log_dirs()?;
-        trace!("DefaultLogConfigProperties::build() DONE");
+        trace!("DefaultLogConfigProperties::resolve() DONE");
         Ok(Self::ConfigType {
             log_dirs,
             log_segment_bytes,
@@ -1142,97 +1143,7 @@ pub struct DefaultLogConfig {
 impl Default for DefaultLogConfig {
     fn default() -> Self {
         let mut config_properties = DefaultLogConfigProperties::default();
-        let log_dirs = config_properties.resolve_log_dirs().unwrap();
-        let log_segment_bytes = config_properties.log_segment_bytes.build().unwrap();
-        let log_roll_time_millis = config_properties.resolve_log_roll_time_millis().unwrap();
-        let log_roll_time_jitter_millis =
-            config_properties.resolve_log_roll_time_jitter_millis().unwrap();
-        let log_retention_time_millis =
-            config_properties.resolve_log_retention_time_millis().unwrap();
-        let log_retention_bytes = config_properties.log_retention_bytes.build().unwrap();
-        let log_cleanup_interval_ms = config_properties.log_cleanup_interval_ms.build().unwrap();
-        let log_cleanup_policy = config_properties.resolve_log_cleanup_policy().unwrap();
-        let log_cleaner_threads = config_properties.log_cleaner_threads.build().unwrap();
-        let log_cleaner_dedupe_buffer_size =
-            config_properties.log_cleaner_dedupe_buffer_size.build().unwrap();
-        let log_cleaner_io_buffer_size =
-            config_properties.log_cleaner_io_buffer_size.build().unwrap();
-        let log_cleaner_dedupe_buffer_load_factor =
-            config_properties.log_cleaner_dedupe_buffer_load_factor.build().unwrap();
-        let log_cleaner_io_max_bytes_per_second =
-            config_properties.log_cleaner_io_max_bytes_per_second.build().unwrap();
-        let log_cleaner_backoff_ms = config_properties.log_cleaner_backoff_ms.build().unwrap();
-        let log_cleaner_min_clean_ratio =
-            config_properties.log_cleaner_min_clean_ratio.build().unwrap();
-        let log_cleaner_enable = config_properties.log_cleaner_enable.build().unwrap();
-        let log_cleaner_delete_retention_ms =
-            config_properties.log_cleaner_delete_retention_ms.build().unwrap();
-        let log_cleaner_min_compaction_lag_ms =
-            config_properties.log_cleaner_min_compaction_lag_ms.build().unwrap();
-        let log_cleaner_max_compaction_lag_ms =
-            config_properties.log_cleaner_max_compaction_lag_ms.build().unwrap();
-        let log_index_interval_bytes = config_properties.log_index_interval_bytes.build().unwrap();
-        let log_index_size_max_bytes = config_properties.log_index_size_max_bytes.build().unwrap();
-        let log_flush_interval_messages =
-            config_properties.log_flush_interval_messages.build().unwrap();
-        let log_delete_delay_ms = config_properties.log_delete_delay_ms.build().unwrap();
-        let log_flush_scheduler_interval_ms =
-            config_properties.log_flush_scheduler_interval_ms.build().unwrap();
-        let log_flush_interval_ms = config_properties.log_flush_interval_ms.build().unwrap();
-        let log_flush_offset_checkpoint_interval_ms =
-            config_properties.log_flush_offset_checkpoint_interval_ms.build().unwrap();
-        let log_flush_start_offset_checkpoint_interval_ms =
-            config_properties.log_flush_start_offset_checkpoint_interval_ms.build().unwrap();
-        let log_pre_allocate_enable = config_properties.log_pre_allocate_enable.build().unwrap();
-        let log_message_format_version =
-            config_properties.resolve_log_message_format_version().unwrap();
-        let log_message_timestamp_type =
-            config_properties.resolve_log_message_timestamp_type().unwrap();
-        let log_message_timestamp_difference_max_ms =
-            config_properties.log_message_timestamp_difference_max_ms.build().unwrap();
-        let num_recovery_threads_per_data_dir =
-            config_properties.num_recovery_threads_per_data_dir.build().unwrap();
-        let min_in_sync_replicas = config_properties.min_in_sync_replicas.build().unwrap();
-        let log_message_down_conversion_enable =
-            config_properties.log_message_down_conversion_enable.build().unwrap();
-        let compression_type = config_properties.compression_type.build().unwrap();
-        Self {
-            log_dirs,
-            log_segment_bytes,
-            log_roll_time_millis,
-            log_roll_time_jitter_millis,
-            log_retention_time_millis,
-            log_retention_bytes,
-            log_cleanup_interval_ms,
-            log_cleanup_policy,
-            log_cleaner_threads,
-            log_cleaner_dedupe_buffer_size,
-            log_cleaner_io_buffer_size,
-            log_cleaner_dedupe_buffer_load_factor,
-            log_cleaner_io_max_bytes_per_second,
-            log_cleaner_backoff_ms,
-            log_cleaner_min_clean_ratio,
-            log_cleaner_enable,
-            log_cleaner_delete_retention_ms,
-            log_cleaner_min_compaction_lag_ms,
-            log_cleaner_max_compaction_lag_ms,
-            log_index_interval_bytes,
-            log_index_size_max_bytes,
-            log_flush_interval_messages,
-            log_delete_delay_ms,
-            log_flush_scheduler_interval_ms,
-            log_flush_interval_ms,
-            log_flush_offset_checkpoint_interval_ms,
-            log_flush_start_offset_checkpoint_interval_ms,
-            log_pre_allocate_enable,
-            log_message_format_version,
-            log_message_timestamp_type,
-            log_message_timestamp_difference_max_ms,
-            num_recovery_threads_per_data_dir,
-            min_in_sync_replicas,
-            log_message_down_conversion_enable,
-            compression_type,
-        }
+        config_properties.resolve().unwrap()
     }
 }
 

@@ -1,5 +1,5 @@
 //! Kafka Config - Quota Configuration
-use super::{ConfigSet, KafkaConfigError};
+use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::server::client_quota_manager;
 use enum_iterator::IntoEnumIterator;
@@ -100,29 +100,31 @@ impl Default for QuotaConfigProperties {
     }
 }
 
-impl ConfigSet for QuotaConfigProperties {
-    type ConfigKey = QuotaConfigKey;
-    type ConfigType = QuotaConfig;
-
+impl TrySetProperty for QuotaConfigProperties {
     fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+        let kafka_config_key = QuotaConfigKey::from_str(property_name)?;
         match kafka_config_key {
-            Self::ConfigKey::ConsumerQuotaBytesPerSecondDefault => {
+            QuotaConfigKey::ConsumerQuotaBytesPerSecondDefault => {
                 self.consumer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::ProducerQuotaBytesPerSecondDefault => {
+            QuotaConfigKey::ProducerQuotaBytesPerSecondDefault => {
                 self.producer_quota_bytes_per_second_default.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::QuotaWindowSizeSeconds => {
+            QuotaConfigKey::QuotaWindowSizeSeconds => {
                 self.quota_window_size_seconds.try_set_parsed_value(property_value)?
             },
         };
         Ok(())
     }
+}
+
+impl ConfigSet for QuotaConfigProperties {
+    type ConfigKey = QuotaConfigKey;
+    type ConfigType = QuotaConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         let consumer_quota_bytes_per_second_default =
@@ -148,16 +150,6 @@ pub struct QuotaConfig {
 impl Default for QuotaConfig {
     fn default() -> Self {
         let mut config_properties = QuotaConfigProperties::default();
-        let consumer_quota_bytes_per_second_default =
-            config_properties.consumer_quota_bytes_per_second_default.build().unwrap();
-        let producer_quota_bytes_per_second_default =
-            config_properties.producer_quota_bytes_per_second_default.build().unwrap();
-        let quota_window_size_seconds =
-            config_properties.quota_window_size_seconds.build().unwrap();
-        Self {
-            producer_quota_bytes_per_second_default,
-            consumer_quota_bytes_per_second_default,
-            quota_window_size_seconds,
-        }
+        config_properties.build().unwrap()
     }
 }

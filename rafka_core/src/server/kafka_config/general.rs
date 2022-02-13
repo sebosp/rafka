@@ -1,11 +1,12 @@
 //! Kafka Config - General Configuration
 
-use super::{ConfigSet, KafkaConfigError};
+use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::common::config::topic_config;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::records;
 use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
+use rafka_derive::ConfigDef;
 use std::fmt;
 use std::str::FromStr;
 use tracing::trace;
@@ -70,46 +71,52 @@ impl FromStr for GeneralConfigKey {
         }
     }
 }
-#[derive(Debug)]
+
+#[derive(Debug, ConfigDef)]
 pub struct GeneralConfigProperties {
+    #[config_def(
+        key = BROKER_ID_GENERATION_ENABLE_PROP,
+        importance = Medium,
+        doc = BROKER_ID_GENERATION_ENABLE_DOC,
+        default = true,
+    )]
     pub broker_id_generation_enable: ConfigDef<bool>,
+    #[config_def(
+        key = RESERVED_BROKER_MAX_ID_PROP,
+        importance = Medium,
+        doc = RESERVED_BROKER_MAX_ID_DOC,
+        default = 1000,
+        with_validator_fn,
+    )]
     pub reserved_broker_max_id: ConfigDef<i32>,
+    #[config_def(
+        key = BROKER_ID_PROP,
+        importance = High,
+        doc = BROKER_ID_DOC,
+        default = -1,
+    )]
     pub broker_id: ConfigDef<i32>,
+    #[config_def(
+        key = MESSAGE_MAX_BYTES_PROP,
+        importance = High,
+        doc = MESSAGE_MAX_BYTES_DOC,
+        with_default_fn,
+        with_validator_fn
+    )]
     pub message_max_bytes: ConfigDef<usize>,
 }
 
-impl Default for GeneralConfigProperties {
-    fn default() -> Self {
-        Self {
-            broker_id_generation_enable: ConfigDef::default()
-                .with_key(BROKER_ID_GENERATION_ENABLE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(BROKER_ID_GENERATION_ENABLE_DOC)
-                .with_default(true),
-            reserved_broker_max_id: ConfigDef::default()
-                .with_key(RESERVED_BROKER_MAX_ID_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(BROKER_ID_GENERATION_ENABLE_DOC)
-                .with_default(1000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, RESERVED_BROKER_MAX_ID_PROP)
-                })),
-            broker_id: ConfigDef::default()
-                .with_key(BROKER_ID_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(BROKER_ID_DOC)
-                .with_default(-1),
-            message_max_bytes: ConfigDef::default()
-                .with_key(MESSAGE_MAX_BYTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_default(1024 * 1024 + records::LOG_OVERHEAD)
-                .with_doc(MESSAGE_MAX_BYTES_DOC)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, MESSAGE_MAX_BYTES_PROP)
-                })),
-        }
+impl GeneralConfigProperties {
+    pub fn validate_reserved_broker_max_id(&self) -> Result<(), KafkaConfigError> {
+        self.reserved_broker_max_id.validate_at_least(0)
+    }
+
+    pub fn validate_message_max_bytes(&self) -> Result<(), KafkaConfigError> {
+        self.message_max_bytes.validate_at_least(0)
+    }
+
+    pub fn default_message_max_bytes() -> usize {
+        1024 * 1024 + records::LOG_OVERHEAD
     }
 }
 
@@ -117,33 +124,12 @@ impl ConfigSet for GeneralConfigProperties {
     type ConfigKey = GeneralConfigKey;
     type ConfigType = GeneralConfig;
 
-    fn try_set_property(
-        &mut self,
-        property_name: &str,
-        property_value: &str,
-    ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
-        match kafka_config_key {
-            Self::ConfigKey::BrokerIdGenerationEnable => {
-                self.broker_id_generation_enable.try_set_parsed_value(property_value)?
-            },
-            Self::ConfigKey::ReservedBrokerMaxId => {
-                self.reserved_broker_max_id.try_set_parsed_value(property_value)?
-            },
-            Self::ConfigKey::BrokerId => self.broker_id.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::MessageMaxBytes => {
-                self.message_max_bytes.try_set_parsed_value(property_value)?
-            },
-        };
-        Ok(())
-    }
-
     fn resolve(&mut self) -> Result<GeneralConfig, KafkaConfigError> {
-        trace!("GeneralConfigProperties::build()");
-        let broker_id_generation_enable = self.broker_id_generation_enable.build()?;
-        let reserved_broker_max_id = self.reserved_broker_max_id.build()?;
-        let broker_id = self.broker_id.build()?;
-        let message_max_bytes = self.message_max_bytes.build()?;
+        trace!("GeneralConfigProperties::resolve()");
+        let broker_id_generation_enable = self.resolve_broker_id_generation_enable()?;
+        let reserved_broker_max_id = self.resolve_reserved_broker_max_id()?;
+        let broker_id = self.resolve_broker_id()?;
+        let message_max_bytes = self.resolve_message_max_bytes()?;
         Ok(GeneralConfig {
             broker_id_generation_enable,
             reserved_broker_max_id,
@@ -152,7 +138,7 @@ impl ConfigSet for GeneralConfigProperties {
         })
     }
 
-    fn validate_values(&self, cfg: &Self::ConfigType) -> Result<(), KafkaConfigError> {
+    fn validate_set(&self, cfg: &Self::ConfigType) -> Result<(), KafkaConfigError> {
         if cfg.broker_id_generation_enable {
             if cfg.broker_id < -1 || cfg.broker_id > cfg.reserved_broker_max_id {
                 return Err(KafkaConfigError::InvalidValue(format!(
@@ -181,12 +167,7 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         // Somehow this should only be allowed for testing...
         let mut config_properties = GeneralConfigProperties::default();
-        let broker_id_generation_enable =
-            config_properties.broker_id_generation_enable.build().unwrap();
-        let reserved_broker_max_id = config_properties.reserved_broker_max_id.build().unwrap();
-        let broker_id = config_properties.broker_id.build().unwrap();
-        let message_max_bytes = config_properties.message_max_bytes.build().unwrap();
-        Self { broker_id_generation_enable, reserved_broker_max_id, broker_id, message_max_bytes }
+        config_properties.build().unwrap()
     }
 }
 

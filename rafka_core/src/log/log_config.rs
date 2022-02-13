@@ -12,7 +12,7 @@ use crate::server::kafka_config::log::{
 };
 use crate::server::kafka_config::replication::ReplicationConfigProperties;
 use crate::server::kafka_config::transaction_management::DEFAULT_COMPRESSION_TYPE;
-use crate::server::kafka_config::{ConfigSet, KafkaConfig, KafkaConfigError};
+use crate::server::kafka_config::{ConfigSet, KafkaConfig, KafkaConfigError, TrySetProperty};
 use enum_iterator::IntoEnumIterator;
 use std::collections::HashMap;
 use std::fmt;
@@ -528,95 +528,95 @@ impl Default for LogConfigProperties {
     }
 }
 
-impl ConfigSet for LogConfigProperties {
-    type ConfigKey = LogConfigKey;
-    type ConfigType = LogConfig;
-
+impl TrySetProperty for LogConfigProperties {
     /// `try_from_config_property` transforms a string value from the config into our actual types
     fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+        let kafka_config_key = LogConfigKey::from_str(property_name)?;
         match kafka_config_key {
-            Self::ConfigKey::CleanupPolicy => {
+            LogConfigKey::CleanupPolicy => {
                 self.cleanup_policy.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::CompressionType => {
+            LogConfigKey::CompressionType => {
                 self.compression_type.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::DeleteRetentionMs => {
+            LogConfigKey::DeleteRetentionMs => {
                 self.delete_retention_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::FileDeleteDelayMs => {
+            LogConfigKey::FileDeleteDelayMs => {
                 self.file_delete_delay_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::FlushMessages => {
+            LogConfigKey::FlushMessages => {
                 self.flush_messages.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::FlushMs => self.flush_ms.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::FollowerReplicationThrottledReplicas => {
+            LogConfigKey::FlushMs => self.flush_ms.try_set_parsed_value(property_value)?,
+            LogConfigKey::FollowerReplicationThrottledReplicas => {
                 self.follower_replication_throttled_replicas.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::IndexIntervalBytes => {
+            LogConfigKey::IndexIntervalBytes => {
                 self.index_interval_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::LeaderReplicationThrottledReplicas => {
+            LogConfigKey::LeaderReplicationThrottledReplicas => {
                 self.leader_replication_throttled_replicas.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MaxCompactionLagMs => {
+            LogConfigKey::MaxCompactionLagMs => {
                 self.max_compaction_lag_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MaxMessageBytes => {
+            LogConfigKey::MaxMessageBytes => {
                 self.max_message_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MessageDownConversionEnable => {
+            LogConfigKey::MessageDownConversionEnable => {
                 self.message_down_conversion_enable.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MessageFormatVersion => {
+            LogConfigKey::MessageFormatVersion => {
                 self.message_format_version.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MessageTimestampDifferenceMaxMs => {
+            LogConfigKey::MessageTimestampDifferenceMaxMs => {
                 self.message_timestamp_difference_max_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MessageTimestampType => {
+            LogConfigKey::MessageTimestampType => {
                 self.message_timestamp_type.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MinCleanableDirtyRatio => {
+            LogConfigKey::MinCleanableDirtyRatio => {
                 self.min_cleanable_dirty_ratio.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MinCompactionLagMs => {
+            LogConfigKey::MinCompactionLagMs => {
                 self.min_compaction_lag_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::MinInSyncReplicas => {
+            LogConfigKey::MinInSyncReplicas => {
                 self.min_in_sync_replicas.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::PreAllocateEnable => {
+            LogConfigKey::PreAllocateEnable => {
                 self.pre_allocate_enable.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::RetentionBytes => {
+            LogConfigKey::RetentionBytes => {
                 self.retention_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::RetentionMs => {
-                self.retention_ms.try_set_parsed_value(property_value)?
-            },
-            Self::ConfigKey::SegmentBytes => {
+            LogConfigKey::RetentionMs => self.retention_ms.try_set_parsed_value(property_value)?,
+            LogConfigKey::SegmentBytes => {
                 self.segment_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::SegmentIndexBytes => {
+            LogConfigKey::SegmentIndexBytes => {
                 self.segment_index_bytes.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::SegmentJitterMs => {
+            LogConfigKey::SegmentJitterMs => {
                 self.segment_jitter_ms.try_set_parsed_value(property_value)?
             },
-            Self::ConfigKey::SegmentMs => self.segment_ms.try_set_parsed_value(property_value)?,
-            Self::ConfigKey::UncleanLeaderElectionEnable => {
+            LogConfigKey::SegmentMs => self.segment_ms.try_set_parsed_value(property_value)?,
+            LogConfigKey::UncleanLeaderElectionEnable => {
                 self.unclean_leader_election_enable.try_set_parsed_value(property_value)?
             },
         };
         Ok(())
     }
+}
+
+impl ConfigSet for LogConfigProperties {
+    type ConfigKey = LogConfigKey;
+    type ConfigType = LogConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("LogConfigProperties::resolve()");

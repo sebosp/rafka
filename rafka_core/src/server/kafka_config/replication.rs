@@ -1,6 +1,6 @@
 //! Kafka Config - Replication Configuration
 
-use super::{ConfigSet, KafkaConfigError};
+use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use enum_iterator::IntoEnumIterator;
 use std::fmt;
@@ -58,24 +58,25 @@ impl Default for ReplicationConfigProperties {
     }
 }
 
-impl ConfigSet for ReplicationConfigProperties {
-    type ConfigKey = ReplicationConfigKey;
-    type ConfigType = ReplicationConfig;
-
+impl TrySetProperty for ReplicationConfigProperties {
     /// `try_from_config_property` transforms a string value from the config into our actual types
     fn try_set_property(
         &mut self,
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = Self::ConfigKey::from_str(property_name)?;
+        let kafka_config_key = ReplicationConfigKey::from_str(property_name)?;
         match kafka_config_key {
-            Self::ConfigKey::UncleanLeaderElectionEnable => {
+            ReplicationConfigKey::UncleanLeaderElectionEnable => {
                 self.unclean_leader_election_enable.try_set_parsed_value(property_value)?
             },
         };
         Ok(())
     }
+}
+impl ConfigSet for ReplicationConfigProperties {
+    type ConfigKey = ReplicationConfigKey;
+    type ConfigType = ReplicationConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("ReplicationConfigProperties::resolve()");
@@ -92,8 +93,6 @@ pub struct ReplicationConfig {
 impl Default for ReplicationConfig {
     fn default() -> Self {
         let mut config_properties = ReplicationConfigProperties::default();
-        let unclean_leader_election_enable =
-            config_properties.unclean_leader_election_enable.build().unwrap();
-        Self { unclean_leader_election_enable }
+        config_properties.build().unwrap()
     }
 }
