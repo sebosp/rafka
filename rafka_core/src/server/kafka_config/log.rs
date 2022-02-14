@@ -3,17 +3,16 @@
 //! configuration. A topic may be individually configured via zookeeper, see
 //! `crate::log::log_config`
 
-use super::quota::PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP;
 use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::api::api_version::{ApiVersion, KafkaApiVersion};
 use crate::common::config::topic_config::{
     COMPRESSION_TYPE_CONFIG, COMPRESSION_TYPE_DOC, MESSAGE_DOWNCONVERSION_ENABLE_DOC,
 };
-use crate::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
+use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::legacy_record;
 use crate::message::compression_codec::{BrokerCompressionCodec, PRODUCER_COMPRESSION_CODEC};
 use const_format::concatcp;
-use enum_iterator::IntoEnumIterator;
+use rafka_derive::ConfigDef;
 use std::fmt;
 use std::str::FromStr;
 use tracing::{trace, warn};
@@ -288,629 +287,623 @@ impl Default for LogMessageTimestampType {
     }
 }
 
-#[derive(Debug, IntoEnumIterator)]
-pub enum DefaultLogConfigKey {
-    LogDir,
-    LogDirs,
-    LogSegmentBytes,
-    LogRollTimeMillis,
-    LogRollTimeHours,
-    LogRollTimeJitterMillis,
-    LogRollTimeJitterHours,
-    LogRetentionTimeMillis,
-    LogRetentionTimeMinutes,
-    LogRetentionTimeHours,
-    LogRetentionBytes,
-    LogCleanupIntervalMs,
-    LogCleanupPolicy,
-    LogCleanerThreads,
-    LogCleanerDedupeBufferSize,
-    LogCleanerIoBufferSize,
-    LogCleanerDedupeBufferLoadFactor,
-    LogCleanerIoMaxBytesPerSecond,
-    LogCleanerBackoffMs,
-    LogCleanerMinCleanRatio,
-    LogCleanerEnable,
-    LogCleanerDeleteRetentionMs,
-    LogCleanerMinCompactionLagMs,
-    LogCleanerMaxCompactionLagMs,
-    LogIndexIntervalBytes,
-    LogIndexSizeMaxBytes,
-    LogFlushIntervalMessages,
-    LogDeleteDelayMs,
-    LogFlushSchedulerIntervalMs,
-    LogFlushIntervalMs,
-    LogFlushOffsetCheckpointIntervalMs,
-    LogFlushStartOffsetCheckpointIntervalMs,
-    LogPreAllocateEnable,
-    LogMessageFormatVersion,
-    LogMessageTimestampType,
-    LogMessageTimestampDifferenceMaxMs,
-    NumRecoveryThreadsPerDataDir,
-    MinInSyncReplicas,
-    LogMessageDownConversionEnable,
-    CompressionType,
-}
-
-impl fmt::Display for DefaultLogConfigKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::LogDir => write!(f, "{}", LOG_DIR_PROP),
-            Self::LogDirs => write!(f, "{}", LOG_DIRS_PROP),
-            Self::LogSegmentBytes => write!(f, "{}", LOG_SEGMENT_BYTES_PROP),
-            Self::LogRollTimeMillis => write!(f, "{}", LOG_ROLL_TIME_MILLIS_PROP),
-            Self::LogRollTimeHours => write!(f, "{}", LOG_ROLL_TIME_HOURS_PROP),
-            Self::LogRollTimeJitterMillis => write!(f, "{}", LOG_ROLL_TIME_JITTER_MILLIS_PROP),
-            Self::LogRollTimeJitterHours => write!(f, "{}", LOG_ROLL_TIME_JITTER_HOURS_PROP),
-            Self::LogRetentionTimeMillis => write!(f, "{}", LOG_RETENTION_TIME_MILLIS_PROP),
-            Self::LogRetentionTimeMinutes => write!(f, "{}", LOG_RETENTION_TIME_MINUTES_PROP),
-            Self::LogRetentionTimeHours => write!(f, "{}", LOG_RETENTION_TIME_HOURS_PROP),
-            Self::LogRetentionBytes => write!(f, "{}", LOG_RETENTION_BYTES_PROP),
-            Self::LogCleanupIntervalMs => write!(f, "{}", LOG_CLEANUP_INTERVAL_MS_PROP),
-            Self::LogCleanupPolicy => write!(f, "{}", LOG_CLEANUP_POLICY_PROP),
-            Self::LogCleanerThreads => write!(f, "{}", LOG_CLEANER_THREADS_PROP),
-            Self::LogCleanerDedupeBufferSize => {
-                write!(f, "{}", LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP)
-            },
-            Self::LogCleanerIoBufferSize => write!(f, "{}", LOG_CLEANER_IO_BUFFER_SIZE_PROP),
-            Self::LogCleanerDedupeBufferLoadFactor => {
-                write!(f, "{}", LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
-            },
-            Self::LogCleanerIoMaxBytesPerSecond => {
-                write!(f, "{}", LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP)
-            },
-            Self::LogCleanerBackoffMs => {
-                write!(f, "{}", LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
-            },
-            Self::LogCleanerMinCleanRatio => write!(f, "{}", LOG_CLEANER_MIN_CLEAN_RATIO_PROP),
-            Self::LogCleanerEnable => write!(f, "{}", LOG_CLEANER_ENABLE_PROP),
-            Self::LogCleanerDeleteRetentionMs => {
-                write!(f, "{}", LOG_CLEANER_DELETE_RETENTION_MS_PROP)
-            },
-            Self::LogCleanerMinCompactionLagMs => {
-                write!(f, "{}", LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP)
-            },
-            Self::LogCleanerMaxCompactionLagMs => {
-                write!(f, "{}", LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP)
-            },
-            Self::LogIndexIntervalBytes => write!(f, "{}", LOG_INDEX_INTERVAL_BYTES_PROP),
-            Self::LogIndexSizeMaxBytes => write!(f, "{}", LOG_INDEX_SIZE_MAX_BYTES_PROP),
-            Self::LogFlushIntervalMessages => write!(f, "{}", LOG_FLUSH_INTERVAL_MESSAGES_PROP),
-            Self::LogDeleteDelayMs => write!(f, "{}", LOG_DELETE_DELAY_MS_PROP),
-            Self::LogFlushSchedulerIntervalMs => {
-                write!(f, "{}", LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
-            },
-            Self::LogFlushIntervalMs => write!(f, "{}", LOG_FLUSH_INTERVAL_MS_PROP),
-            Self::LogFlushOffsetCheckpointIntervalMs => {
-                write!(f, "{}", LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
-            },
-            Self::LogFlushStartOffsetCheckpointIntervalMs => {
-                write!(f, "{}", LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
-            },
-            Self::LogPreAllocateEnable => write!(f, "{}", LOG_PRE_ALLOCATE_PROP),
-            Self::LogMessageFormatVersion => write!(f, "{}", LOG_MESSAGE_FORMAT_VERSION_PROP),
-            Self::LogMessageTimestampType => write!(f, "{}", LOG_MESSAGE_TIMESTAMP_TYPE_PROP),
-            Self::LogMessageTimestampDifferenceMaxMs => {
-                write!(f, "{}", LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP)
-            },
-            Self::NumRecoveryThreadsPerDataDir => {
-                write!(f, "{}", NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
-            },
-            Self::MinInSyncReplicas => write!(f, "{}", MIN_IN_SYNC_REPLICAS_PROP),
-            Self::LogMessageDownConversionEnable => {
-                write!(f, "{}", LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
-            },
-            Self::CompressionType => write!(f, "{}", COMPRESSION_TYPE_CONFIG),
-        }
-    }
-}
-
-impl FromStr for DefaultLogConfigKey {
-    type Err = KafkaConfigError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            LOG_DIR_PROP => Ok(Self::LogDir),
-            LOG_DIRS_PROP => Ok(Self::LogDirs),
-            LOG_SEGMENT_BYTES_PROP => Ok(Self::LogSegmentBytes),
-            LOG_ROLL_TIME_MILLIS_PROP => Ok(Self::LogRollTimeMillis),
-            LOG_ROLL_TIME_HOURS_PROP => Ok(Self::LogRollTimeHours),
-            LOG_ROLL_TIME_JITTER_MILLIS_PROP => Ok(Self::LogRollTimeJitterMillis),
-            LOG_ROLL_TIME_JITTER_HOURS_PROP => Ok(Self::LogRollTimeJitterHours),
-            LOG_RETENTION_TIME_MILLIS_PROP => Ok(Self::LogRetentionTimeMillis),
-            LOG_RETENTION_TIME_MINUTES_PROP => Ok(Self::LogRetentionTimeMinutes),
-            LOG_RETENTION_TIME_HOURS_PROP => Ok(Self::LogRetentionTimeHours),
-            LOG_RETENTION_BYTES_PROP => Ok(Self::LogRetentionBytes),
-            LOG_CLEANUP_INTERVAL_MS_PROP => Ok(Self::LogCleanupIntervalMs),
-            LOG_CLEANUP_POLICY_PROP => Ok(Self::LogCleanupPolicy),
-            LOG_CLEANER_THREADS_PROP => Ok(Self::LogCleanerThreads),
-            LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP => Ok(Self::LogCleanerDedupeBufferSize),
-            LOG_CLEANER_IO_BUFFER_SIZE_PROP => Ok(Self::LogCleanerIoBufferSize),
-            LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP => {
-                Ok(Self::LogCleanerDedupeBufferLoadFactor)
-            },
-            LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP => Ok(Self::LogCleanerIoMaxBytesPerSecond),
-            LOG_CLEANER_BACKOFF_MS_PROP => Ok(Self::LogCleanerBackoffMs),
-            LOG_CLEANER_MIN_CLEAN_RATIO_PROP => Ok(Self::LogCleanerMinCleanRatio),
-            LOG_CLEANER_ENABLE_PROP => Ok(Self::LogCleanerEnable),
-            LOG_CLEANER_DELETE_RETENTION_MS_PROP => Ok(Self::LogCleanerDeleteRetentionMs),
-            LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMinCompactionLagMs),
-            LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP => Ok(Self::LogCleanerMaxCompactionLagMs),
-            LOG_INDEX_INTERVAL_BYTES_PROP => Ok(Self::LogIndexIntervalBytes),
-            LOG_INDEX_SIZE_MAX_BYTES_PROP => Ok(Self::LogIndexSizeMaxBytes),
-            LOG_FLUSH_INTERVAL_MESSAGES_PROP => Ok(Self::LogFlushIntervalMessages),
-            LOG_DELETE_DELAY_MS_PROP => Ok(Self::LogDeleteDelayMs),
-            LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP => Ok(Self::LogFlushSchedulerIntervalMs),
-            LOG_FLUSH_INTERVAL_MS_PROP => Ok(Self::LogFlushIntervalMs),
-            LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
-                Ok(Self::LogFlushOffsetCheckpointIntervalMs)
-            },
-            LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP => {
-                Ok(Self::LogFlushStartOffsetCheckpointIntervalMs)
-            },
-            LOG_PRE_ALLOCATE_PROP => Ok(Self::LogPreAllocateEnable),
-            LOG_MESSAGE_FORMAT_VERSION_PROP => Ok(Self::LogMessageFormatVersion),
-            LOG_MESSAGE_TIMESTAMP_TYPE_PROP => Ok(Self::LogMessageTimestampType),
-            LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP => {
-                Ok(Self::LogMessageTimestampDifferenceMaxMs)
-            },
-            NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP => Ok(Self::NumRecoveryThreadsPerDataDir),
-            MIN_IN_SYNC_REPLICAS_PROP => Ok(Self::MinInSyncReplicas),
-            LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP => Ok(Self::LogMessageDownConversionEnable),
-            COMPRESSION_TYPE_CONFIG => Ok(Self::CompressionType),
-            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, ConfigDef)]
 pub struct DefaultLogConfigProperties {
+    #[config_def(
+        key = LOG_DIR_PROP,
+        importance = High,
+        doc = LOG_DIR_DOC,
+        default = "/tmp/kafka-logs",
+    )]
     // Singular log.dir
-    log_dir: PartialConfigDef<String>,
+    log_dir: ConfigDef<String>,
+
     // Multiple comma separated log.dirs, may include spaces after the comma (will be trimmed)
-    log_dirs: PartialConfigDef<String>,
+    #[config_def(
+        key = LOG_DIRS_PROP,
+        importance = High,
+        doc = LOG_DIRS_DOC,
+        no_default_resolver,
+        no_default_builder
+    )]
+    log_dirs: ConfigDef<String>,
+
+    #[config_def(
+        key = LOG_SEGMENT_BYTES_PROP,
+        importance = High,
+        doc = LOG_SEGMENT_BYTES_DOC,
+        with_default_fn,
+        with_validator_fn
+    )]
     pub log_segment_bytes: ConfigDef<usize>,
-    log_roll_time_millis: PartialConfigDef<i64>,
-    log_roll_time_hours: PartialConfigDef<i32>,
-    log_roll_time_jitter_millis: PartialConfigDef<i64>,
-    pub log_roll_time_jitter_hours: PartialConfigDef<i32>,
-    log_retention_time_millis: PartialConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_ROLL_TIME_MILLIS_PROP,
+        importance = High,
+        doc = LOG_ROLL_TIME_MILLIS_DOC,
+        with_validator_fn
+        no_default_resolver,
+    )]
+    log_roll_time_millis: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_ROLL_TIME_HOURS_PROP,
+        importance = High,
+        doc = LOG_ROLL_TIME_HOURS_DOC,
+        with_validator_fn
+        with_default_fn
+    )]
+    log_roll_time_hours: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_ROLL_TIME_JITTER_MILLIS_PROP,
+        importance = High,
+        doc = LOG_ROLL_TIME_JITTER_MILLIS_DOC,
+        no_default_resolver,
+    )]
+    log_roll_time_jitter_millis: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_ROLL_TIME_JITTER_HOURS_PROP,
+        importance = High,
+        doc = LOG_ROLL_TIME_JITTER_HOURS_DOC,
+        default = 0,
+        with_validator_fn,
+    )]
+    pub log_roll_time_jitter_hours: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_RETENTION_TIME_MILLIS_PROP,
+        importance = High,
+        doc = LOG_RETENTION_TIME_MILLIS_DOC,
+        no_default_resolver,
+    )]
+    log_retention_time_millis: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_RETENTION_TIME_MINUTES_PROP,
+        importance = High,
+        doc = LOG_RETENTION_TIME_MINUTES_DOC,
+    )]
     log_retention_time_minutes: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_RETENTION_TIME_HOURS_PROP,
+        importance = High,
+        doc = LOG_RETENTION_TIME_HOURS_DOC,
+        with_default_fn,
+        with_validator_fn,
+    )]
     pub log_retention_time_hours: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_RETENTION_BYTES_PROP,
+        importance = High,
+        doc = LOG_RETENTION_BYTES_DOC,
+        default = -1,
+    )]
     pub log_retention_bytes: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_CLEANUP_INTERVAL_MS_PROP,
+        importance = Medium,
+        doc = LOG_CLEANUP_INTERVAL_MS_DOC,
+        with_default_fn,
+    )]
     log_cleanup_interval_ms: ConfigDef<i64>,
-    log_cleanup_policy: PartialConfigDef<String>,
+
+    #[config_def(
+        key = LOG_CLEANUP_POLICY_PROP,
+        importance = Medium,
+        doc = LOG_CLEANUP_POLICY_DOC,
+        with_default_fn,
+        with_validator_fn,
+        no_default_resolver,
+        no_default_builder,
+    )]
+    log_cleanup_policy: ConfigDef<String>,
+
+    #[config_def(
+        key = LOG_CLEANER_THREADS_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_THREADS_DOC,
+        default = 1,
+        with_validator_fn,
+    )]
     log_cleaner_threads: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_DEDUPE_BUFFER_SIZE_DOC,
+        with_default_fn,
+    )]
     log_cleaner_dedupe_buffer_size: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_CLEANER_IO_BUFFER_SIZE_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_IO_BUFFER_SIZE_DOC,
+        with_default_fn,
+    )]
     log_cleaner_io_buffer_size: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_DOC,
+        with_default_fn,
+    )]
     log_cleaner_dedupe_buffer_load_factor: ConfigDef<f64>,
+
+    #[config_def(
+        key = LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_DOC,
+        with_default_fn,
+    )]
     log_cleaner_io_max_bytes_per_second: ConfigDef<f64>,
+
+    #[config_def(
+        key = LOG_CLEANER_BACKOFF_MS_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_BACKOFF_MS_DOC,
+        with_default_fn,
+        with_validator_fn,
+    )]
     log_cleaner_backoff_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_CLEANER_MIN_CLEAN_RATIO_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_MIN_CLEAN_RATIO_DOC,
+        with_default_fn,
+    )]
     pub log_cleaner_min_clean_ratio: ConfigDef<f64>,
+
+    #[config_def(
+        key = LOG_CLEANER_ENABLE_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_ENABLE_DOC,
+        default = true
+    )]
     log_cleaner_enable: ConfigDef<bool>,
+
+    #[config_def(
+        key = LOG_CLEANER_DELETE_RETENTION_MS_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_DELETE_RETENTION_MS_DOC,
+        with_default_fn,
+    )]
     pub log_cleaner_delete_retention_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_MIN_COMPACTION_LAG_MS_DOC,
+        default = 0,
+    )]
     pub log_cleaner_min_compaction_lag_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP,
+        importance = Medium,
+        doc = LOG_CLEANER_MAX_COMPACTION_LAG_MS_DOC,
+        with_default_fn
+    )]
     pub log_cleaner_max_compaction_lag_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_INDEX_INTERVAL_BYTES_PROP,
+        importance = Medium,
+        doc = LOG_INDEX_INTERVAL_BYTES_DOC,
+        default = 4096,
+    )]
     pub log_index_interval_bytes: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_INDEX_SIZE_MAX_BYTES_PROP,
+        importance = Medium,
+        doc = LOG_INDEX_SIZE_MAX_BYTES_DOC,
+        with_default_fn,
+        with_validator_fn,
+    )]
     pub log_index_size_max_bytes: ConfigDef<usize>,
+
+    #[config_def(
+        key = LOG_FLUSH_INTERVAL_MESSAGES_PROP,
+        importance = High,
+        doc = LOG_FLUSH_INTERVAL_MESSAGES_DOC,
+        with_default_fn,
+        with_validator_fn,
+    )]
     pub log_flush_interval_messages: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_DELETE_DELAY_MS_PROP,
+        importance = High,
+        doc = LOG_DELETE_DELAY_MS_DOC,
+        default = 60000,
+        with_validator_fn,
+    )]
     pub log_delete_delay_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP,
+        importance = Medium,
+        doc = LOG_FLUSH_SCHEDULER_INTERVAL_MS_DOC,
+        with_default_fn,
+    )]
     pub log_flush_scheduler_interval_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_FLUSH_INTERVAL_MS_PROP,
+        importance = High,
+        doc = LOG_FLUSH_INTERVAL_MS_DOC,
+        with_default_fn,
+    )]
     log_flush_interval_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP,
+        importance = High,
+        doc = LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_DOC,
+        default = 6000,
+        with_validator_fn
+    )]
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP,
+        importance = High,
+        doc = LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_DOC,
+        default = 6000,
+        with_validator_fn
+    )]
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_PRE_ALLOCATE_PROP,
+        importance = Medium,
+        doc = LOG_PRE_ALLOCATE_DOC,
+        default = false,
+    )]
     pub log_pre_allocate_enable: ConfigDef<bool>,
-    pub log_message_format_version: PartialConfigDef<String>,
-    pub log_message_timestamp_type: PartialConfigDef<String>,
+
+    #[config_def(
+        key = LOG_MESSAGE_FORMAT_VERSION_PROP,
+        importance = High,
+        doc = LOG_MESSAGE_FORMAT_VERSION_DOC,
+        with_default_fn,
+        no_default_resolver,
+        no_default_builder,
+    )]
+    pub log_message_format_version: ConfigDef<String>,
+
+    #[config_def(
+        key = LOG_MESSAGE_TIMESTAMP_TYPE_PROP,
+        importance = Medium,
+        doc = LOG_MESSAGE_TIMESTAMP_TYPE_DOC,
+        with_default_fn,
+        no_default_resolver,
+        no_default_builder,
+    )]
+    pub log_message_timestamp_type: ConfigDef<String>,
+
+    #[config_def(
+        key = LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP,
+        importance = Medium,
+        doc = LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC,
+        with_default_fn
+    )]
     pub log_message_timestamp_difference_max_ms: ConfigDef<i64>,
+
+    #[config_def(
+        key = NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP,
+        importance = High,
+        doc = NUM_RECOVERY_THREADS_PER_DATA_DIR_DOC,
+        default = 1
+    )]
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
+
+    #[config_def(
+        key = MIN_IN_SYNC_REPLICAS_PROP,
+        importance = High,
+        doc = MIN_IN_SYNC_REPLICAS_DOC,
+        default = 1
+        with_validator_fn,
+    )]
     pub min_in_sync_replicas: ConfigDef<i32>,
+
+    #[config_def(
+        key = LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP,
+        importance = Low,
+        doc = MESSAGE_DOWNCONVERSION_ENABLE_DOC,
+        default = true
+    )]
     pub log_message_down_conversion_enable: ConfigDef<bool>,
+
+    #[config_def(
+        key = COMPRESSION_TYPE_CONFIG,
+        importance = High,
+        doc = COMPRESSION_TYPE_DOC,
+        with_default_fn,
+    )]
     compression_type: ConfigDef<BrokerCompressionCodec>,
 }
 
-impl Default for DefaultLogConfigProperties {
-    fn default() -> Self {
-        let inter_broker_protocol_version = ApiVersion::latest_version();
-        Self {
-            log_dir: PartialConfigDef::default()
-                .with_key(LOG_DIR_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_DIR_DOC)
-                .with_default(String::from("/tmp/kafka-logs")),
-            log_dirs: PartialConfigDef::default()
-                .with_key(LOG_DIRS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_DIRS_DOC),
-            log_segment_bytes: ConfigDef::default()
-                .with_key(LOG_SEGMENT_BYTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_SEGMENT_BYTES_DOC)
-                .with_default(1 * 1024 * 1024 * 1024)
-                .with_validator(Box::new(|data| {
-                    // RAFKA TODO: This doesn't make much sense if it's u32...
-                    ConfigDef::at_least(
-                        data,
-                        &legacy_record::RECORD_OVERHEAD_V0,
-                        LOG_SEGMENT_BYTES_PROP,
-                    )
-                })),
-            log_roll_time_millis: PartialConfigDef::default()
-                .with_key(LOG_ROLL_TIME_MILLIS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, PRODUCER_QUOTA_BYTES_PER_SECOND_DEFAULT_PROP)
-                }))
-                .with_doc(LOG_ROLL_TIME_MILLIS_DOC),
-            log_roll_time_hours: PartialConfigDef::default()
-                .with_key(LOG_ROLL_TIME_HOURS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_ROLL_TIME_HOURS_DOC)
-                .with_default(24 * 7)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, LOG_ROLL_TIME_HOURS_PROP)
-                })),
-            log_roll_time_jitter_millis: PartialConfigDef::default()
-                .with_key(LOG_ROLL_TIME_JITTER_MILLIS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_ROLL_TIME_JITTER_MILLIS_DOC),
-            log_roll_time_jitter_hours: PartialConfigDef::default()
-                .with_key(LOG_ROLL_TIME_JITTER_HOURS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_ROLL_TIME_JITTER_HOURS_DOC)
-                .with_default(0)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_ROLL_TIME_JITTER_HOURS_PROP)
-                })),
-            log_retention_time_millis: PartialConfigDef::default()
-                .with_key(LOG_RETENTION_TIME_MILLIS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_RETENTION_TIME_MILLIS_DOC),
-            log_retention_time_minutes: ConfigDef::default()
-                .with_key(LOG_RETENTION_TIME_MINUTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_RETENTION_TIME_MINUTES_DOC),
-            log_retention_time_hours: ConfigDef::default()
-                .with_key(LOG_RETENTION_TIME_HOURS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_RETENTION_TIME_HOURS_DOC)
-                .with_default(24 * 7)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, LOG_CLEANER_THREADS_PROP)
-                })),
-            log_retention_bytes: ConfigDef::default()
-                .with_key(LOG_RETENTION_BYTES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_RETENTION_BYTES_DOC)
-                .with_default(-1),
-            log_cleanup_interval_ms: ConfigDef::default()
-                .with_key(LOG_CLEANUP_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANUP_INTERVAL_MS_DOC)
-                .with_default(5 * 60 * 1000),
-            log_cleanup_policy: PartialConfigDef::default()
-                .with_key(LOG_CLEANUP_POLICY_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANUP_POLICY_DOC)
-                .with_default(LogCleanupPolicy::Delete.to_string())
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::value_in_list(
-                        data,
-                        vec![
-                            &LogCleanupPolicy::Delete.to_string(),
-                            &LogCleanupPolicy::Compact.to_string(),
-                        ],
-                        LOG_CLEANUP_POLICY_PROP,
-                    )
-                })),
-            log_cleaner_threads: ConfigDef::default()
-                .with_key(LOG_CLEANER_THREADS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_THREADS_DOC)
-                .with_default(1)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
-                })),
-            log_cleaner_dedupe_buffer_size: ConfigDef::default()
-                .with_key(LOG_CLEANER_DEDUPE_BUFFER_SIZE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_DEDUPE_BUFFER_SIZE_DOC)
-                .with_default(128 * 1024 * 1024),
-            log_cleaner_io_buffer_size: ConfigDef::default()
-                .with_key(LOG_CLEANER_IO_BUFFER_SIZE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_IO_BUFFER_SIZE_DOC)
-                .with_default(512 * 1024),
-            log_cleaner_dedupe_buffer_load_factor: ConfigDef::default()
-                .with_key(LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_DEDUPE_BUFFER_LOAD_FACTOR_DOC)
-                .with_default(0.9), // Contained a 0.9d before, double check
-            log_cleaner_io_max_bytes_per_second: ConfigDef::default()
-                .with_key(LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_IO_MAX_BYTES_PER_SECOND_DOC)
-                .with_default(f64::MAX),
-            log_cleaner_backoff_ms: ConfigDef::default()
-                .with_key(LOG_CLEANER_BACKOFF_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_BACKOFF_MS_DOC)
-                .with_default(15 * 1000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_CLEANER_BACKOFF_MS_PROP)
-                })),
-            log_cleaner_min_clean_ratio: ConfigDef::default()
-                .with_key(LOG_CLEANER_MIN_CLEAN_RATIO_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_MIN_CLEAN_RATIO_DOC)
-                .with_default(0.5),
-            log_cleaner_enable: ConfigDef::default()
-                .with_key(LOG_CLEANER_ENABLE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_ENABLE_DOC)
-                .with_default(true),
-            log_cleaner_delete_retention_ms: ConfigDef::default()
-                .with_key(LOG_CLEANER_DELETE_RETENTION_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_DELETE_RETENTION_MS_DOC)
-                .with_default(24 * 60 * 60 * 1000),
-            log_cleaner_min_compaction_lag_ms: ConfigDef::default()
-                .with_key(LOG_CLEANER_MIN_COMPACTION_LAG_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_MIN_COMPACTION_LAG_MS_DOC)
-                .with_default(0),
-            log_cleaner_max_compaction_lag_ms: ConfigDef::default()
-                .with_key(LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_CLEANER_MAX_COMPACTION_LAG_MS_DOC)
-                .with_default(i64::MAX),
-            log_index_interval_bytes: ConfigDef::default()
-                .with_key(LOG_INDEX_INTERVAL_BYTES_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_INDEX_INTERVAL_BYTES_DOC)
-                .with_default(4096),
-            log_index_size_max_bytes: ConfigDef::default()
-                .with_key(LOG_INDEX_SIZE_MAX_BYTES_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_INDEX_SIZE_MAX_BYTES_DOC)
-                .with_default(10 * 1024 * 1024)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &4, LOG_INDEX_SIZE_MAX_BYTES_PROP)
-                })),
-            log_flush_interval_messages: ConfigDef::default()
-                .with_key(LOG_FLUSH_INTERVAL_MESSAGES_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_FLUSH_INTERVAL_MESSAGES_DOC)
-                .with_default(i64::MAX)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, LOG_FLUSH_INTERVAL_MESSAGES_PROP)
-                })),
-            log_delete_delay_ms: ConfigDef::default()
-                .with_key(LOG_DELETE_DELAY_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_DELETE_DELAY_MS_DOC)
-                .with_default(60000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_DELETE_DELAY_MS_PROP)
-                })),
-            log_flush_scheduler_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_FLUSH_SCHEDULER_INTERVAL_MS_DOC)
-                .with_default(i64::MAX),
-            log_flush_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_FLUSH_INTERVAL_MS_DOC)
-                .with_default(i64::MAX),
-            log_flush_offset_checkpoint_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_DOC)
-                .with_default(60000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
-                })),
-            log_flush_start_offset_checkpoint_interval_ms: ConfigDef::default()
-                .with_key(LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_DOC)
-                .with_default(60000)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &0, LOG_CLEANER_THREADS_PROP)
-                })),
-            log_pre_allocate_enable: ConfigDef::default()
-                .with_key(LOG_PRE_ALLOCATE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_PRE_ALLOCATE_DOC)
-                .with_default(false),
-            log_message_format_version: PartialConfigDef::default()
-                .with_key(LOG_MESSAGE_FORMAT_VERSION_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LOG_MESSAGE_FORMAT_VERSION_DOC)
-                .with_default(inter_broker_protocol_version.to_string()),
-            log_message_timestamp_type: PartialConfigDef::default()
-                .with_key(LOG_MESSAGE_TIMESTAMP_TYPE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_MESSAGE_TIMESTAMP_TYPE_DOC)
-                .with_default(LogMessageTimestampType::default().to_string()),
-            log_message_timestamp_difference_max_ms: ConfigDef::default()
-                .with_key(LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC)
-                .with_default(i64::MAX),
-            num_recovery_threads_per_data_dir: ConfigDef::default()
-                .with_key(NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(NUM_RECOVERY_THREADS_PER_DATA_DIR_DOC)
-                .with_default(1),
-            min_in_sync_replicas: ConfigDef::default()
-                .with_key(MIN_IN_SYNC_REPLICAS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(MIN_IN_SYNC_REPLICAS_DOC)
-                .with_default(1)
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, MIN_IN_SYNC_REPLICAS_PROP)
-                })),
-            log_message_down_conversion_enable: ConfigDef::default()
-                .with_key(LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP)
-                .with_importance(ConfigDefImportance::Low)
-                .with_doc(MESSAGE_DOWNCONVERSION_ENABLE_DOC)
-                .with_default(true),
-            compression_type: ConfigDef::default()
-                .with_key(COMPRESSION_TYPE_CONFIG)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(COMPRESSION_TYPE_DOC)
-                .with_default(PRODUCER_COMPRESSION_CODEC),
+impl DefaultLogConfigProperties {
+    // Defaults
+
+    fn default_log_segment_bytes() -> usize {
+        1 * 1024 * 1024 * 1024
+    }
+
+    fn default_log_roll_time_hours() -> i32 {
+        24 * 7
+    }
+
+    fn default_log_retention_time_hours() -> i32 {
+        24 * 7
+    }
+
+    fn default_log_cleanup_interval_ms() -> i64 {
+        25 * 60 * 1000
+    }
+
+    fn default_log_cleanup_policy() -> String {
+        LogCleanupPolicy::Delete.to_string()
+    }
+
+    fn default_log_cleaner_dedupe_buffer_size() -> i64 {
+        128 * 1024 * 1024
+    }
+
+    fn default_log_cleaner_io_buffer_size() -> i32 {
+        512 * 1024
+    }
+
+    fn default_log_cleaner_dedupe_buffer_load_factor() -> f64 {
+        0.9
+    }
+
+    fn default_log_cleaner_min_clean_ratio() -> f64 {
+        0.5
+    }
+
+    fn default_log_cleaner_io_max_bytes_per_second() -> f64 {
+        // XXX: The max of java may not be the same as the max of Rust?
+        f64::MAX
+    }
+
+    fn default_log_cleaner_backoff_ms() -> i64 {
+        15 * 1000
+    }
+
+    fn default_log_cleaner_delete_retention_ms() -> i64 {
+        24 * 60 * 60 * 1000
+    }
+
+    fn default_log_cleaner_max_compaction_lag_ms() -> i64 {
+        i64::MAX
+    }
+
+    fn default_log_index_size_max_bytes() -> usize {
+        10 * 1024 * 1024
+    }
+
+    fn default_log_flush_interval_messages() -> i64 {
+        i64::MAX
+    }
+
+    fn default_log_flush_scheduler_interval_ms() -> i64 {
+        i64::MAX
+    }
+
+    fn default_log_flush_interval_ms() -> i64 {
+        i64::MAX
+    }
+
+    fn default_log_message_format_version() -> String {
+        ApiVersion::latest_version().to_string()
+    }
+
+    fn default_log_message_timestamp_type() -> String {
+        LogMessageTimestampType::default().to_string()
+    }
+
+    fn default_log_message_timestamp_difference_max_ms() -> i64 {
+        i64::MAX
+    }
+
+    fn default_compression_type() -> BrokerCompressionCodec {
+        PRODUCER_COMPRESSION_CODEC
+    }
+
+    // Validators
+
+    fn validate_log_segment_bytes(&self) -> Result<(), KafkaConfigError> {
+        self.log_segment_bytes.validate_at_least(legacy_record::RECORD_OVERHEAD_V0)
+    }
+
+    fn validate_log_roll_time_millis(&self) -> Result<(), KafkaConfigError> {
+        self.log_roll_time_millis.validate_at_least(0)
+    }
+
+    fn validate_log_roll_time_hours(&self) -> Result<(), KafkaConfigError> {
+        self.log_roll_time_hours.validate_at_least(1)
+    }
+
+    fn validate_log_roll_time_jitter_hours(&self) -> Result<(), KafkaConfigError> {
+        self.log_roll_time_jitter_hours.validate_at_least(0)
+    }
+
+    fn validate_log_retention_time_hours(&self) -> Result<(), KafkaConfigError> {
+        self.log_retention_time_hours.validate_at_least(1)
+    }
+
+    fn validate_log_cleanup_policy(&self) -> Result<(), KafkaConfigError> {
+        self.log_cleanup_policy.validate_value_in_list(vec![
+            &LogCleanupPolicy::Delete.to_string(),
+            &LogCleanupPolicy::Compact.to_string(),
+        ])
+    }
+
+    fn validate_log_cleaner_threads(&self) -> Result<(), KafkaConfigError> {
+        self.log_retention_time_hours.validate_at_least(0)
+    }
+
+    fn validate_log_cleaner_backoff_ms(&self) -> Result<(), KafkaConfigError> {
+        self.log_cleaner_backoff_ms.validate_at_least(0)
+    }
+
+    fn validate_log_index_size_max_bytes(&self) -> Result<(), KafkaConfigError> {
+        self.log_index_size_max_bytes.validate_at_least(4)
+    }
+
+    fn validate_log_flush_interval_messages(&self) -> Result<(), KafkaConfigError> {
+        self.log_flush_interval_messages.validate_at_least(1)
+    }
+
+    fn validate_log_delete_delay_ms(&self) -> Result<(), KafkaConfigError> {
+        self.log_delete_delay_ms.validate_at_least(0)
+    }
+
+    fn validate_log_flush_offset_checkpoint_interval_ms(&self) -> Result<(), KafkaConfigError> {
+        self.log_flush_offset_checkpoint_interval_ms.validate_at_least(0)
+    }
+
+    fn validate_log_flush_start_offset_checkpoint_interval_ms(
+        &self,
+    ) -> Result<(), KafkaConfigError> {
+        self.log_flush_start_offset_checkpoint_interval_ms.validate_at_least(0)
+    }
+
+    fn validate_min_in_sync_replicas(&self) -> Result<(), KafkaConfigError> {
+        self.min_in_sync_replicas.validate_at_least(1)
+    }
+
+    /// `resolve_log_dirs` validates the log.dirs and log.dir combination. Note that the end value
+    /// in KafkaConfig has a default, so even if they are un-set, they will be marked as provided
+    fn resolve_log_dirs(&mut self) -> Result<Vec<String>, KafkaConfigError> {
+        // TODO: Consider checking for valid Paths and return KafkaConfigError for them
+        // NOTE: When the directories do not exist, KafkaServer simply gets a list of offline_dirs
+        if let Some(log_dirs) = &self.log_dirs.get_value() {
+            Ok((*log_dirs).clone().split(',').map(|x| x.trim_start().to_string()).collect())
+        } else if let Some(log_dir) = &self.log_dir.get_value() {
+            Ok(vec![log_dir.to_string()])
+        } else {
+            Ok(vec![])
         }
     }
-}
 
-impl TrySetProperty for DefaultLogConfigProperties {
-    /// `try_from_config_property` transforms a string value from the config into our actual types
-    fn try_set_property(
-        &mut self,
-        property_name: &str,
-        property_value: &str,
-    ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = DefaultLogConfigKey::from_str(property_name)?;
-        match kafka_config_key {
-            DefaultLogConfigKey::LogDir => self.log_dir.try_set_parsed_value(property_value)?,
-            DefaultLogConfigKey::LogDirs => self.log_dirs.try_set_parsed_value(property_value)?,
-            DefaultLogConfigKey::LogSegmentBytes => {
-                self.log_segment_bytes.try_set_parsed_value(property_value)?
+    /// The `or_set_fallback()` from `ConfigDef` cannot be used because the units (hours to millis)
+    /// cannot be currently performed by the resolver.
+    pub fn resolve_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
+            Ok(*log_roll_time_millis)
+        } else {
+            Ok(i64::from(self.log_roll_time_hours.build()?) * 60 * 60 * 1000)
+        }
+    }
+
+    /// The `or_set_fallback()` from `ConfigDef` cannot be used because the units (hours to millis)
+    /// cannot be currently performed by the resolver.
+    pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
+            Ok(*log_roll_time_jitter_millis)
+        } else {
+            Ok(i64::from(self.log_roll_time_jitter_hours.build()?) * 60 * 60 * 1000)
+        }
+    }
+
+    /// The `or_set_fallback()` from `ConfigDef` cannot be used as we need to transform hours to
+    /// minutes to millis
+    pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        let millis_in_minute = 60 * 1000;
+        let millis_in_hour = 60 * millis_in_minute;
+
+        let mut millis: i64 = match self.log_retention_time_millis.get_value() {
+            Some(0) => {
+                return Err(KafkaConfigError::InvalidValue(format!(
+                    "{} must be unlimited (-1) or, equal or greater than 1",
+                    LOG_RETENTION_TIME_MILLIS_PROP
+                )))
             },
-            DefaultLogConfigKey::LogRollTimeMillis => {
-                self.log_roll_time_millis.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogRollTimeHours => {
-                self.log_roll_time_hours.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogRollTimeJitterMillis => {
-                self.log_roll_time_jitter_millis.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogRollTimeJitterHours => {
-                self.log_roll_time_jitter_hours.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogRetentionTimeMillis => {
-                self.log_retention_time_millis.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogRetentionTimeMinutes => {
-                self.log_retention_time_minutes.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogRetentionTimeHours => {
-                self.log_retention_time_hours.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogRetentionBytes => {
-                self.log_retention_bytes.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanupIntervalMs => {
-                self.log_cleanup_interval_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanupPolicy => {
-                self.log_cleanup_policy.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerThreads => {
-                self.log_cleaner_threads.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerDedupeBufferSize => {
-                self.log_cleaner_dedupe_buffer_size.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerIoBufferSize => {
-                self.log_cleaner_io_buffer_size.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerDedupeBufferLoadFactor => {
-                self.log_cleaner_dedupe_buffer_load_factor.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerIoMaxBytesPerSecond => {
-                self.log_cleaner_io_max_bytes_per_second.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerBackoffMs => {
-                self.log_cleaner_backoff_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerMinCleanRatio => {
-                self.log_cleaner_min_clean_ratio.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerEnable => {
-                self.log_cleaner_enable.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerDeleteRetentionMs => {
-                self.log_cleaner_delete_retention_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerMinCompactionLagMs => {
-                self.log_cleaner_min_compaction_lag_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogCleanerMaxCompactionLagMs => {
-                self.log_cleaner_max_compaction_lag_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogIndexIntervalBytes => {
-                self.log_index_interval_bytes.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogIndexSizeMaxBytes => {
-                self.log_index_size_max_bytes.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogFlushIntervalMessages => {
-                self.log_flush_interval_messages.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogDeleteDelayMs => {
-                self.log_delete_delay_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogFlushSchedulerIntervalMs => {
-                self.log_flush_scheduler_interval_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogFlushIntervalMs => {
-                self.log_flush_interval_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogFlushOffsetCheckpointIntervalMs => {
-                self.log_flush_offset_checkpoint_interval_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogFlushStartOffsetCheckpointIntervalMs => self
-                .log_flush_start_offset_checkpoint_interval_ms
-                .try_set_parsed_value(property_value)?,
-            DefaultLogConfigKey::LogPreAllocateEnable => {
-                self.log_pre_allocate_enable.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogMessageFormatVersion => {
-                self.log_message_format_version.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogMessageTimestampType => {
-                self.log_message_timestamp_type.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogMessageTimestampDifferenceMaxMs => {
-                self.log_message_timestamp_difference_max_ms.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::NumRecoveryThreadsPerDataDir => {
-                self.num_recovery_threads_per_data_dir.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::MinInSyncReplicas => {
-                self.min_in_sync_replicas.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::LogMessageDownConversionEnable => {
-                self.log_message_down_conversion_enable.try_set_parsed_value(property_value)?
-            },
-            DefaultLogConfigKey::CompressionType => {
-                self.compression_type.try_set_parsed_value(property_value)?
+            Some(millis) => *millis,
+            None => match self.log_retention_time_minutes.get_value() {
+                Some(0) => {
+                    return Err(KafkaConfigError::InvalidValue(format!(
+                        "{} must be unlimited (-1) or, equal or greater than 1",
+                        LOG_RETENTION_TIME_MINUTES_PROP
+                    )))
+                },
+                Some(mins) => i64::from(millis_in_minute) * i64::from(*mins),
+                None => match self.log_retention_time_hours.get_value() {
+                    Some(0) => {
+                        return Err(KafkaConfigError::InvalidValue(format!(
+                            "{} must be unlimited (-1) or, equal or greater than 1",
+                            LOG_RETENTION_TIME_HOURS_PROP
+                        )))
+                    },
+                    Some(hours) => i64::from(*hours) * millis_in_hour,
+                    None => unreachable!("log_retention_time_hours has a default."),
+                },
             },
         };
-        Ok(())
+        if millis < 0 {
+            // RAFKA TODO: perhaps create an enum to represent LogRetentiontime(Unlimimited)
+            warn!(
+                "Resolved Log Retention Time millis is below zero: '{}' Setting to -1 (unlimited)",
+                millis
+            );
+            millis = -1;
+        }
+        Ok(millis)
+    }
+
+    pub fn resolve_log_message_timestamp_type(
+        &mut self,
+    ) -> Result<LogMessageTimestampType, KafkaConfigError> {
+        LogMessageTimestampType::from_str(self.log_message_timestamp_type.get_value().unwrap())
+    }
+
+    pub fn resolve_log_cleanup_policy(
+        &mut self,
+    ) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
+        match self.log_cleanup_policy.get_value() {
+            Some(val) => LogCleanupPolicy::from_str_to_vec(val),
+            None => Ok(vec![]),
+        }
+    }
+
+    pub fn resolve_log_message_format_version(
+        &mut self,
+    ) -> Result<KafkaApiVersion, KafkaConfigError> {
+        KafkaApiVersion::from_str(&self.log_message_format_version.get_value().unwrap())
+    }
+
+    // Custom builders, type conversion our deriver can't handle (yet?)
+
+    pub fn build_log_message_timestamp_type(
+        &mut self,
+    ) -> Result<LogMessageTimestampType, KafkaConfigError> {
+        self.resolve_log_message_timestamp_type()
+    }
+
+    pub fn build_log_message_format_version(
+        &mut self,
+    ) -> Result<KafkaApiVersion, KafkaConfigError> {
+        self.resolve_log_message_format_version()
+    }
+
+    pub fn build_log_cleanup_policy(&mut self) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
+        self.validate_log_cleanup_policy()?;
+        self.resolve_log_cleanup_policy()
     }
 }
 
 impl ConfigSet for DefaultLogConfigProperties {
-    type ConfigKey = DefaultLogConfigKey;
     type ConfigType = DefaultLogConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
@@ -993,108 +986,6 @@ impl ConfigSet for DefaultLogConfigProperties {
             log_message_down_conversion_enable,
             compression_type,
         })
-    }
-}
-
-impl DefaultLogConfigProperties {
-    /// `resolve_log_dirs` validates the log.dirs and log.dir combination. Note that the end value
-    /// in KafkaConfig has a default, so even if they are un-set, they will be marked as provided
-    fn resolve_log_dirs(&mut self) -> Result<Vec<String>, KafkaConfigError> {
-        // TODO: Consider checking for valid Paths and return KafkaConfigError for them
-        // NOTE: When the directories do not exist, KafkaServer simply gets a list of offline_dirs
-        if let Some(log_dirs) = &self.log_dirs.get_value() {
-            Ok((*log_dirs).clone().split(',').map(|x| x.trim_start().to_string()).collect())
-        } else if let Some(log_dir) = &self.log_dir.get_value() {
-            Ok(vec![log_dir.to_string()])
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis)
-    /// cannot be currently performed by the resolver.
-    pub fn resolve_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
-        if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
-            Ok(*log_roll_time_millis)
-        } else {
-            Ok(i64::from(self.log_roll_time_hours.partial_build()?) * 60 * 60 * 1000)
-        }
-    }
-
-    /// The `get_or_fallback()` from `ConfigDef` cannot be used because the units (hours to millis)
-    /// cannot be currently performed by the resolver.
-    pub fn resolve_log_roll_time_jitter_millis(&mut self) -> Result<i64, KafkaConfigError> {
-        if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
-            Ok(*log_roll_time_jitter_millis)
-        } else {
-            Ok(i64::from(self.log_roll_time_jitter_hours.partial_build()?) * 60 * 60 * 1000)
-        }
-    }
-
-    /// The `get_or_fallback()` from `ConfigDef` cannot be used as we need to transform hours to
-    /// minutes to millis
-    pub fn resolve_log_retention_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
-        let millis_in_minute = 60 * 1000;
-        let millis_in_hour = 60 * millis_in_minute;
-
-        let mut millis: i64 = match self.log_retention_time_millis.get_value() {
-            Some(0) => {
-                return Err(KafkaConfigError::InvalidValue(format!(
-                    "{} must be unlimited (-1) or, equal or greater than 1",
-                    LOG_RETENTION_TIME_MILLIS_PROP
-                )))
-            },
-            Some(millis) => *millis,
-            None => match self.log_retention_time_minutes.get_value() {
-                Some(0) => {
-                    return Err(KafkaConfigError::InvalidValue(format!(
-                        "{} must be unlimited (-1) or, equal or greater than 1",
-                        LOG_RETENTION_TIME_MINUTES_PROP
-                    )))
-                },
-                Some(mins) => i64::from(millis_in_minute) * i64::from(*mins),
-                None => match self.log_retention_time_hours.get_value() {
-                    Some(0) => {
-                        return Err(KafkaConfigError::InvalidValue(format!(
-                            "{} must be unlimited (-1) or, equal or greater than 1",
-                            LOG_RETENTION_TIME_HOURS_PROP
-                        )))
-                    },
-                    Some(hours) => i64::from(*hours) * millis_in_hour,
-                    None => unreachable!("log_retention_time_hours has a default."),
-                },
-            },
-        };
-        if millis < 0 {
-            // RAFKA TODO: perhaps create an enum to represent LogRetentiontime(Unlimimited)
-            warn!(
-                "Resolved Log Retention Time millis is below zero: '{}' Setting to -1 (unlimited)",
-                millis
-            );
-            millis = -1;
-        }
-        Ok(millis)
-    }
-
-    pub fn resolve_log_message_timestamp_type(
-        &mut self,
-    ) -> Result<LogMessageTimestampType, KafkaConfigError> {
-        LogMessageTimestampType::from_str(self.log_message_timestamp_type.get_value().unwrap())
-    }
-
-    pub fn resolve_log_cleanup_policy(
-        &mut self,
-    ) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
-        match self.log_cleanup_policy.get_value() {
-            Some(val) => LogCleanupPolicy::from_str_to_vec(val),
-            None => Ok(vec![]),
-        }
-    }
-
-    pub fn resolve_log_message_format_version(
-        &mut self,
-    ) -> Result<KafkaApiVersion, KafkaConfigError> {
-        KafkaApiVersion::from_str(&self.log_message_format_version.get_value().unwrap())
     }
 }
 
