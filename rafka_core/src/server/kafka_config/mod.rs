@@ -13,20 +13,16 @@ pub mod socket_server;
 pub mod transaction_management;
 pub mod zookeeper;
 
-use self::general::{GeneralConfig, GeneralConfigKey, GeneralConfigProperties};
-use self::log::{DefaultLogConfig, DefaultLogConfigKey, DefaultLogConfigProperties};
-use self::quota::{QuotaConfig, QuotaConfigKey, QuotaConfigProperties};
-use self::replication::{ReplicationConfig, ReplicationConfigKey, ReplicationConfigProperties};
-use self::transaction_management::{
-    TransactionConfig, TransactionConfigKey, TransactionConfigProperties,
-};
-use self::zookeeper::{ZookeeperConfig, ZookeeperConfigKey, ZookeeperConfigProperties};
+use self::general::{GeneralConfig, GeneralConfigProperties};
+use self::log::{DefaultLogConfig, DefaultLogConfigProperties};
+use self::quota::{QuotaConfig, QuotaConfigProperties};
+use self::replication::{ReplicationConfig, ReplicationConfigProperties};
+use self::transaction_management::{TransactionConfig, TransactionConfigProperties};
+use self::zookeeper::{ZookeeperConfig, ZookeeperConfigProperties};
 use crate::common::config::config_exception;
 use crate::common::security::auth::security_protocol::SecurityProtocolError;
-use enum_iterator::IntoEnumIterator;
 use fs_err::File;
 use std::collections::HashMap;
-use std::fmt;
 use std::io::{self, BufReader};
 use std::num;
 use std::str::FromStr;
@@ -34,68 +30,6 @@ use thiserror::Error;
 use tracing::{debug, trace};
 
 use self::socket_server::{SocketConfig, SocketConfigKey, SocketConfigProperties};
-
-// A Helper Enum to aid with the miriad of properties that could be forgotten to be matched.
-#[derive(Debug)]
-pub enum KafkaConfigKey {
-    Zookeeper(ZookeeperConfigKey),
-    General(GeneralConfigKey),
-    Socket(SocketConfigKey),
-    Log(DefaultLogConfigKey),
-    Transaction(TransactionConfigKey),
-    Quota(QuotaConfigKey),
-    Replication(ReplicationConfigKey),
-}
-
-// impl fmt::Display for *ConfigKey {
-// vim from enum to match: /^    \(.*\),/\= "Self::" . submatch(1) . "=> write!(f, \"{}\","
-// . Uppercase(submatch(1)) . "_PROP),"/
-//}
-
-impl fmt::Display for KafkaConfigKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Zookeeper(val) => write!(f, "{}", val.to_string()),
-            Self::General(val) => write!(f, "{}", val.to_string()),
-            Self::Socket(val) => write!(f, "{}", val.to_string()),
-            Self::Log(val) => write!(f, "{}", val.to_string()),
-            Self::Transaction(val) => write!(f, "{}", val.to_string()),
-            Self::Quota(val) => write!(f, "{}", val.to_string()),
-            Self::Replication(val) => write!(f, "{}", val.to_string()),
-        }
-    }
-}
-
-impl FromStr for KafkaConfigKey {
-    type Err = KafkaConfigError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        if let Ok(val) = ZookeeperConfigKey::from_str(input) {
-            return Ok(Self::Zookeeper(val));
-        }
-        if let Ok(val) = GeneralConfigKey::from_str(input) {
-            return Ok(Self::General(val));
-        }
-        if let Ok(val) = SocketConfigKey::from_str(input) {
-            return Ok(Self::Socket(val));
-        }
-        if let Ok(val) = DefaultLogConfigKey::from_str(input) {
-            return Ok(Self::Log(val));
-        }
-        if let Ok(val) = TransactionConfigKey::from_str(input) {
-            return Ok(Self::Transaction(val));
-        }
-        if let Ok(val) = QuotaConfigKey::from_str(input) {
-            return Ok(Self::Quota(val));
-        }
-        if let Ok(val) = ReplicationConfigKey::from_str(input) {
-            return Ok(Self::Replication(val));
-        }
-        // vim from enum to match: /^    \(.*\),/\= "         " . Uppercase(submatch(1)) . "_PROP =>
-        // Ok(Self::" .submatch(1) . "),"/
-        Err(KafkaConfigError::UnknownKey(input.to_string()))
-    }
-}
 
 /// `KafkaConfigError` is a custom error that is returned when properties are invalid, unknown,
 /// missing or the config file is not readable.
@@ -179,6 +113,9 @@ impl PartialEq for KafkaConfigError {
 /// A type may implement TrySetProperty which receives a "key" that is tied to a specific field and
 /// a value to set it that impls FromStr, usually read from config files, zookeeper, etc
 pub trait TrySetProperty {
+    /// `config_names` returns a list of config keys managed by a specific Properties
+    fn config_names() -> Vec<&'static str>;
+
     /// `try_from_config_property` transforms a string value from the config into our actual types
     fn try_set_property(
         &mut self,
@@ -190,7 +127,6 @@ pub trait TrySetProperty {
 /// A set of methods that the different configuration-sets must implement, including building,
 /// validating, etc.
 pub trait ConfigSet {
-    type ConfigKey;
     type ConfigType;
     /// `resolve` dependant properties from a ConfigKey into a ConfigType.
     /// NOTE: This doesn't consume self, as a ConfigKey may be re-used after bootstrap,
@@ -204,13 +140,6 @@ pub trait ConfigSet {
         let res = self.resolve()?;
         self.validate_set(&res)?;
         Ok(res)
-    }
-    /// `config_names` returns a list of config keys used
-    fn config_names() -> Vec<String>
-    where
-        Self::ConfigKey: IntoEnumIterator + fmt::Display,
-    {
-        Self::ConfigKey::into_enum_iter().map(|val| val.to_string()).collect()
     }
 
     /// Transforms from a HashMap of configs into a KafkaConfigProperties object
@@ -270,38 +199,30 @@ impl KafkaConfigProperties {
         property_name: &str,
         property_value: &str,
     ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = KafkaConfigKey::from_str(property_name)?;
-        // vim from enum to match: s/^    \(.*\),/\= "            Self::ConfigKey::" . submatch(1) .
-        // " => self." . Snakecase(submatch(1)). ".try_set_parsed_value(property_value)?,"/
-        match kafka_config_key {
-            KafkaConfigKey::Zookeeper(_) => {
-                self.zookeeper.try_set_property(property_name, property_value)?
-            },
-            KafkaConfigKey::General(_) => {
-                self.general.try_set_property(property_name, property_value)?
-            },
-            KafkaConfigKey::Socket(_) => {
-                self.socket.try_set_property(property_name, property_value)?
-            },
-            KafkaConfigKey::Log(_) => self.log.try_set_property(property_name, property_value)?,
-            KafkaConfigKey::Transaction(_) => {
-                self.transaction.try_set_property(property_name, property_value)?
-            },
-            KafkaConfigKey::Quota(_) => {
-                self.quota.try_set_property(property_name, property_value)?
-            },
-            KafkaConfigKey::Replication(_) => {
-                self.replication.try_set_property(property_name, property_value)?
-            },
-        };
-        Ok(())
+        if ZookeeperConfigProperties::config_names().contains(&property_name) {
+            self.zookeeper.try_set_property(property_name, property_value)
+        } else if GeneralConfigProperties::config_names().contains(&property_name) {
+            self.general.try_set_property(property_name, property_value)
+        } else if SocketConfigProperties::config_names().contains(&property_name) {
+            self.socket.try_set_property(property_name, property_value)
+        } else if DefaultLogConfigProperties::config_names().contains(&property_name) {
+            self.log.try_set_property(property_name, property_value)
+        } else if TransactionConfigProperties::config_names().contains(&property_name) {
+            self.transaction.try_set_property(property_name, property_value)
+        } else if QuotaConfigProperties::config_names().contains(&property_name) {
+            self.quota.try_set_property(property_name, property_value)
+        } else if ReplicationConfigProperties::config_names().contains(&property_name) {
+            self.replication.try_set_property(property_name, property_value)
+        } else {
+            Err(KafkaConfigError::UnknownKey(property_name.to_string()))
+        }
     }
 
     /// `config_names` returns a list of config keys used by KafkaConfigProperties
-    pub fn config_names() -> Vec<String> {
+    pub fn config_names() -> Vec<&'static str> {
         // RAFKA TODO: Add unit tests to make sure all configs are returned here
         let mut res = vec![];
-        res.append(&mut ZookeeperConfigProperties::config_names());
+        res.append(&mut ZookeeperConfigProperties::config_names().clone());
         res.append(&mut GeneralConfigProperties::config_names());
         res.append(&mut SocketConfigProperties::config_names());
         res.append(&mut DefaultLogConfigProperties::config_names());
