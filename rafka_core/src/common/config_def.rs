@@ -150,6 +150,31 @@ where
         }
     }
 
+    pub fn validate_value_in_list(&self, valid_list: Vec<&T>) -> Result<(), KafkaConfigError>
+    where
+        T: PartialEq + fmt::Display,
+    {
+        match &self.value {
+            Some(val) => {
+                if valid_list.iter().any(|&item| val == item) {
+                    Ok(())
+                } else {
+                    Err(KafkaConfigError::InvalidValue(format!(
+                        "{}: '{}' should be in list {:?}",
+                        self.key, val, valid_list
+                    )))
+                }
+            },
+            None => {
+                error!(
+                    "Running value_in_list() with no value provided for ConfigDef {:?}",
+                    self.key
+                );
+                Err(KafkaConfigError::ComparisonOnNone(self.key.to_string()))
+            },
+        }
+    }
+
     pub fn value_in_list(
         data: Option<&T>,
         valid_list: Vec<&T>,
@@ -201,53 +226,30 @@ where
         }
     }
 
-    #[deprecated(note = "please use `validate_at_least` instead")]
-    pub fn at_least(data: Option<&T>, rhs: &T, key: &str) -> Result<(), KafkaConfigError>
-    where
-        T: PartialEq + PartialOrd + fmt::Display,
-    {
-        match data {
-            Some(val) => {
-                if val < rhs {
-                    Err(KafkaConfigError::InvalidValue(format!(
-                        "{}: '{}' should be at least {}",
-                        key, val, rhs
-                    )))
-                } else {
-                    Ok(())
-                }
-            },
-            None => {
-                error!("Running at_least() with no value provided for ConfigDef {:?}", data);
-                Err(KafkaConfigError::ComparisonOnNone(key.to_string()))
-            },
-        }
-    }
-
     /// Checks a value is between both the upper (inclusive) and lower bound
-    pub fn between(data: Option<&T>, min: &T, max: &T, key: &str) -> Result<(), KafkaConfigError>
+    pub fn validate_between(&self, min: T, max: T) -> Result<(), KafkaConfigError>
     where
         T: PartialEq + PartialOrd + fmt::Display,
     {
-        match data {
+        match &self.value {
             Some(val) => {
-                if val < min {
+                if *val < min {
                     Err(KafkaConfigError::InvalidValue(format!(
                         "{}: '{}' should be at least {}",
-                        key, val, min
+                        self.key, val, min
                     )))
-                } else if val > max {
+                } else if *val > max {
                     Err(KafkaConfigError::InvalidValue(format!(
                         "{}: '{}' should be no more than {}",
-                        key, val, max
+                        self.key, val, max
                     )))
                 } else {
                     Ok(())
                 }
             },
             None => {
-                error!("Running between() with no value provided for ConfigDef {:?}", data);
-                Err(KafkaConfigError::ComparisonOnNone(key.to_string()))
+                error!("Running between() with no value provided for ConfigDef {:?}", self.key);
+                Err(KafkaConfigError::ComparisonOnNone(self.key.to_string()))
             },
         }
     }
