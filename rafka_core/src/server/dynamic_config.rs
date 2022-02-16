@@ -3,9 +3,11 @@
 /// RAFKA NOTES:
 /// - The properties are LONG and must be at least 0. They have been set as u64 here.
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
-use crate::server::kafka_config::{KafkaConfigError, KafkaConfigProperties};
+use crate::server::kafka_config::{KafkaConfigError, KafkaConfigProperties, TrySetProperty};
 use crate::server::replication_quota_manager::ReplicationQuotaManagerConfig;
+use rafka_derive::ConfigDef;
 use std::collections::HashMap;
+use std::str::FromStr;
 use tracing::error;
 
 // Config Keys
@@ -48,71 +50,40 @@ impl Default for BrokerConfigs {
         let configs = KafkaConfigProperties::config_names();
         let dynamic_conf = DynamicBrokerConfigDefs::config_names();
         let (_, non_dynamic_props): (Vec<_>, Vec<_>) =
-            configs.into_iter().partition(|e| dynamic_conf.contains(&e));
+            configs.iter().map(|x| x.to_string()).partition(|e| dynamic_conf.contains(&e.as_str()));
 
         Self { dynamic_props: DynamicBrokerConfigDefs::default(), non_dynamic_props }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, ConfigDef)]
 pub struct DynamicBrokerConfigDefs {
+    #[config_def(
+        key = LEADER_REPLICATION_THROTTLED_RATE_PROP,
+        importance = Medium,
+        doc = LEADER_REPLICATION_THROTTLED_RATE_DOC,
+        with_default_fn,
+    )]
     leader_replication_throttled_rate_prop: ConfigDef<u64>,
+
+    #[config_def(
+        key = FOLLOWER_REPLICATION_THROTTLED_RATE_PROP,
+        importance = Medium,
+        doc = FOLLOWER_REPLICATION_THROTTLED_RATE_DOC,
+    )]
     follower_replication_throttled_rate_prop: ConfigDef<u64>,
+
+    #[config_def(
+        key = REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP,
+        importance = Medium,
+        doc = REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_DOC,
+    )]
     replica_alter_log_dirs_io_max_bytes_per_second_prop: ConfigDef<u64>,
 }
 
-impl Default for DynamicBrokerConfigDefs {
-    fn default() -> Self {
-        Self {
-            leader_replication_throttled_rate_prop: ConfigDef::default()
-                .with_key(LEADER_REPLICATION_THROTTLED_RATE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(LEADER_REPLICATION_THROTTLED_RATE_DOC)
-                .with_default(
-                    ReplicationQuotaManagerConfig::default().quota_bytes_per_second_default,
-                ),
-            follower_replication_throttled_rate_prop: ConfigDef::default()
-                .with_key(FOLLOWER_REPLICATION_THROTTLED_RATE_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(FOLLOWER_REPLICATION_THROTTLED_RATE_DOC),
-            replica_alter_log_dirs_io_max_bytes_per_second_prop: ConfigDef::default()
-                .with_key(REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP)
-                .with_importance(ConfigDefImportance::Medium)
-                .with_doc(REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_DOC),
-        }
-    }
-}
-
 impl DynamicBrokerConfigDefs {
-    /// `try_from_config_property` transforms a string value from the config into our actual types
-    pub fn try_set_property(
-        &mut self,
-        property_name: &str,
-        property_value: &str,
-    ) -> Result<(), KafkaConfigError> {
-        match property_name {
-            LEADER_REPLICATION_THROTTLED_RATE_PROP => {
-                self.leader_replication_throttled_rate_prop.try_set_parsed_value(property_value)?
-            },
-            FOLLOWER_REPLICATION_THROTTLED_RATE_PROP => self
-                .follower_replication_throttled_rate_prop
-                .try_set_parsed_value(property_value)?,
-            REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP => self
-                .replica_alter_log_dirs_io_max_bytes_per_second_prop
-                .try_set_parsed_value(property_value)?,
-            _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
-        }
-        Ok(())
-    }
-
-    /// `config_names` returns a list of config keys used by KafkaConfigProperties
-    pub fn config_names() -> Vec<String> {
-        // TODO: This should be derivable somehow too.
-        vec![
-            LEADER_REPLICATION_THROTTLED_RATE_PROP.to_string(),
-            FOLLOWER_REPLICATION_THROTTLED_RATE_PROP.to_string(),
-            REPLICA_ALTER_LOG_DIRS_IO_MAX_BYTES_PER_SECOND_PROP.to_string(),
-        ]
+    fn default_leader_replication_throttled_rate_prop() -> u64 {
+        ReplicationQuotaManagerConfig::default().quota_bytes_per_second_default
     }
 
     pub fn validate(props: HashMap<String, String>) -> Result<(), KafkaConfigError> {
@@ -121,7 +92,7 @@ impl DynamicBrokerConfigDefs {
         let custom_props_allowed = true;
         if !custom_props_allowed {
             let unknown_keys: Vec<String> =
-                props.keys().filter(|x| names.contains(x)).map(|x| x.to_string()).collect();
+                props.keys().filter(|x| names.contains(&x.as_str())).map(|x| x.clone()).collect();
             if !unknown_keys.is_empty() {
                 error!("Unknown Dynamic Configuration: {:?}.", unknown_keys);
                 // Fail early with the latest failed key. the error line above would show all the
@@ -131,7 +102,7 @@ impl DynamicBrokerConfigDefs {
                 ));
             }
         }
-        // ValidateValues
+        // Validate Values
         let mut test = Self::default();
         let mut last_invalid_settings: Option<KafkaConfigError> = None;
         for (prop_key, prop_value) in props {
