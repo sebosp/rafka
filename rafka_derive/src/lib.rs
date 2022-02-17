@@ -73,6 +73,10 @@ struct ConfigDefFieldAttrs {
     /// A field may require special code to handle its internal value, not just a build() on
     /// ConfigDef but maybe inspect other fields for context/deriving
     with_default_resolver: bool,
+    /// The caller may decide not to use a default resolver. The caller must call the validator if
+    /// any. This may happen when we read for example a ConfigDef<String> and build a
+    /// Vec<Something> and the default builder cannot know the Vec<Something>
+    with_default_builder: bool,
     /// A field's internal type, i.e. i64 in ConfigDef<i64>
     internal_field_ty: String,
 }
@@ -88,6 +92,7 @@ impl Default for ConfigDefFieldAttrs {
             doc_const: None,
             internal_field_ty: String::from("UNSET"),
             with_default_resolver: true,
+            with_default_builder: true,
             with_validator_fn: false,
         }
     }
@@ -103,6 +108,7 @@ impl ConfigDefFieldAttrs {
     }
 
     fn set(&mut self, field_name: &str, current_attr: &str, lit_value: String) {
+        // eprintln!(".set({} {}='{}')", field_name, current_attr, lit_value);
         match current_attr.as_ref() {
             "key" => {
                 self.key_const = Some(lit_value);
@@ -157,7 +163,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
         if let syn::PathArguments::AngleBracketed(ref bracketed) =
             type_path.path.segments.first().unwrap().arguments
         {
-            eprintln!("bracketed: {:?}", bracketed);
+            // eprintln!("bracketed: {:?}", bracketed);
             if bracketed.args.len() != 1 {
                 panic!(
                     "Field {} only one argument expected as in 'pub some_field: ConfigDef<T>'",
@@ -166,7 +172,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
             }
             if let syn::GenericArgument::Type(syn::Type::Path(internal_ty)) = &bracketed.args[0] {
                 internal_field_ty = Some(internal_ty.path.segments.first().unwrap().ident.clone());
-                eprintln!("first unwrap: {:?}", internal_ty.path.segments.first().unwrap());
+                // eprintln!("first unwrap: {:?}", internal_ty.path.segments.first().unwrap());
                 if !internal_ty.path.segments.first().unwrap().arguments.is_empty() {
                     panic!(
                         "Field {} currently not supporting multiple levels inside ConfigDef<T>",
@@ -197,12 +203,14 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
             for token in attr.tokens.clone() {
                 if let proc_macro2::TokenTree::Group(group) = token {
                     let mut current_attr = String::from("");
+                    // The value may be a negative number
+                    let mut has_dash = false;
                     for section in group.stream() {
                         match section {
                             proc_macro2::TokenTree::Ident(id) => {
                                 if is_assign_operation {
-                                    // An Ident may be the right hand side of an operation.
                                     res.set(&field_ref_name, current_attr.as_ref(), id.to_string());
+                                    has_dash = false;
                                 } else {
                                     // But if there was no assignment, the ident is a new attribute
                                     // key
@@ -213,6 +221,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                                         "with_validator_fn" => res.with_validator_fn = true,
                                         "with_default_fn" => res.with_default_fn = true,
                                         "no_default_resolver" => res.with_default_resolver = false,
+                                        "no_default_builder" => res.with_default_builder = false,
                                         unknown_attr @ _ => {
                                             panic!("section Unknown attr: {}", unknown_attr);
                                         },
@@ -224,6 +233,9 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                                     is_assign_operation = true;
                                 } else if punct.as_char() == ',' {
                                     is_assign_operation = false;
+                                    has_dash = false;
+                                } else if punct.as_char() == '-' {
+                                    has_dash = true;
                                 } else {
                                     panic!(
                                         "Only supporting assignment as in: \"attr '=' value,\" \
@@ -233,8 +245,10 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
                                 }
                             },
                             proc_macro2::TokenTree::Literal(lit) => {
-                                let lit_value = lit.to_string();
-                                eprintln!("{}='{}'", current_attr, lit_value);
+                                let mut lit_value = lit.to_string();
+                                if has_dash {
+                                    lit_value = format!("-{}", lit_value);
+                                }
                                 res.set(&field_ref_name, current_attr.as_ref(), lit_value);
                             },
                             _ => {},
@@ -290,7 +304,7 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
 #[proc_macro_derive(ConfigDef, attributes(config_def))]
 pub fn config_def_derive(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
-    eprintln!("{:#?}", ast);
+    // eprintln!("{:#?}", ast);
     let name = &ast.ident;
     let fields = if let syn::Data::Struct(syn::DataStruct {
         fields: syn::Fields::Named(syn::FieldsNamed { ref named, .. }),
@@ -325,6 +339,9 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
     // A reference to all the resolvers so that the compiler generates friendly messages on missing
     // methods.
     let mut resolver_refs = vec![];
+    // A builder_<field> for each field that calls both the vallidator (if any) and the resolver be
+    // it custom or default.
+    let mut builders = vec![];
     let mut all_keys = vec![];
     for field in fields {
         let field_name = field.ident.clone().unwrap();
@@ -333,7 +350,7 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         if all_keys.contains(&field_key) {
             panic!("field {} key {} is repeated", field_name, field_key);
         }
-        all_keys.push(field_key.clone());
+        all_keys.push(remove_if_enclosing_double_quotes(field_key.clone()));
         if let Some(default_attr) = field_attrs.default_attr {
             defaults.push(default_attr);
         }
@@ -354,20 +371,41 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
         try_set_parsed_entries.push(quote! {
             #enum_key_name::#enum_name => self.#field_name.try_set_parsed_value(property_value)?,
         });
+        let validator_fn_name =
+            syn::Ident::new(&format!("validate_{}", field_name.to_string()), name.span());
+        let mut validator_ref_for_builder = vec![];
         if field_attrs.with_validator_fn {
-            let validator_fn_name =
-                syn::Ident::new(&format!("validate_{}", field_name.to_string()), name.span());
             validators.push(quote! {
                 self.#validator_fn_name()?;
             });
+            validator_ref_for_builder.push(quote! {
+                self.#validator_fn_name()?;
+            })
         }
+        // If there is a custom resolver, the derived struct must impl resolve_<field>.
+        // If there is none, a default resolver is created that simply calls field.build().
+        // Such resolver will be invoked by the builder_<field>, which calls the validator and
+        // subsequently the default/custom field resolver, this so that we do not rely on the
+        // user of the derive trait to remember to call the validator.
+        // builder -> resolver & validator. The caller may opt-out of the use of the builder with
+        // no_default_builder, which means the caller must call its validate_<field>() if any.
         let internal_field_ty = syn::Ident::new(&field_attrs.internal_field_ty, name.span());
+        let builder_fn_name =
+            syn::Ident::new(&format!("build_{}", field_name.to_string()), name.span());
         let resolver_fn_name =
-            syn::Ident::new(&format!("resolver_{}", field_name.to_string()), name.span());
+            syn::Ident::new(&format!("resolve_{}", field_name.to_string()), name.span());
         if field_attrs.with_default_resolver {
             resolvers.push(quote! {
                 pub fn #resolver_fn_name(&mut self) -> Result<#internal_field_ty, KafkaConfigError> {
                     self.#field_name.build()
+                }
+            });
+        }
+        if field_attrs.with_default_builder {
+            builders.push(quote! {
+                pub fn #builder_fn_name(&mut self) -> Result<#internal_field_ty, KafkaConfigError> {
+                    #(#validator_ref_for_builder)*
+                    self.#resolver_fn_name()
                 }
             });
         }
@@ -377,14 +415,12 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
     }
     let expanded = quote! {
         impl #name {
-            pub fn init(&self) {
-                println!("Hello");
-            }
             pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
                 #(#validators)*
                 Ok(())
             }
             #(#resolvers)*
+            #(#builders)*
 
             #[allow(dead_code)]
             pub fn resolver_references(&mut self) {
@@ -423,7 +459,12 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
                 }
             }
         }
-        impl #name {
+        impl TrySetProperty for #name {
+            fn config_names() -> Vec<&'static str> {
+                vec![
+                    #(#all_keys,)*
+                ]
+            }
             fn try_set_property(
                 &mut self,
                 property_name: &str,
@@ -432,11 +473,12 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
                 let kafka_config_key = #enum_key_name::from_str(property_name)?;
                 match kafka_config_key {
                     #(#try_set_parsed_entries)*
+                    _ => return Err(KafkaConfigError::UnknownKey(property_name.to_string())),
                 };
                 Ok(())
             }
         }
     };
-    eprintln!("{}", expanded);
+    // eprintln!("{}", expanded);
     expanded.into()
 }
