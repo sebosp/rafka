@@ -304,7 +304,7 @@ pub struct DefaultLogConfigProperties {
         importance = High,
         doc = LOG_DIRS_DOC,
         no_default_resolver,
-        no_default_builder
+        no_default_builder,
     )]
     log_dirs: ConfigDef<String>,
 
@@ -313,7 +313,7 @@ pub struct DefaultLogConfigProperties {
         importance = High,
         doc = LOG_SEGMENT_BYTES_DOC,
         with_default_fn,
-        with_validator_fn
+        with_validator_fn,
     )]
     pub log_segment_bytes: ConfigDef<usize>,
 
@@ -321,8 +321,9 @@ pub struct DefaultLogConfigProperties {
         key = LOG_ROLL_TIME_MILLIS_PROP,
         importance = High,
         doc = LOG_ROLL_TIME_MILLIS_DOC,
-        with_validator_fn
+        with_validator_fn,
         no_default_resolver,
+        no_default_builder,
     )]
     log_roll_time_millis: ConfigDef<i64>,
 
@@ -330,8 +331,8 @@ pub struct DefaultLogConfigProperties {
         key = LOG_ROLL_TIME_HOURS_PROP,
         importance = High,
         doc = LOG_ROLL_TIME_HOURS_DOC,
-        with_validator_fn
-        with_default_fn
+        with_validator_fn,
+        with_default_fn,
     )]
     log_roll_time_hours: ConfigDef<i32>,
 
@@ -465,7 +466,7 @@ pub struct DefaultLogConfigProperties {
         key = LOG_CLEANER_ENABLE_PROP,
         importance = Medium,
         doc = LOG_CLEANER_ENABLE_DOC,
-        default = true
+        default = true,
     )]
     log_cleaner_enable: ConfigDef<bool>,
 
@@ -489,7 +490,7 @@ pub struct DefaultLogConfigProperties {
         key = LOG_CLEANER_MAX_COMPACTION_LAG_MS_PROP,
         importance = Medium,
         doc = LOG_CLEANER_MAX_COMPACTION_LAG_MS_DOC,
-        with_default_fn
+        with_default_fn,
     )]
     pub log_cleaner_max_compaction_lag_ms: ConfigDef<i64>,
 
@@ -549,7 +550,7 @@ pub struct DefaultLogConfigProperties {
         importance = High,
         doc = LOG_FLUSH_OFFSET_CHECKPOINT_INTERVAL_MS_DOC,
         default = 6000,
-        with_validator_fn
+        with_validator_fn,
     )]
     log_flush_offset_checkpoint_interval_ms: ConfigDef<i32>,
 
@@ -558,7 +559,7 @@ pub struct DefaultLogConfigProperties {
         importance = High,
         doc = LOG_FLUSH_START_OFFSET_CHECKPOINT_INTERVAL_MS_DOC,
         default = 6000,
-        with_validator_fn
+        with_validator_fn,
     )]
     log_flush_start_offset_checkpoint_interval_ms: ConfigDef<i32>,
 
@@ -594,7 +595,7 @@ pub struct DefaultLogConfigProperties {
         key = LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_PROP,
         importance = Medium,
         doc = LOG_MESSAGE_TIMESTAMP_DIFFERENCE_MAX_MS_DOC,
-        with_default_fn
+        with_default_fn,
     )]
     pub log_message_timestamp_difference_max_ms: ConfigDef<i64>,
 
@@ -602,7 +603,7 @@ pub struct DefaultLogConfigProperties {
         key = NUM_RECOVERY_THREADS_PER_DATA_DIR_PROP,
         importance = High,
         doc = NUM_RECOVERY_THREADS_PER_DATA_DIR_DOC,
-        default = 1
+        default = 1,
     )]
     num_recovery_threads_per_data_dir: ConfigDef<i32>,
 
@@ -610,7 +611,7 @@ pub struct DefaultLogConfigProperties {
         key = MIN_IN_SYNC_REPLICAS_PROP,
         importance = High,
         doc = MIN_IN_SYNC_REPLICAS_DOC,
-        default = 1
+        default = 1,
         with_validator_fn,
     )]
     pub min_in_sync_replicas: ConfigDef<i32>,
@@ -619,7 +620,7 @@ pub struct DefaultLogConfigProperties {
         key = LOG_MESSAGE_DOWN_CONVERSION_ENABLE_PROP,
         importance = Low,
         doc = MESSAGE_DOWNCONVERSION_ENABLE_DOC,
-        default = true
+        default = true,
     )]
     pub log_message_down_conversion_enable: ConfigDef<bool>,
 
@@ -803,7 +804,7 @@ impl DefaultLogConfigProperties {
         if let Some(log_roll_time_millis) = self.log_roll_time_millis.get_value() {
             Ok(*log_roll_time_millis)
         } else {
-            Ok(i64::from(self.log_roll_time_hours.build()?) * 60 * 60 * 1000)
+            Ok(i64::from(self.build_log_roll_time_hours()?) * 60 * 60 * 1000)
         }
     }
 
@@ -813,7 +814,7 @@ impl DefaultLogConfigProperties {
         if let Some(log_roll_time_jitter_millis) = self.log_roll_time_jitter_millis.get_value() {
             Ok(*log_roll_time_jitter_millis)
         } else {
-            Ok(i64::from(self.log_roll_time_jitter_hours.build()?) * 60 * 60 * 1000)
+            Ok(i64::from(self.build_log_roll_time_jitter_hours()?) * 60 * 60 * 1000)
         }
     }
 
@@ -901,6 +902,18 @@ impl DefaultLogConfigProperties {
         self.validate_log_cleanup_policy()?;
         self.resolve_log_cleanup_policy()
     }
+
+    pub fn build_log_dirs(&mut self) -> Result<Vec<String>, KafkaConfigError> {
+        // No validator
+        self.resolve_log_dirs()
+    }
+
+    pub fn build_log_roll_time_millis(&mut self) -> Result<i64, KafkaConfigError> {
+        if self.log_roll_time_millis.value_as_ref().is_some() {
+            self.validate_log_roll_time_millis()?;
+        }
+        self.resolve_log_roll_time_millis()
+    }
 }
 
 impl ConfigSet for DefaultLogConfigProperties {
@@ -908,46 +921,46 @@ impl ConfigSet for DefaultLogConfigProperties {
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("DefaultLogConfigProperties::resolve() INIT");
-        let log_segment_bytes = self.log_segment_bytes.build()?;
-        let log_roll_time_millis = self.resolve_log_roll_time_millis()?;
-        let log_roll_time_jitter_millis = self.resolve_log_roll_time_jitter_millis()?;
-        let log_retention_time_millis = self.resolve_log_retention_time_millis()?;
-        let log_retention_bytes = self.log_retention_bytes.build()?;
-        let log_cleanup_interval_ms = self.log_cleanup_interval_ms.build()?;
-        let log_cleanup_policy = self.resolve_log_cleanup_policy()?;
-        let log_cleaner_threads = self.log_cleaner_threads.build()?;
-        let log_cleaner_dedupe_buffer_size = self.log_cleaner_dedupe_buffer_size.build()?;
-        let log_cleaner_io_buffer_size = self.log_cleaner_io_buffer_size.build()?;
+        let log_segment_bytes = self.build_log_segment_bytes()?;
+        let log_roll_time_millis = self.build_log_roll_time_millis()?;
+        let log_roll_time_jitter_millis = self.build_log_roll_time_jitter_millis()?;
+        let log_retention_time_millis = self.build_log_retention_time_millis()?;
+        let log_retention_bytes = self.build_log_retention_bytes()?;
+        let log_cleanup_interval_ms = self.build_log_cleanup_interval_ms()?;
+        let log_cleanup_policy = self.build_log_cleanup_policy()?;
+        let log_cleaner_threads = self.build_log_cleaner_threads()?;
+        let log_cleaner_dedupe_buffer_size = self.build_log_cleaner_dedupe_buffer_size()?;
+        let log_cleaner_io_buffer_size = self.build_log_cleaner_io_buffer_size()?;
         let log_cleaner_dedupe_buffer_load_factor =
-            self.log_cleaner_dedupe_buffer_load_factor.build()?;
+            self.build_log_cleaner_dedupe_buffer_load_factor()?;
         let log_cleaner_io_max_bytes_per_second =
-            self.log_cleaner_io_max_bytes_per_second.build()?;
-        let log_cleaner_backoff_ms = self.log_cleaner_backoff_ms.build()?;
-        let log_cleaner_min_clean_ratio = self.log_cleaner_min_clean_ratio.build()?;
-        let log_cleaner_enable = self.log_cleaner_enable.build()?;
-        let log_cleaner_delete_retention_ms = self.log_cleaner_delete_retention_ms.build()?;
-        let log_cleaner_min_compaction_lag_ms = self.log_cleaner_min_compaction_lag_ms.build()?;
-        let log_cleaner_max_compaction_lag_ms = self.log_cleaner_max_compaction_lag_ms.build()?;
-        let log_index_interval_bytes = self.log_index_interval_bytes.build()?;
-        let log_index_size_max_bytes = self.log_index_size_max_bytes.build()?;
-        let log_flush_interval_messages = self.log_flush_interval_messages.build()?;
-        let log_delete_delay_ms = self.log_delete_delay_ms.build()?;
-        let log_flush_scheduler_interval_ms = self.log_flush_scheduler_interval_ms.build()?;
-        let log_flush_interval_ms = self.log_flush_interval_ms.build()?;
+            self.build_log_cleaner_io_max_bytes_per_second()?;
+        let log_cleaner_backoff_ms = self.build_log_cleaner_backoff_ms()?;
+        let log_cleaner_min_clean_ratio = self.build_log_cleaner_min_clean_ratio()?;
+        let log_cleaner_enable = self.build_log_cleaner_enable()?;
+        let log_cleaner_delete_retention_ms = self.build_log_cleaner_delete_retention_ms()?;
+        let log_cleaner_min_compaction_lag_ms = self.build_log_cleaner_min_compaction_lag_ms()?;
+        let log_cleaner_max_compaction_lag_ms = self.build_log_cleaner_max_compaction_lag_ms()?;
+        let log_index_interval_bytes = self.build_log_index_interval_bytes()?;
+        let log_index_size_max_bytes = self.build_log_index_size_max_bytes()?;
+        let log_flush_interval_messages = self.build_log_flush_interval_messages()?;
+        let log_delete_delay_ms = self.build_log_delete_delay_ms()?;
+        let log_flush_scheduler_interval_ms = self.build_log_flush_scheduler_interval_ms()?;
+        let log_flush_interval_ms = self.build_log_flush_interval_ms()?;
         let log_flush_offset_checkpoint_interval_ms =
-            self.log_flush_offset_checkpoint_interval_ms.build()?;
+            self.build_log_flush_offset_checkpoint_interval_ms()?;
         let log_flush_start_offset_checkpoint_interval_ms =
-            self.log_flush_start_offset_checkpoint_interval_ms.build()?;
-        let log_pre_allocate_enable = self.log_pre_allocate_enable.build()?;
-        let log_message_format_version = self.resolve_log_message_format_version()?;
-        let log_message_timestamp_type = self.resolve_log_message_timestamp_type()?;
+            self.build_log_flush_start_offset_checkpoint_interval_ms()?;
+        let log_pre_allocate_enable = self.build_log_pre_allocate_enable()?;
+        let log_message_format_version = self.build_log_message_format_version()?;
+        let log_message_timestamp_type = self.build_log_message_timestamp_type()?;
         let log_message_timestamp_difference_max_ms =
-            self.log_message_timestamp_difference_max_ms.build()?;
-        let num_recovery_threads_per_data_dir = self.num_recovery_threads_per_data_dir.build()?;
-        let min_in_sync_replicas = self.min_in_sync_replicas.build()?;
-        let log_message_down_conversion_enable = self.log_message_down_conversion_enable.build()?;
-        let compression_type = self.compression_type.build()?;
-        let log_dirs = self.resolve_log_dirs()?;
+            self.build_log_message_timestamp_difference_max_ms()?;
+        let num_recovery_threads_per_data_dir = self.build_num_recovery_threads_per_data_dir()?;
+        let min_in_sync_replicas = self.build_min_in_sync_replicas()?;
+        let log_message_down_conversion_enable = self.build_log_message_down_conversion_enable()?;
+        let compression_type = self.build_compression_type()?;
+        let log_dirs = self.build_log_dirs()?;
         trace!("DefaultLogConfigProperties::resolve() DONE");
         Ok(Self::ConfigType {
             log_dirs,
