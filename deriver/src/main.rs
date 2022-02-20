@@ -1,4 +1,5 @@
-use rafka_core::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
+use enum_iterator::IntoEnumIterator;
+use rafka_core::common::config_def::{ConfigDef, ConfigDefImportance};
 use rafka_core::server::kafka_config::{ConfigSet, KafkaConfigError, TrySetProperty};
 use rafka_derive::ConfigDef;
 use std::str::FromStr;
@@ -59,6 +60,6 @@ impl Test1Properties {
 fn main() {
     let meh = String::from_str("aoeu").unwrap();
     println!("meh: {}", meh);
-    let props = Test1Properties::default();
-    props.init();
+    let mut props = Test1Properties::default();
+    assert_eq!(props.build_log_roll_time_millis().unwrap(), -32);
 }
