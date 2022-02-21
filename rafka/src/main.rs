@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::{App, Arg};
 use rafka_core::majordomo::MajordomoCoordinator;
 use rafka_core::server::kafka_config::KafkaConfigProperties;
@@ -9,7 +10,6 @@ use tokio::sync::mpsc;
 use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::FmtSubscriber;
-use anyhow::Result;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 10)]
 async fn main() {
@@ -24,12 +24,7 @@ async fn main_processor() -> Result<()> {
         .version("0.0")
         .author("Seb Ospina <kraige@gmail.com>")
         .about("A dive into kafka using rust")
-        .arg(
-            Arg::new("INPUT")
-                .help("Sets the input config file to use")
-                .required(true)
-                .index(1),
-        )
+        .arg(Arg::new("INPUT").help("Sets the input config file to use").required(true).index(1))
         .arg(
             Arg::new("verbosity_level")
                 .short('v')
@@ -82,6 +77,7 @@ async fn main_processor() -> Result<()> {
             majordomo_tx_clone.clone(),
             kafka_server_rx,
         );
+        kafka_server.init();
         match kafka_server.startup().await {
             Ok(()) => {
                 info!("Kafka startup Complete");
