@@ -413,6 +413,8 @@ pub fn config_def_derive(input: TokenStream) -> TokenStream {
             let _ = self.#resolver_fn_name();
         });
     }
+    let all_keys: Vec<syn::Ident> =
+        all_keys.iter().map(|x| syn::Ident::new(x, name.span())).collect();
     let expanded = quote! {
         impl #name {
             pub fn validate_values(&self) -> Result<(), KafkaConfigError> {
