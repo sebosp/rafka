@@ -2,8 +2,7 @@
 use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use const_format::concatcp;
-use enum_iterator::IntoEnumIterator;
-use std::fmt;
+use rafka_derive::ConfigDef;
 use std::str::FromStr;
 use tracing::trace;
 
@@ -34,116 +33,60 @@ pub const ZK_MAX_IN_FLIGHT_REQUESTS_DOC: &str = "The maximum number of unacknowl
                                                  the client will send to Zookeeper before \
                                                  blocking.";
 
-#[derive(Debug, IntoEnumIterator)]
-pub enum ZookeeperConfigKey {
-    ZkConnect,
-    ZkSessionTimeoutMs,
-    ZkConnectionTimeoutMs,
-    ZkMaxInFlightRequests,
-}
-
-impl fmt::Display for ZookeeperConfigKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ZkConnect => write!(f, "{}", ZK_CONNECT_PROP),
-            Self::ZkSessionTimeoutMs => write!(f, "{}", ZK_SESSION_TIMEOUT_PROP),
-            Self::ZkConnectionTimeoutMs => write!(f, "{}", ZK_CONNECTION_TIMEOUT_PROP),
-            Self::ZkMaxInFlightRequests => write!(f, "{}", ZK_MAX_IN_FLIGHT_REQUESTS_PROP),
-        }
-    }
-}
-
-impl FromStr for ZookeeperConfigKey {
-    type Err = KafkaConfigError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            ZK_CONNECT_PROP => Ok(Self::ZkConnect),
-            ZK_SESSION_TIMEOUT_PROP => Ok(Self::ZkSessionTimeoutMs),
-            ZK_CONNECTION_TIMEOUT_PROP => Ok(Self::ZkConnectionTimeoutMs),
-            ZK_MAX_IN_FLIGHT_REQUESTS_PROP => Ok(Self::ZkMaxInFlightRequests),
-            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, ConfigDef)]
 pub struct ZookeeperConfigProperties {
+    #[config_def(
+        key = ZK_CONNECT_PROP,
+        importance = High,
+        doc = ZK_CONNECT_DOC,
+    )]
     zk_connect: ConfigDef<String>,
+
+    #[config_def(
+        key = ZK_SESSION_TIMEOUT_PROP,
+        importance = High,
+        doc = ZK_SESSION_TIMEOUT_DOC,
+        default = 18000,
+    )]
     zk_session_timeout_ms: ConfigDef<u32>,
+
+    #[config_def(
+        key = ZK_CONNECTION_TIMEOUT_PROP,
+        importance = High,
+        doc = ZK_CONNECTION_TIMEOUT_DOC,
+    )]
     zk_connection_timeout_ms: ConfigDef<u32>,
+
+    #[config_def(
+        key = ZK_MAX_IN_FLIGHT_REQUESTS_PROP,
+        importance = High,
+        doc = ZK_MAX_IN_FLIGHT_REQUESTS_DOC,
+        default = 100,
+        with_validator_fn,
+    )]
     zk_max_in_flight_requests: ConfigDef<u32>,
 }
 
-impl Default for ZookeeperConfigProperties {
-    fn default() -> Self {
-        Self {
-            zk_connect: ConfigDef::default()
-                .with_key(ZK_CONNECT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(ZK_CONNECT_DOC),
-            zk_session_timeout_ms: ConfigDef::default()
-                .with_key(ZK_SESSION_TIMEOUT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(ZK_SESSION_TIMEOUT_DOC)
-                .with_default(18000),
-            zk_connection_timeout_ms: ConfigDef::default()
-                .with_key(ZK_CONNECTION_TIMEOUT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(ZK_CONNECTION_TIMEOUT_DOC),
-            zk_max_in_flight_requests: ConfigDef::default()
-                .with_key(ZK_MAX_IN_FLIGHT_REQUESTS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(ZK_MAX_IN_FLIGHT_REQUESTS_DOC)
-                .with_default(10)
-                .with_validator(Box::new(|data| {
-                    // RAFKA TODO: This doesn't make much sense if it's u32...
-                    ConfigDef::at_least(data, &1, ZK_MAX_IN_FLIGHT_REQUESTS_PROP)
-                })),
-        }
-    }
-}
-
-impl TrySetProperty for ZookeeperConfigProperties {
-    fn try_set_property(
-        &mut self,
-        property_name: &str,
-        property_value: &str,
-    ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = ZookeeperConfigKey::from_str(property_name)?;
-        match kafka_config_key {
-            ZookeeperConfigKey::ZkConnect => {
-                self.zk_connect.try_set_parsed_value(property_value)?
-            },
-            ZookeeperConfigKey::ZkSessionTimeoutMs => {
-                self.zk_session_timeout_ms.try_set_parsed_value(property_value)?
-            },
-            ZookeeperConfigKey::ZkConnectionTimeoutMs => {
-                self.zk_connection_timeout_ms.try_set_parsed_value(property_value)?
-            },
-            ZookeeperConfigKey::ZkMaxInFlightRequests => {
-                self.zk_max_in_flight_requests.try_set_parsed_value(property_value)?
-            },
-        };
-        Ok(())
+impl ZookeeperConfigProperties {
+    pub fn validate_zk_max_in_flight_requests(&self) -> Result<(), KafkaConfigError> {
+        self.zk_max_in_flight_requests.validate_at_least(1)
     }
 }
 
 impl ConfigSet for ZookeeperConfigProperties {
-    type ConfigKey = ZookeeperConfigKey;
     type ConfigType = ZookeeperConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("ZookeeperConfigProperties::resolve()");
-        let zk_connect = self.zk_connect.build()?;
-        let zk_session_timeout_ms = self.zk_session_timeout_ms.build()?;
+        let zk_connect = self.build_zk_connect()?;
+        let zk_session_timeout_ms = self.build_zk_session_timeout_ms()?;
         // Satisties REQ-01, if zk_connection_timeout_ms is unset the value of
         // zk_connection_timeout_ms will be used.
         // RAFKA NOTE: somehow the zk_session_timeout_ms build needs to be called before this,
         // maybe resolve can do it?
         self.zk_connection_timeout_ms.or_set_fallback(&self.zk_session_timeout_ms)?;
-        let zk_connection_timeout_ms = self.zk_connection_timeout_ms.build()?;
-        let zk_max_in_flight_requests = self.zk_max_in_flight_requests.build()?;
+        let zk_connection_timeout_ms = self.build_zk_connection_timeout_ms()?;
+        let zk_max_in_flight_requests = self.build_zk_max_in_flight_requests()?;
         Ok(Self::ConfigType {
             zk_connect,
             zk_session_timeout_ms,
@@ -164,6 +107,14 @@ pub struct ZookeeperConfig {
 impl Default for ZookeeperConfig {
     fn default() -> Self {
         let mut config_properties = ZookeeperConfigProperties::default();
-        config_properties.resolve().unwrap()
+        config_properties.build().unwrap()
+    }
+}
+
+impl ZookeeperConfig {
+    pub fn default_for_test() -> Self {
+        let mut config_properties = ZookeeperConfigProperties::default();
+        config_properties.try_set_property("zookeeper.connect", "UNSET").unwrap();
+        config_properties.build().unwrap()
     }
 }
