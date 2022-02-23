@@ -21,6 +21,10 @@ use super::log_cleaner::LogCleaner;
 
 pub const RECOVERY_POINT_CHECKPOINT_FILE: &str = "recovery-point-offset-checkpoint";
 pub const LOG_START_OFFSET_CHECKPOINT_FILE: &str = "log-start-offset-checkpoint";
+
+pub const DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS: u64 = 10 * 60 * 1000;
+pub const DEFAULT_LOCK_FILE: &str = ".lock";
+
 #[derive(Debug)]
 pub struct Scheduler;
 
@@ -55,36 +59,6 @@ pub struct LogManager {
 impl fmt::Display for LogManagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "LogManagerError({:?})", self)
-    }
-}
-
-impl Default for LogManager {
-    fn default() -> Self {
-        let kafka_config = KafkaConfig::default();
-        let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        Self {
-            producer_id_expiration_check_interval_ms: 10 * 60 * 1000,
-            log_dirs: vec![],
-            initial_offline_dirs: vec![],
-            topic_configs: HashMap::new(),
-            initial_default_config: LogConfig::default(),
-            cleaner_config: CleanerConfig::default(),
-            recovery_threads_per_data_dir: kafka_config.log.num_recovery_threads_per_data_dir,
-            flush_check_ms: kafka_config.log.log_flush_scheduler_interval_ms,
-            flush_recovery_offset_checkpoint_ms: kafka_config
-                .log
-                .log_flush_offset_checkpoint_interval_ms,
-            flush_start_offset_checkpoint_ms: kafka_config
-                .log
-                .log_flush_start_offset_checkpoint_interval_ms,
-            retention_check_ms: kafka_config.log.log_cleanup_interval_ms,
-            max_pid_expiration_ms: kafka_config.transaction.transactional_id_expiration_ms,
-            scheduler: KafkaScheduler::default(),
-            broker_state: BrokerState::default(),
-            majordomo_tx,
-            time: Instant::now(),
-            lock_file: String::from(".lock"),
-        }
     }
 }
 
@@ -136,7 +110,38 @@ impl LogManager {
             broker_state: broker_state.clone(),
             majordomo_tx: majordomo_tx.clone(),
             time,
-            ..Default::default()
+            producer_id_expiration_check_interval_ms:
+                DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS,
+            lock_file: DEFAULT_LOCK_FILE.to_string(),
         })
+    }
+
+    pub fn default_for_test() -> Self {
+        let kafka_config = KafkaConfig::default_for_test();
+        let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        Self {
+            producer_id_expiration_check_interval_ms:
+                DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS,
+            log_dirs: vec![],
+            initial_offline_dirs: vec![],
+            topic_configs: HashMap::new(),
+            initial_default_config: LogConfig::default(),
+            cleaner_config: CleanerConfig::default(),
+            recovery_threads_per_data_dir: kafka_config.log.num_recovery_threads_per_data_dir,
+            flush_check_ms: kafka_config.log.log_flush_scheduler_interval_ms,
+            flush_recovery_offset_checkpoint_ms: kafka_config
+                .log
+                .log_flush_offset_checkpoint_interval_ms,
+            flush_start_offset_checkpoint_ms: kafka_config
+                .log
+                .log_flush_start_offset_checkpoint_interval_ms,
+            retention_check_ms: kafka_config.log.log_cleanup_interval_ms,
+            max_pid_expiration_ms: kafka_config.transaction.transactional_id_expiration_ms,
+            scheduler: KafkaScheduler::default(),
+            broker_state: BrokerState::default(),
+            majordomo_tx,
+            time: Instant::now(),
+            lock_file: DEFAULT_LOCK_FILE.to_string(),
+        }
     }
 }
