@@ -8,7 +8,7 @@ pub const PLAINTEXT: SecurityProtocol = SecurityProtocol::Plaintext(SecurityProt
     name: "PLAINTEXT",
 });
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum SecurityProtocolError {
     #[error("Unsupported Security Protocol: {0}")]
     UnsupportedSecurityProtocol(String),
