@@ -46,7 +46,7 @@ fn listener_config_regex_captures(text: &str) -> Option<String> {
     LISTENER_CONFIG_REGEX.captures(text).map(|val| val[1].to_string())
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DynamicBrokerConfig {
     pub kafka_config: KafkaConfig,
     dynamic_default_configs: HashMap<String, String>,
@@ -379,6 +379,17 @@ impl DynamicBrokerConfig {
                 );
                 Ok(())
             },
+        }
+    }
+
+    pub fn default_for_test() -> Self {
+        Self {
+            kafka_config: KafkaConfig::default_for_test(),
+            dynamic_default_configs: HashMap::new(),
+            dynamic_broker_configs: HashMap::new(),
+            per_broker_configs: vec![],
+            cluster_level_listener_configs: vec![],
+            static_broker_configs: HashMap::new(),
         }
     }
 }
