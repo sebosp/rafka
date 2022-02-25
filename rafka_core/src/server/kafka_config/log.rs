@@ -373,7 +373,6 @@ pub struct DefaultLogConfigProperties {
         importance = High,
         doc = LOG_RETENTION_TIME_HOURS_DOC,
         with_default_fn,
-        with_validator_fn,
     )]
     pub log_retention_time_hours: ConfigDef<i32>,
 
@@ -398,7 +397,6 @@ pub struct DefaultLogConfigProperties {
         importance = Medium,
         doc = LOG_CLEANUP_POLICY_DOC,
         with_default_fn,
-        with_validator_fn,
         no_default_resolver,
         no_default_builder,
     )]
@@ -739,19 +737,23 @@ impl DefaultLogConfigProperties {
         self.log_roll_time_jitter_hours.validate_at_least(0)
     }
 
-    fn validate_log_retention_time_hours(&self) -> Result<(), KafkaConfigError> {
-        self.log_retention_time_hours.validate_at_least(1)
-    }
+    // The original code validates log_retention_time_hours but it may be -1 to denote "unlimited"
+    // fn validate_log_retention_time_hours(&self) -> Result<(), KafkaConfigError> {
+    // self.log_retention_time_hours.validate_at_least(1)
+    // }
 
-    fn validate_log_cleanup_policy(&self) -> Result<(), KafkaConfigError> {
-        self.log_cleanup_policy.validate_value_in_list(vec![
-            &LogCleanupPolicy::Delete.to_string(),
-            &LogCleanupPolicy::Compact.to_string(),
-        ])
-    }
+    // The original code checks log_cleanup_policy but it needs the string already split by ","
+    // And to check every token. The resolve_log_cleanup_policy does this already by using the
+    // FromStr
+    // fn validate_log_cleanup_policy(&self) -> Result<(), KafkaConfigError> {
+    // self.log_cleanup_policy.validate_value_in_list(vec![
+    // &LogCleanupPolicy::Delete.to_string(),
+    // &LogCleanupPolicy::Compact.to_string(),
+    // ])
+    // }
 
     fn validate_log_cleaner_threads(&self) -> Result<(), KafkaConfigError> {
-        self.log_retention_time_hours.validate_at_least(0)
+        self.log_cleaner_threads.validate_at_least(0)
     }
 
     fn validate_log_cleaner_backoff_ms(&self) -> Result<(), KafkaConfigError> {
@@ -899,7 +901,8 @@ impl DefaultLogConfigProperties {
     }
 
     pub fn build_log_cleanup_policy(&mut self) -> Result<Vec<LogCleanupPolicy>, KafkaConfigError> {
-        self.validate_log_cleanup_policy()?;
+        // Resolver already takes care of validation, LogCleanupPolicy splits the string by "," and
+        // then does FromStr for each token
         self.resolve_log_cleanup_policy()
     }
 

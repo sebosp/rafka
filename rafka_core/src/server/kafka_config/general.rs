@@ -5,9 +5,7 @@ use crate::common::config::topic_config;
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::common::record::records;
 use const_format::concatcp;
-use enum_iterator::IntoEnumIterator;
 use rafka_derive::ConfigDef;
-use std::fmt;
 use std::str::FromStr;
 use tracing::trace;
 
@@ -40,38 +38,6 @@ pub const MESSAGE_MAX_BYTES_DOC: &str = concatcp!(
     "` config."
 );
 
-#[derive(Debug, IntoEnumIterator)]
-pub enum GeneralConfigKey {
-    BrokerIdGenerationEnable,
-    ReservedBrokerMaxId,
-    BrokerId,
-    MessageMaxBytes,
-}
-
-impl fmt::Display for GeneralConfigKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::BrokerIdGenerationEnable => write!(f, "{}", BROKER_ID_GENERATION_ENABLE_PROP),
-            Self::ReservedBrokerMaxId => write!(f, "{}", RESERVED_BROKER_MAX_ID_PROP),
-            Self::BrokerId => write!(f, "{}", BROKER_ID_PROP),
-            Self::MessageMaxBytes => write!(f, "{}", MESSAGE_MAX_BYTES_PROP),
-        }
-    }
-}
-impl FromStr for GeneralConfigKey {
-    type Err = KafkaConfigError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            BROKER_ID_GENERATION_ENABLE_PROP => Ok(Self::BrokerIdGenerationEnable),
-            RESERVED_BROKER_MAX_ID_PROP => Ok(Self::ReservedBrokerMaxId),
-            BROKER_ID_PROP => Ok(Self::BrokerId),
-            MESSAGE_MAX_BYTES_PROP => Ok(Self::MessageMaxBytes),
-            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
-        }
-    }
-}
-
 #[derive(Debug, ConfigDef)]
 pub struct GeneralConfigProperties {
     #[config_def(
@@ -101,7 +67,7 @@ pub struct GeneralConfigProperties {
         importance = High,
         doc = MESSAGE_MAX_BYTES_DOC,
         with_default_fn,
-        with_validator_fn
+        with_validator_fn,
     )]
     pub message_max_bytes: ConfigDef<usize>,
 }
@@ -121,15 +87,14 @@ impl GeneralConfigProperties {
 }
 
 impl ConfigSet for GeneralConfigProperties {
-    type ConfigKey = GeneralConfigKey;
     type ConfigType = GeneralConfig;
 
     fn resolve(&mut self) -> Result<GeneralConfig, KafkaConfigError> {
         trace!("GeneralConfigProperties::resolve()");
-        let broker_id_generation_enable = self.resolve_broker_id_generation_enable()?;
-        let reserved_broker_max_id = self.resolve_reserved_broker_max_id()?;
-        let broker_id = self.resolve_broker_id()?;
-        let message_max_bytes = self.resolve_message_max_bytes()?;
+        let broker_id_generation_enable = self.build_broker_id_generation_enable()?;
+        let reserved_broker_max_id = self.build_reserved_broker_max_id()?;
+        let broker_id = self.build_broker_id()?;
+        let message_max_bytes = self.build_message_max_bytes()?;
         Ok(GeneralConfig {
             broker_id_generation_enable,
             reserved_broker_max_id,
@@ -165,7 +130,6 @@ pub struct GeneralConfig {
 
 impl Default for GeneralConfig {
     fn default() -> Self {
-        // Somehow this should only be allowed for testing...
         let mut config_properties = GeneralConfigProperties::default();
         config_properties.build().unwrap()
     }
