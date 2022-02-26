@@ -115,11 +115,16 @@ impl LogManager {
             lock_file: DEFAULT_LOCK_FILE.to_string(),
         })
     }
+}
 
-    pub fn default_for_test() -> Self {
-        let kafka_config = KafkaConfig::default_for_test();
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::server::kafka_config;
+    pub fn default_log_manager_test() -> LogManager {
+        let kafka_config = kafka_config::tests::default_config_for_test();
         let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        Self {
+        LogManager {
             producer_id_expiration_check_interval_ms:
                 DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS,
             log_dirs: vec![],

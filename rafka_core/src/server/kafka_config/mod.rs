@@ -25,11 +25,10 @@ use fs_err::File;
 use std::collections::HashMap;
 use std::io::{self, BufReader};
 use std::num;
-use std::str::FromStr;
 use thiserror::Error;
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
-use self::socket_server::{SocketConfig, SocketConfigKey, SocketConfigProperties};
+use self::socket_server::{SocketConfig, SocketConfigProperties};
 
 /// `KafkaConfigError` is a custom error that is returned when properties are invalid, unknown,
 /// missing or the config file is not readable.
@@ -281,11 +280,16 @@ pub struct KafkaConfig {
     pub replication: ReplicationConfig,
 }
 
-impl Default for KafkaConfig {
-    fn default() -> Self {
-        // Somehow this should only be allowed for testing...
-        Self {
-            zookeeper: ZookeeperConfig::default(),
+#[cfg(test)]
+pub mod tests {
+    use super::general::{BROKER_ID_PROP, RESERVED_BROKER_MAX_ID_PROP};
+    use super::log::{LOG_DIRS_PROP, LOG_DIR_PROP};
+    use super::zookeeper::{self, *};
+    use super::*;
+
+    pub fn default_config_for_test() -> KafkaConfig {
+        KafkaConfig {
+            zookeeper: zookeeper::tests::default_config_for_test(),
             general: GeneralConfig::default(),
             socket: SocketConfig::default(),
             log: DefaultLogConfig::default(),
@@ -294,15 +298,18 @@ impl Default for KafkaConfig {
             replication: ReplicationConfig::default(),
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::general::{BROKER_ID_PROP, RESERVED_BROKER_MAX_ID_PROP};
-    use super::log::{LOG_DIRS_PROP, LOG_DIR_PROP};
-    use super::zookeeper::*;
-    use super::*;
-
+    pub fn default_props_for_test() -> KafkaConfigProperties {
+        KafkaConfigProperties {
+            zookeeper: zookeeper::tests::default_props_for_test(),
+            general: GeneralConfigProperties::default(),
+            socket: SocketConfigProperties::default(),
+            log: DefaultLogConfigProperties::default(),
+            transaction: TransactionConfigProperties::default(),
+            quota: QuotaConfigProperties::default(),
+            replication: ReplicationConfigProperties::default(),
+        }
+    }
     #[test]
     fn it_gets_config_from_hashmap() {
         let empty_config: HashMap<String, String> = HashMap::new();

@@ -422,20 +422,6 @@ impl KafkaServer {
     pub async fn shutdown(tx: mpsc::Sender<KafkaServerAsyncTask>) {
         tx.send(KafkaServerAsyncTask::Shutdown).await.unwrap();
     }
-
-    fn default_for_test() -> Self {
-        // Used only for testing
-        let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let mut res = KafkaServer::new(
-            KafkaConfig::default_for_test(),
-            Instant::now(),
-            majordomo_tx,
-            main_rx,
-        );
-        res.init();
-        res
-    }
 }
 
 #[derive(Debug, Error)]
@@ -460,10 +446,33 @@ pub enum KafkaServerError {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
+    use super::*;
+    use crate::server::kafka_config::{self, KafkaConfigProperties};
     use tracing::error;
 
-    use super::*;
+    pub struct KafkaServerTestWithChannels {
+        pub majordomo_tx: tokio::sync::mpsc::Sender<AsyncTask>,
+        pub majordomo_rx: tokio::sync::mpsc::Receiver<AsyncTask>,
+        pub kafka_server_tx: tokio::sync::mpsc::Sender<KafkaServerAsyncTask>,
+        pub kafka_server: KafkaServer,
+    }
+
+    pub fn default_server_for_test(
+        config_props: Option<KafkaConfigProperties>,
+    ) -> KafkaServerTestWithChannels {
+        // Used only for testing
+        let (majordomo_tx, majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let (kafka_server_tx, kafka_server_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let kafka_config = match config_props {
+            Some(mut val) => val.build().unwrap(),
+            None => kafka_config::tests::default_config_for_test(),
+        };
+        let kafka_server =
+            KafkaServer::new(kafka_config, Instant::now(), majordomo_tx.clone(), kafka_server_rx);
+        KafkaServerTestWithChannels { majordomo_tx, majordomo_rx, kafka_server_tx, kafka_server }
+    }
+
     // #[test_log::test]
     #[test]
     fn it_loads_brokermetadata() {
@@ -471,8 +480,8 @@ mod tests {
         good_broker_metadata_set.insert(BrokerMetadata::new(1, None));
         good_broker_metadata_set.insert(BrokerMetadata::new(1, None));
         let broker_metadata_found = String::from("test");
-        let kafka_server = KafkaServer::default_for_test();
-        error!("Meh");
+        let kafka_server_test = default_server_for_test(None);
+        let kafka_server = kafka_server_test.kafka_server;
         assert!(kafka_server
             .load_broker_metadata(good_broker_metadata_set, broker_metadata_found.clone())
             .is_ok());
@@ -521,8 +530,9 @@ mod tests {
         let bm_b1 = BrokerMetadata::new(1, None);
         let bm_b2 = BrokerMetadata::new(2, None);
         let bm_b_unset = BrokerMetadata::new(-1, None);
-        let mut ks_b1 = KafkaServer::default_for_test();
-        //    dynamic_broker_config: DynamicBrokerConfig::new(kafka_config),
+        let mut ks_b1_config = kafka_config::tests::default_props_for_test();
+        ks_b1_config.try_set_property("broker.id", "1").unwrap();
+        let mut ks_b1 = default_server_for_test(Some(ks_b1_config)).kafka_server;
         let same_broker_id = ks_b1.get_or_generate_broker_id(bm_b1.clone()).await;
         assert!(same_broker_id.is_ok());
         let same_broker_id = same_broker_id.unwrap();
@@ -533,7 +543,7 @@ mod tests {
         assert!(with_bm_b_unset.is_ok());
         let with_bm_b_unset = with_bm_b_unset.unwrap();
         assert_eq!(with_bm_b_unset, 1);
-        let mut ks_b_unset = KafkaServer::default_for_test();
+        let mut ks_b_unset = default_server_for_test(None).kafka_server;
         let broker_1 = ks_b_unset.get_or_generate_broker_id(bm_b1).await.unwrap();
         assert_eq!(broker_1, 1);
         // NOTE: We cannot test with both KafaServer.config.broker_id being -1 and

@@ -47,6 +47,7 @@ pub struct GeneralConfigProperties {
         default = true,
     )]
     pub broker_id_generation_enable: ConfigDef<bool>,
+
     #[config_def(
         key = RESERVED_BROKER_MAX_ID_PROP,
         importance = Medium,
@@ -55,6 +56,7 @@ pub struct GeneralConfigProperties {
         with_validator_fn,
     )]
     pub reserved_broker_max_id: ConfigDef<i32>,
+
     #[config_def(
         key = BROKER_ID_PROP,
         importance = High,
@@ -62,6 +64,7 @@ pub struct GeneralConfigProperties {
         default = -1,
     )]
     pub broker_id: ConfigDef<i32>,
+
     #[config_def(
         key = MESSAGE_MAX_BYTES_PROP,
         importance = High,

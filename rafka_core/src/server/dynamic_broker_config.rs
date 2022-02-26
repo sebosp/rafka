@@ -381,17 +381,6 @@ impl DynamicBrokerConfig {
             },
         }
     }
-
-    pub fn default_for_test() -> Self {
-        Self {
-            kafka_config: KafkaConfig::default_for_test(),
-            dynamic_default_configs: HashMap::new(),
-            dynamic_broker_configs: HashMap::new(),
-            per_broker_configs: vec![],
-            cluster_level_listener_configs: vec![],
-            static_broker_configs: HashMap::new(),
-        }
-    }
 }
 
 pub struct DynamicListenerConfig {}
@@ -415,4 +404,20 @@ pub trait BrokerReconfigurable {
     fn validate_reconfiguration(&self, new_config: KafkaConfig);
 
     fn reconfigure(&self, old_config: KafkaConfig, new_config: KafkaConfig);
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::server::kafka_config;
+    pub fn default_for_test() -> DynamicBrokerConfig {
+        DynamicBrokerConfig {
+            kafka_config: kafka_config::tests::default_config_for_test(),
+            dynamic_default_configs: HashMap::new(),
+            dynamic_broker_configs: HashMap::new(),
+            per_broker_configs: vec![],
+            cluster_level_listener_configs: vec![],
+            static_broker_configs: HashMap::new(),
+        }
+    }
 }

@@ -111,10 +111,19 @@ impl Default for ZookeeperConfig {
     }
 }
 
-impl ZookeeperConfig {
-    pub fn default_for_test() -> Self {
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    pub fn default_config_for_test() -> ZookeeperConfig {
         let mut config_properties = ZookeeperConfigProperties::default();
         config_properties.try_set_property("zookeeper.connect", "UNSET").unwrap();
         config_properties.build().unwrap()
+    }
+
+    pub fn default_props_for_test() -> ZookeeperConfigProperties {
+        let mut config_properties = ZookeeperConfigProperties::default();
+        config_properties.try_set_property("zookeeper.connect", "UNSET").unwrap();
+        config_properties
     }
 }
