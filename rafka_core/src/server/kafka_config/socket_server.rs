@@ -1,10 +1,11 @@
 //! Kafka Config - Socket Server Configuration
 use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::cluster::end_point::EndPoint;
-use crate::common::config_def::{ConfigDef, ConfigDefImportance, PartialConfigDef};
+use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::utils::core_utils;
 use const_format::concatcp;
 use enum_iterator::IntoEnumIterator;
+use rafka_derive::ConfigDef;
 use std::fmt;
 use std::str::FromStr;
 use tracing::trace;
@@ -105,86 +106,70 @@ impl FromStr for SocketConfigKey {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, ConfigDef)]
 pub struct SocketConfigProperties {
+    #[config_def(
+        key = PORT_PROP,
+        importance = High,
+        doc = PORT_DOC,
+        default = 9092,
+    )]
     port: ConfigDef<i32>,
+
+    #[config_def(
+        key = HOST_NAME_PROP,
+        importance = High,
+        doc = HOST_NAME_DOC,
+        default = "",
+    )]
     host_name: ConfigDef<String>,
-    listeners: PartialConfigDef<String>,
+
+    #[config_def(
+        key = LISTENERS_PROP,
+        importance = High,
+        doc = LISTENERS_DOC,
+        no_default_resolver,
+        no_default_builder,
+    )]
+    listeners: ConfigDef<String>,
+
+    #[config_def(
+        key = ADVERTISED_HOST_NAME_PROP,
+        importance = High,
+        doc = ADVERTISED_HOST_NAME_DOC,
+    )]
     advertised_host_name: ConfigDef<String>,
+
+    #[config_def(
+        key = ADVERTISED_PORT_PROP,
+        importance = High,
+        doc = ADVERTISED_PORT_DOC,
+    )]
     advertised_port: ConfigDef<i32>,
-    advertised_listeners: PartialConfigDef<String>,
-}
-impl Default for SocketConfigProperties {
-    fn default() -> Self {
-        Self {
-            port: ConfigDef::default()
-                .with_key(PORT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(PORT_DOC)
-                .with_default(9092),
-            host_name: ConfigDef::default()
-                .with_key(HOST_NAME_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(HOST_NAME_DOC)
-                .with_default(String::from("")),
-            listeners: PartialConfigDef::default()
-                .with_key(LISTENERS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(LISTENERS_DOC),
-            advertised_listeners: PartialConfigDef::default()
-                .with_key(ADVERTISED_LISTENERS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(ADVERTISED_LISTENERS_DOC),
-            advertised_host_name: ConfigDef::default()
-                .with_key(ADVERTISED_HOST_NAME_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(ADVERTISED_HOST_NAME_DOC),
-            advertised_port: ConfigDef::default()
-                .with_key(ADVERTISED_PORT_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(ADVERTISED_PORT_DOC),
-        }
-    }
-}
-impl TrySetProperty for SocketConfigProperties {
-    fn try_set_property(
-        &mut self,
-        property_name: &str,
-        property_value: &str,
-    ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = SocketConfigKey::from_str(property_name)?;
-        match kafka_config_key {
-            SocketConfigKey::Port => self.port.try_set_parsed_value(property_value)?,
-            SocketConfigKey::HostName => self.host_name.try_set_parsed_value(property_value)?,
-            SocketConfigKey::Listeners => self.listeners.try_set_parsed_value(property_value)?,
-            SocketConfigKey::AdvertisedHostName => {
-                self.advertised_host_name.try_set_parsed_value(property_value)?
-            },
-            SocketConfigKey::AdvertisedPort => {
-                self.advertised_port.try_set_parsed_value(property_value)?
-            },
-            SocketConfigKey::AdvertisedListeners => {
-                self.advertised_listeners.try_set_parsed_value(property_value)?
-            },
-        };
-        Ok(())
-    }
+
+    #[config_def(
+        key = ADVERTISED_LISTENERS_PROP,
+        importance = High,
+        doc = ADVERTISED_LISTENERS_DOC,
+        no_default_resolver,
+        no_default_builder,
+    )]
+    advertised_listeners: ConfigDef<String>,
 }
 
 impl ConfigSet for SocketConfigProperties {
-    type ConfigKey = SocketConfigKey;
     type ConfigType = SocketConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("SocketConfigProperties::resolve()");
-        let port = self.port.build()?;
-        let host_name = self.host_name.build()?;
-        let listeners = self.resolve_listeners()?;
+        let port = self.build_port()?;
+        let host_name = self.build_host_name()?;
+        let listeners = self.build_listeners()?;
         self.advertised_host_name.or_set_fallback(&self.host_name)?;
         self.advertised_port.or_set_fallback(&self.port)?;
-        let advertised_host_name = self.advertised_host_name.build()?;
-        let advertised_port = self.advertised_port.build()?;
-        let advertised_listeners = self.resolve_advertised_listeners()?;
+        let advertised_host_name = self.build_advertised_host_name()?;
+        let advertised_port = self.build_advertised_port()?;
+        let advertised_listeners = self.build_advertised_listeners()?;
         Ok(Self::ConfigType {
             port,
             host_name,
@@ -195,6 +180,7 @@ impl ConfigSet for SocketConfigProperties {
         })
     }
 }
+
 impl SocketConfigProperties {
     /// If user did not define advertised listeners, we'll use host:port, if they were not set
     /// either we set listeners
@@ -235,7 +221,18 @@ impl SocketConfigProperties {
             },
         }
     }
+
+    pub fn build_listeners(&mut self) -> Result<Vec<EndPoint>, KafkaConfigError> {
+        // there's no validator.
+        self.resolve_listeners()
+    }
+
+    pub fn build_advertised_listeners(&mut self) -> Result<Vec<EndPoint>, KafkaConfigError> {
+        // there's no validator.
+        self.resolve_advertised_listeners()
+    }
 }
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct SocketConfig {
     pub port: i32,
@@ -245,6 +242,7 @@ pub struct SocketConfig {
     pub advertised_port: i32,
     pub advertised_listeners: Vec<EndPoint>,
 }
+
 impl Default for SocketConfig {
     fn default() -> Self {
         trace!("SocketConfig::default()");
@@ -252,6 +250,7 @@ impl Default for SocketConfig {
         config_properties.build().unwrap()
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
