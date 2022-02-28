@@ -1,6 +1,9 @@
 //! From core/src/main/scala/kafka/cluster/EndPoint.scala
 
+use std::collections::HashMap;
+
 use crate::common::network::listener_name::ListenerName;
+use crate::common::security::auth::security_protocol::SecurityProtocol;
 use crate::server::kafka_config::KafkaConfigError;
 use regex::Regex;
 use tracing::error;
@@ -40,6 +43,14 @@ impl EndPoint {
                 input
             )))
         }
+    }
+
+    pub fn default_security_protocol_map() -> HashMap<ListenerName, SecurityProtocol> {
+        let mut res = HashMap::new();
+        for security_proto in SecurityProtocol::security_protocol_list() {
+            res.insert(ListenerName::from(security_proto.clone()), security_proto.clone());
+        }
+        res
     }
 }
 
