@@ -16,16 +16,30 @@ pub enum SecurityProtocolError {
     UnknownSecurityProtocol(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SecurityProtocolDefinition {
     pub id: i16,
     pub name: &'static str,
 }
 
 // For now only Plaintext
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SecurityProtocol {
     Plaintext(SecurityProtocolDefinition),
+}
+
+impl SecurityProtocol {
+    pub fn security_protocol_list() -> Vec<Self> {
+        vec![
+            PLAINTEXT
+        ]
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Plaintext(def) => def.name,
+        }
+    }
 }
 
 impl PartialEq for SecurityProtocol {
