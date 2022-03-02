@@ -1,6 +1,7 @@
 //! From core/src/main/scala/kafka/cluster/EndPoint.scala
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use crate::common::network::listener_name::ListenerName;
 use crate::common::security::auth::security_protocol::SecurityProtocol;
@@ -13,6 +14,7 @@ pub struct EndPoint {
     pub host: String,
     pub port: i32,
     pub listener_name: ListenerName,
+    pub security_protocol: SecurityProtocol,
 }
 
 impl EndPoint {
@@ -20,7 +22,13 @@ impl EndPoint {
         let (listener_name_string, host, port) = Self::uri_parse_exp(connection_string)?;
         let port = port.parse::<i32>()?;
         let listener_name = ListenerName::normalised(listener_name_string);
-        Ok(Self { host: host.to_string(), port, listener_name: ListenerName::new(listener_name) })
+        let security_protocol = SecurityProtocol::from_str(&listener_name)?;
+        Ok(Self {
+            host: host.to_string(),
+            port,
+            listener_name: ListenerName::new(listener_name),
+            security_protocol,
+        })
     }
 
     pub fn uri_parse_exp(input: &str) -> Result<(&str, &str, &str), KafkaConfigError> {
@@ -65,6 +73,7 @@ mod tests {
             host: String::from("localhost"),
             port: 9092,
             listener_name: ListenerName::new(String::from("PLAINTEXT")),
+            security_protocol: SecurityProtocol::from_str("PLAINTEXT").unwrap(),
         });
     }
 }
