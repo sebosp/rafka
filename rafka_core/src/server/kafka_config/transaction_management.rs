@@ -4,8 +4,7 @@ use super::{ConfigSet, KafkaConfigError, TrySetProperty};
 use crate::common::config_def::{ConfigDef, ConfigDefImportance};
 use crate::coordinator::transaction::transaction_state_manager::TransactionStateManager;
 use crate::message::compression_codec::BrokerCompressionCodec;
-use enum_iterator::IntoEnumIterator;
-use std::fmt;
+use rafka_derive::ConfigDef;
 use std::str::FromStr;
 use tracing::trace;
 
@@ -23,78 +22,37 @@ pub const TRANSACTIONAL_ID_EXPIRATION_MS_DOC: &str =
      sooner if the last write from the producer id is deleted due to the topic's retention \
      settings.";
 
-#[derive(Debug, IntoEnumIterator)]
-pub enum TransactionConfigKey {
-    TransactionalIdExpirationMs,
-}
-
-impl fmt::Display for TransactionConfigKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::TransactionalIdExpirationMs => {
-                write!(f, "{}", TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
-            },
-        }
-    }
-}
-
-impl FromStr for TransactionConfigKey {
-    type Err = KafkaConfigError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            TRANSACTIONAL_ID_EXPIRATION_MS_PROP => Ok(Self::TransactionalIdExpirationMs),
-            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
-        }
-    }
-}
-#[derive(Debug)]
+#[derive(Debug, ConfigDef)]
 pub struct TransactionConfigProperties {
+    #[config_def(
+        key = TRANSACTIONAL_ID_EXPIRATION_MS_PROP,
+        importance = High,
+        doc = TRANSACTIONAL_ID_EXPIRATION_MS_DOC,
+        with_default_fn,
+        with_validator_fn,
+    )]
     transactional_id_expiration_ms: ConfigDef<i64>,
 }
 
-impl Default for TransactionConfigProperties {
-    fn default() -> Self {
-        Self {
-            transactional_id_expiration_ms: ConfigDef::default()
-                .with_key(TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
-                .with_importance(ConfigDefImportance::High)
-                .with_doc(TRANSACTIONAL_ID_EXPIRATION_MS_DOC)
-                .with_default(
-                    TransactionStateManager::default().default_transactional_id_expiration_ms,
-                )
-                .with_validator(Box::new(|data| {
-                    // Safe to unwrap, we have a default
-                    ConfigDef::at_least(data, &1, TRANSACTIONAL_ID_EXPIRATION_MS_PROP)
-                })),
-        }
+impl TransactionConfigProperties {
+    // Defaults
+    pub fn default_transactional_id_expiration_ms() -> i64 {
+        TransactionStateManager::default().default_transactional_id_expiration_ms
     }
-}
 
-impl TrySetProperty for TransactionConfigProperties {
-    fn try_set_property(
-        &mut self,
-        property_name: &str,
-        property_value: &str,
-    ) -> Result<(), KafkaConfigError> {
-        let kafka_config_key = TransactionConfigKey::from_str(property_name)?;
-        match kafka_config_key {
-            TransactionConfigKey::TransactionalIdExpirationMs => {
-                self.transactional_id_expiration_ms.try_set_parsed_value(property_value)?
-            },
-        };
-        Ok(())
+    // Custom validators
+    pub fn validate_transactional_id_expiration_ms(&self) -> Result<(), KafkaConfigError> {
+        self.transactional_id_expiration_ms.validate_at_least(1)
     }
 }
 
 impl ConfigSet for TransactionConfigProperties {
-    type ConfigKey = TransactionConfigKey;
     type ConfigType = TransactionConfig;
 
     fn resolve(&mut self) -> Result<Self::ConfigType, KafkaConfigError> {
         trace!("TransactionConfigProperties::resolve()");
         Ok(Self::ConfigType {
-            transactional_id_expiration_ms: self.transactional_id_expiration_ms.build()?,
+            transactional_id_expiration_ms: self.build_transactional_id_expiration_ms()?,
         })
     }
 }
