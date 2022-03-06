@@ -57,7 +57,7 @@ async fn main_processor() -> Result<()> {
             std::process::exit(1);
         },
     };
-    if let Some(property_overrides) = matches.values_of("overrides") {
+    if let Some(property_overrides) = matches.values_of("override") {
         for override_property in property_overrides {
             if let Some((property_name, property_value)) = override_property.split_once('=') {
                 kafka_config.try_set_property(property_name, property_value)?;
