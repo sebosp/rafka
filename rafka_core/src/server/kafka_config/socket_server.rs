@@ -18,6 +18,7 @@ pub const ADVERTISED_HOST_NAME_PROP: &str = "advertised.host.name";
 pub const ADVERTISED_PORT_PROP: &str = "advertised.port";
 pub const ADVERTISED_LISTENERS_PROP: &str = "advertised.listeners";
 pub const MAX_CONNECTIONS_PROP: &str = "max.connections";
+pub const LISTENER_SECURITY_PROTOCOL_MAP_PROP: &str = "listener.security.protocol.map";
 
 // Documentation
 pub const PORT_DOC: &str = concatcp!(
@@ -31,12 +32,14 @@ pub const HOST_NAME_DOC: &str = concatcp!(
     "` instead. hostname of broker. If this is set, it will only bind to this address. If this is \
      not set, it will bind to all interfaces"
 );
-pub const LISTENERS_DOC: &str =
-    "Listener List - Comma-separated list of URIs we will listen on and the listener names. NOTE: \
-     RAFKA does not implement listener security protocols Specify hostname as 0.0.0.0 to bind to \
-     all interfaces. Leave hostname empty to bind to default interface. Examples of legal \
-     listener lists: PLAINTEXT://myhost:9092,SSL://:9091 \
-     CLIENT://0.0.0.0:9092,REPLICATION://localhost:9093";
+pub const LISTENERS_DOC: &str = concatcp!(
+    "Listener List - Comma-separated list of URIs we will listen on and the listener names. If \
+     the listener name is not a security protocol, ",
+    LISTENER_SECURITY_PROTOCOL_MAP_PROP,
+    " must also be set.\n Specify hostname as 0.0.0.0 to bind to all interfaces.\n Leave hostname \
+     empty to bind to default interface.\n Examples of legal listener lists:\n \
+     PLAINTEXT://myhost:9092,SSL://:9091\n CLIENT://0.0.0.0:9092,REPLICATION://localhost:9093\n"
+);
 pub const ADVERTISED_LISTENERS_DOC: &str = concatcp!(
     "Listeners to publish to ZooKeeper for clients to use, if different than the `",
     LISTENERS_PROP,
@@ -44,6 +47,19 @@ pub const ADVERTISED_LISTENERS_DOC: &str = concatcp!(
      which the broker binds. If this is not set, the value for `listeners` will be used. Unlike \
      `listeners` it is not valid to advertise the 0.0.0.0 meta-address "
 );
+pub const LISTENER_SECURITY_PROTOCOL_MAP_DOC: &str =
+    "Map between listener names and security protocols. This must be defined for the same \
+     security protocol to be usable in more than one port or IP. For example, internal and \
+     external traffic can be separated even if SSL is required for both. Concretely, the user \
+     could define listeners with names INTERNAL and EXTERNAL and this property as: \
+     `INTERNAL:SSL,EXTERNAL:SSL`. As shown, key and value are separated by a colon and map \
+     entries are separated by commas. Each listener name should only appear once in the map. \
+     Different security (SSL and SASL) settings can be configured for each listener by adding a \
+     normalised prefix (the listener name is lowercased) to the config name. For example, to set \
+     a different keystore for the INTERNAL listener, a config with name \
+     <code>listener.name.internal.ssl.keystore.location</code> would be set. If the config for \
+     the listener name is not set, the config will fallback to the generic config (i.e. \
+     <code>ssl.keystore.location</code>). ";
 pub const ADVERTISED_HOST_NAME_DOC: &str = concatcp!(
     "DEPRECATED: only used when `",
     ADVERTISED_LISTENERS_PROP,
@@ -68,43 +84,6 @@ pub const ADVERTISED_PORT_DOC: &str = concatcp!(
      may need to be different from the port to which the broker binds. If this is not set, it \
      will publish the same port that the broker binds to."
 );
-
-#[derive(Debug, IntoEnumIterator)]
-pub enum SocketConfigKey {
-    Port,
-    HostName,
-    Listeners,
-    AdvertisedHostName,
-    AdvertisedPort,
-    AdvertisedListeners,
-}
-impl fmt::Display for SocketConfigKey {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Port => write!(f, "{}", PORT_PROP),
-            Self::HostName => write!(f, "{}", HOST_NAME_PROP),
-            Self::Listeners => write!(f, "{}", LISTENERS_PROP),
-            Self::AdvertisedHostName => write!(f, "{}", ADVERTISED_HOST_NAME_PROP),
-            Self::AdvertisedPort => write!(f, "{}", ADVERTISED_PORT_PROP),
-            Self::AdvertisedListeners => write!(f, "{}", ADVERTISED_LISTENERS_PROP),
-        }
-    }
-}
-impl FromStr for SocketConfigKey {
-    type Err = KafkaConfigError;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match input {
-            PORT_PROP => Ok(Self::Port),
-            HOST_NAME_PROP => Ok(Self::HostName),
-            LISTENERS_PROP => Ok(Self::Listeners),
-            ADVERTISED_HOST_NAME_PROP => Ok(Self::AdvertisedHostName),
-            ADVERTISED_PORT_PROP => Ok(Self::AdvertisedPort),
-            ADVERTISED_LISTENERS_PROP => Ok(Self::AdvertisedListeners),
-            _ => Err(KafkaConfigError::UnknownKey(input.to_string())),
-        }
-    }
-}
 
 #[derive(Debug, ConfigDef)]
 pub struct SocketConfigProperties {
