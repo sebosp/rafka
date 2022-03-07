@@ -16,14 +16,14 @@ pub enum SecurityProtocolError {
     UnknownSecurityProtocol(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd)]
 pub struct SecurityProtocolDefinition {
     pub id: i16,
     pub name: &'static str,
 }
 
 // For now only Plaintext
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialOrd)]
 pub enum SecurityProtocol {
     Plaintext(SecurityProtocolDefinition),
 }
