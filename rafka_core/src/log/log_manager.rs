@@ -24,6 +24,7 @@ pub const LOG_START_OFFSET_CHECKPOINT_FILE: &str = "log-start-offset-checkpoint"
 
 pub const DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS: u64 = 10 * 60 * 1000;
 pub const DEFAULT_LOCK_FILE: &str = ".lock";
+pub const INITIAL_TASK_DELAY_MS: i32 = 30 * 1000;
 
 #[derive(Debug)]
 pub struct Scheduler;
@@ -32,6 +33,8 @@ pub struct Scheduler;
 pub enum LogManagerError {
     FailedLogConfigs(HashMap<std::string::String, AsyncTaskError>),
 }
+
+pub struct Log;
 
 #[derive(Debug)]
 pub struct LogManager {
@@ -114,6 +117,21 @@ impl LogManager {
                 DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS,
             lock_file: DEFAULT_LOCK_FILE.to_string(),
         })
+    }
+
+    pub fn init(&mut self) -> Result<(), KafkaConfigError> {
+
+        let log_creation_or_deletion_lock: Option<()> = None; // XXX: Was set as object, figure out what to d 
+        let current_logs: Vec<TopicPartition, Log> = vec![]; 
+        // The logs being moved across kafka (as with partition reassigment) contain a '-future',
+        // later on when they catch up with partitions they would be removed the '-future'
+        let future_logs = Vec<TopicPartition, Log>
+        let logs_to_be_deleted: Vec<Log, u64> = vec![];
+
+        let live_log_dirs =  Self::createAndValidateLogDirs(self.log_dirs, self.initial_offline_dirs)
+        let current_default_config = self.initial_default_config.clone();
+        let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
+        Ok(())
     }
 }
 
