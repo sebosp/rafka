@@ -3,19 +3,23 @@
 //! with the fewer logs. Once a log is created, it won't be automatically balanced either for I/O
 //! speed reasons or disk space exhausted.
 
+use crate::common::topic_partition::TopicPartition;
 use crate::log::cleaner_config::CleanerConfig;
+use crate::log::log::Log;
 use crate::log::log_config::{LogConfig, LogConfigProperties};
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_states::BrokerState;
-use crate::server::kafka_config::{ConfigSet, KafkaConfig};
+use crate::server::kafka_config::{ConfigSet, KafkaConfig, KafkaConfigError};
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::fs::create_dir;
 use std::path::PathBuf;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
+use tracing::info;
 
 use super::log_cleaner::LogCleaner;
 
@@ -32,9 +36,10 @@ pub struct Scheduler;
 #[derive(Debug, Error)]
 pub enum LogManagerError {
     FailedLogConfigs(HashMap<std::string::String, AsyncTaskError>),
+    FailedToLoadDuringStartup(String),
+    #[error("IO error: {0}")]
+    Io(#[from] io::Error),
 }
-
-pub struct Log;
 
 #[derive(Debug)]
 pub struct LogManager {
@@ -120,19 +125,42 @@ impl LogManager {
     }
 
     pub fn init(&mut self) -> Result<(), KafkaConfigError> {
-
-        let log_creation_or_deletion_lock: Option<()> = None; // XXX: Was set as object, figure out what to d 
-        let current_logs: Vec<TopicPartition, Log> = vec![]; 
+        let log_creation_or_deletion_lock: Option<()> = None; // XXX: Was set as object, figure out what to d
+        let current_logs: HashMap<TopicPartition, Log> = HashMap::new();
         // The logs being moved across kafka (as with partition reassigment) contain a '-future',
         // later on when they catch up with partitions they would be removed the '-future'
-        let future_logs = Vec<TopicPartition, Log>
-        let logs_to_be_deleted: Vec<Log, u64> = vec![];
+        let future_logs: HashMap<TopicPartition, Log> = HashMap::new();
+        let logs_to_be_deleted: HashMap<Log, u64> = HashMap::new();
 
-        let live_log_dirs =  Self::createAndValidateLogDirs(self.log_dirs, self.initial_offline_dirs)
+        let live_log_dirs =
+            Self::create_and_validate_log_dirs(self.log_dirs, self.initial_offline_dirs);
         let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
         Ok(())
     }
+    /// Creates and validates the directories that are not offline.
+    /// Directories must not be duplicated and must be readable
+  fn create_and_validate_log_dirs(dirs: Vec<PathBuf>, initial_offline_dirs: Vec<PathBuf>) -> Result<Vec<PathBuf>, AsyncTaskError> {
+    let mut live_log_dirs = vec![];
+    let mut canonical_paths: HashSet<String> = HashSet::new();
+    for dir in dirs {
+        let dir_absolute_path = match dir.canonicalize(){
+            Ok(val) => val.to_str().unwrap().to_string(),
+            Err(err) => return Err(AsyncTaskError::LogManager(LogManagerError::Io(err))),
+        };
+        if initial_offline_dirs.contains(&dir) {
+            return Err(AsyncTaskError::LogManager(LogManagerError::FailedToLoadDuringStartup(dir_absolute_path)));
+        }
+        if !dir.exists() {
+            info!("Log directory {dir_absolute_path} not found, creating it.");
+            create_dir(dir).map_err(|err| AsyncTaskError::LogManager(LogManagerError::Io(err)))?;
+        }
+        if ! dir.is_dir() || dir.read_dir().is_err()){
+            // RAFKA TODO: Check if we can read the directory there may be a better way.
+            return Err(AsyncTaskError::LogManager(LogManagerError::Io(dir_absolute_path)));
+        }
+    live_log_dirs
+  }
 }
 
 #[cfg(test)]
