@@ -7,19 +7,20 @@ use crate::common::topic_partition::TopicPartition;
 use crate::log::cleaner_config::CleanerConfig;
 use crate::log::log::Log;
 use crate::log::log_config::{LogConfig, LogConfigProperties};
-use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::majordomo::{AsyncTask, AsyncTaskError, MajordomoCoordinator};
 use crate::server::broker_states::BrokerState;
-use crate::server::kafka_config::{ConfigSet, KafkaConfig, KafkaConfigError};
+use crate::server::kafka_config::{ConfigSet, KafkaConfig};
+use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::fs::create_dir;
+use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{error, info, trace};
 
 use super::log_cleaner::LogCleaner;
 
@@ -35,8 +36,14 @@ pub struct Scheduler;
 
 #[derive(Debug, Error)]
 pub enum LogManagerError {
+    #[error("Failed Log Configs: {0:?}")]
     FailedLogConfigs(HashMap<std::string::String, AsyncTaskError>),
+    #[error("Failed To Load Direcotry During Startup: {0}")]
     FailedToLoadDuringStartup(String),
+    #[error("Not a Directory: {0}")]
+    NotADirectory(String),
+    #[error("Duplicate Log Directory: {0}")]
+    DuplicateLogDirectory(String),
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 }
@@ -62,12 +69,6 @@ pub struct LogManager {
     majordomo_tx: mpsc::Sender<AsyncTask>,
     time: Instant,
     lock_file: String,
-}
-
-impl fmt::Display for LogManagerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "LogManagerError({:?})", self)
-    }
 }
 
 impl LogManager {
@@ -124,7 +125,7 @@ impl LogManager {
         })
     }
 
-    pub fn init(&mut self) -> Result<(), KafkaConfigError> {
+    pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
         let log_creation_or_deletion_lock: Option<()> = None; // XXX: Was set as object, figure out what to d
         let current_logs: HashMap<TopicPartition, Log> = HashMap::new();
         // The logs being moved across kafka (as with partition reassigment) contain a '-future',
@@ -132,35 +133,99 @@ impl LogManager {
         let future_logs: HashMap<TopicPartition, Log> = HashMap::new();
         let logs_to_be_deleted: HashMap<Log, u64> = HashMap::new();
 
-        let live_log_dirs =
-            Self::create_and_validate_log_dirs(self.log_dirs, self.initial_offline_dirs);
+        let live_log_dirs = self.create_and_validate_log_dirs().await?;
         let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
         Ok(())
     }
+
+    async fn send_maybe_add_offline_log_dir(
+        &mut self,
+        path: &str,
+        err: LogManagerError,
+    ) -> Result<(), AsyncTaskError> {
+        Ok(self
+            .majordomo_tx
+            .send(AsyncTask::LogDirFailureChannel(
+                LogDirFailureChannelAsyncTask::MaybeAddOfflineLogDir(path.to_string(), err),
+            ))
+            .await?)
+    }
+
     /// Creates and validates the directories that are not offline.
     /// Directories must not be duplicated and must be readable
-  fn create_and_validate_log_dirs(dirs: Vec<PathBuf>, initial_offline_dirs: Vec<PathBuf>) -> Result<Vec<PathBuf>, AsyncTaskError> {
-    let mut live_log_dirs = vec![];
-    let mut canonical_paths: HashSet<String> = HashSet::new();
-    for dir in dirs {
-        let dir_absolute_path = match dir.canonicalize(){
-            Ok(val) => val.to_str().unwrap().to_string(),
-            Err(err) => return Err(AsyncTaskError::LogManager(LogManagerError::Io(err))),
-        };
-        if initial_offline_dirs.contains(&dir) {
-            return Err(AsyncTaskError::LogManager(LogManagerError::FailedToLoadDuringStartup(dir_absolute_path)));
+    async fn create_and_validate_log_dirs(&mut self) -> Result<Vec<PathBuf>, AsyncTaskError> {
+        let mut live_log_dirs = vec![];
+        let mut canonical_paths: HashSet<String> = HashSet::new();
+        for dir in &self.log_dirs {
+            let dir_absolute_path = match dir.canonicalize() {
+                Ok(val) => val.to_str().unwrap().to_string(),
+                Err(err) => {
+                    self.send_maybe_add_offline_log_dir(
+                        dir.to_str().unwrap_or("RAFKA_INVALID_DIR"),
+                        LogManagerError::Io(err),
+                    )
+                    .await?;
+                    continue;
+                },
+            };
+            if self.initial_offline_dirs.contains(&dir) {
+                self.send_maybe_add_offline_log_dir(
+                    &dir_absolute_path,
+                    LogManagerError::FailedToLoadDuringStartup(dir_absolute_path),
+                )
+                .await?;
+                continue;
+            }
+            if !dir.exists() {
+                info!("Log directory {dir_absolute_path} not found, creating it.");
+                match create_dir(dir) {
+                    Err(err) => {
+                        self.send_maybe_add_offline_log_dir(
+                            &dir_absolute_path,
+                            LogManagerError::Io(err),
+                        )
+                        .await?;
+                        continue;
+                    },
+                    Ok(_) => trace!("Successfully created dir: {dir_absolute_path}"),
+                };
+            }
+            if !dir.is_dir() {
+                error!("dir: {dir_absolute_path} not a directory");
+                self.send_maybe_add_offline_log_dir(
+                    &dir_absolute_path,
+                    LogManagerError::NotADirectory(dir_absolute_path),
+                )
+                .await?;
+                continue;
+            }
+            if let Err(err) = dir.read_dir() {
+                // RAFKA TODO: Check if we can read the directory there may be a better way.
+                error!("dir: {dir_absolute_path} unable to read directory");
+                self.send_maybe_add_offline_log_dir(&dir_absolute_path, LogManagerError::Io(err))
+                    .await?;
+                return Err(AsyncTaskError::LogManager(LogManagerError::Io(err)));
+            }
+            if !canonical_paths.insert(dir_absolute_path) {
+                self.send_maybe_add_offline_log_dir(
+                    &dir_absolute_path,
+                    LogManagerError::DuplicateLogDirectory(dir_absolute_path),
+                )
+                .await?;
+            }
+            live_log_dirs.push(dir);
         }
-        if !dir.exists() {
-            info!("Log directory {dir_absolute_path} not found, creating it.");
-            create_dir(dir).map_err(|err| AsyncTaskError::LogManager(LogManagerError::Io(err)))?;
+        if live_log_dirs.is_empty() {
+            error!(
+                "Shutting down broker because none of the specified log dirs from {:?} can be \
+                 created or validated",
+                self.log_dirs
+            );
+            MajordomoCoordinator::shutdown(self.majordomo_tx);
         }
-        if ! dir.is_dir() || dir.read_dir().is_err()){
-            // RAFKA TODO: Check if we can read the directory there may be a better way.
-            return Err(AsyncTaskError::LogManager(LogManagerError::Io(dir_absolute_path)));
-        }
-    live_log_dirs
-  }
+        live_log_dirs
+    }
 }
 
 #[cfg(test)]
