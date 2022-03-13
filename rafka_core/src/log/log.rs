@@ -2,11 +2,14 @@
 
 use std::{path::PathBuf, time::Instant};
 
+use crate::common::topic_partition::TopicPartition;
+
 use super::log_config::LogConfig;
 
 /// Append-only log for storing messages, it is a sequence of segments.
 /// Each segment has a base offset showing the first message in such segment.
 /// Logs are created based on policies such as byte size, time, etc.
+#[derive(Debug)]
 pub struct Log {
     /// directory to store the log segments
     dir: PathBuf,
@@ -33,4 +36,14 @@ pub struct Log {
     max_producer_id_expiration_ms: u32,
     /// Interval to check for expiration of producer ids
     producer_id_expiration_check_interval_ms: u32,
+    topic_partition: TopicPartition,
+    // The identifier of a Log
+    log_ident: String,
 }
+
+// impl Log {
+// pub fn new(topic_partition: TopicPartition, dir: PathBuf) -> Self {
+//    let dir_parent = dir.parent().unwrap_or(PathBuf::from("/"));
+// Self {
+// log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ")
+//}

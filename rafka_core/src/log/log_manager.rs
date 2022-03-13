@@ -52,6 +52,7 @@ pub enum LogManagerError {
 pub struct LogManager {
     pub producer_id_expiration_check_interval_ms: u64,
     log_dirs: Vec<PathBuf>,
+    live_log_dirs: Vec<PathBuf>,
     initial_offline_dirs: Vec<PathBuf>,
     topic_configs: HashMap<String, LogConfig>, // note that this doesn't get updated after creation
     initial_default_config: LogConfig,
@@ -100,6 +101,7 @@ impl LogManager {
         let broker_defaults = LogConfigProperties::try_from(&config)?.build()?;
         Ok(Self {
             log_dirs: config.log.log_dirs.iter().map(|path| PathBuf::from(path)).collect(),
+            live_log_dirs: vec![],
             initial_offline_dirs: initial_offline_dirs
                 .iter()
                 .map(|path| PathBuf::from(path))
@@ -133,7 +135,7 @@ impl LogManager {
         let future_logs: HashMap<TopicPartition, Log> = HashMap::new();
         let logs_to_be_deleted: HashMap<Log, u64> = HashMap::new();
 
-        let live_log_dirs = self.create_and_validate_log_dirs().await?;
+        self.create_and_validate_live_log_dirs().await?;
         let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
         Ok(())
@@ -141,28 +143,28 @@ impl LogManager {
 
     async fn send_maybe_add_offline_log_dir(
         &mut self,
-        path: &str,
+        path: String,
         err: LogManagerError,
     ) -> Result<(), AsyncTaskError> {
         Ok(self
             .majordomo_tx
             .send(AsyncTask::LogDirFailureChannel(
-                LogDirFailureChannelAsyncTask::MaybeAddOfflineLogDir(path.to_string(), err),
+                LogDirFailureChannelAsyncTask::MaybeAddOfflineLogDir(path, err),
             ))
             .await?)
     }
 
     /// Creates and validates the directories that are not offline.
     /// Directories must not be duplicated and must be readable
-    async fn create_and_validate_log_dirs(&mut self) -> Result<Vec<PathBuf>, AsyncTaskError> {
+    async fn create_and_validate_live_log_dirs(&mut self) -> Result<(), AsyncTaskError> {
         let mut live_log_dirs = vec![];
         let mut canonical_paths: HashSet<String> = HashSet::new();
-        for dir in &self.log_dirs {
+        for dir in self.log_dirs.clone() {
             let dir_absolute_path = match dir.canonicalize() {
                 Ok(val) => val.to_str().unwrap().to_string(),
                 Err(err) => {
                     self.send_maybe_add_offline_log_dir(
-                        dir.to_str().unwrap_or("RAFKA_INVALID_DIR"),
+                        dir.to_str().unwrap_or("RAFKA_INVALID_DIR").to_string(),
                         LogManagerError::Io(err),
                     )
                     .await?;
@@ -171,7 +173,7 @@ impl LogManager {
             };
             if self.initial_offline_dirs.contains(&dir) {
                 self.send_maybe_add_offline_log_dir(
-                    &dir_absolute_path,
+                    dir_absolute_path.clone(),
                     LogManagerError::FailedToLoadDuringStartup(dir_absolute_path),
                 )
                 .await?;
@@ -179,10 +181,10 @@ impl LogManager {
             }
             if !dir.exists() {
                 info!("Log directory {dir_absolute_path} not found, creating it.");
-                match create_dir(dir) {
+                match create_dir(&dir) {
                     Err(err) => {
                         self.send_maybe_add_offline_log_dir(
-                            &dir_absolute_path,
+                            dir_absolute_path,
                             LogManagerError::Io(err),
                         )
                         .await?;
@@ -194,7 +196,7 @@ impl LogManager {
             if !dir.is_dir() {
                 error!("dir: {dir_absolute_path} not a directory");
                 self.send_maybe_add_offline_log_dir(
-                    &dir_absolute_path,
+                    dir_absolute_path.clone(),
                     LogManagerError::NotADirectory(dir_absolute_path),
                 )
                 .await?;
@@ -203,18 +205,18 @@ impl LogManager {
             if let Err(err) = dir.read_dir() {
                 // RAFKA TODO: Check if we can read the directory there may be a better way.
                 error!("dir: {dir_absolute_path} unable to read directory");
-                self.send_maybe_add_offline_log_dir(&dir_absolute_path, LogManagerError::Io(err))
+                self.send_maybe_add_offline_log_dir(dir_absolute_path, LogManagerError::Io(err))
                     .await?;
-                return Err(AsyncTaskError::LogManager(LogManagerError::Io(err)));
+                continue;
             }
-            if !canonical_paths.insert(dir_absolute_path) {
+            if !canonical_paths.insert(dir_absolute_path.clone()) {
                 self.send_maybe_add_offline_log_dir(
-                    &dir_absolute_path,
+                    dir_absolute_path.clone(),
                     LogManagerError::DuplicateLogDirectory(dir_absolute_path),
                 )
                 .await?;
             }
-            live_log_dirs.push(dir);
+            live_log_dirs.push(dir.clone());
         }
         if live_log_dirs.is_empty() {
             error!(
@@ -222,9 +224,9 @@ impl LogManager {
                  created or validated",
                 self.log_dirs
             );
-            MajordomoCoordinator::shutdown(self.majordomo_tx);
+            MajordomoCoordinator::shutdown(self.majordomo_tx.clone()).await;
         }
-        live_log_dirs
+        Ok(())
     }
 }
 
@@ -239,6 +241,7 @@ pub mod tests {
             producer_id_expiration_check_interval_ms:
                 DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS,
             log_dirs: vec![],
+            live_log_dirs: vec![],
             initial_offline_dirs: vec![],
             topic_configs: HashMap::new(),
             initial_default_config: LogConfig::default(),
