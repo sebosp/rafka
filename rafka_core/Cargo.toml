@@ -32,6 +32,7 @@ lazy_static = "1.4"
 enum-iterator = "0.7.0"
 itertools = "0.10"
 const_format = "0.2.22"
+file-lock = "2.0"
 
 [dependencies.rafka_derive]
 path = "../rafka_derive"
