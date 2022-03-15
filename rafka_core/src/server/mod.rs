@@ -1,5 +1,6 @@
 pub mod broker_metadata_checkpoint;
 pub mod broker_states;
+pub mod checkpoints;
 pub mod client_quota_manager;
 pub mod config_handler;
 pub mod dynamic_broker_config;
