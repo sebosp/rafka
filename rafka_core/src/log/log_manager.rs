@@ -13,6 +13,7 @@ use crate::server::kafka_config::{ConfigSet, KafkaConfig};
 use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
 use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
+use file_lock::{FileLock, FileOptions};
 use std::collections::{HashMap, HashSet};
 use std::fs::create_dir;
 use std::io;
@@ -46,6 +47,10 @@ pub enum LogManagerError {
     DuplicateLogDirectory(String),
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
+    #[error(
+        "Failed to acquire lock on file in {0}. Another kafka process may be using that log-dir"
+    )]
+    AcquireLock(String),
 }
 
 #[derive(Debug)]
@@ -70,6 +75,7 @@ pub struct LogManager {
     majordomo_tx: mpsc::Sender<AsyncTask>,
     time: Instant,
     lock_file: String,
+    dir_locks: Vec<FileLock>,
 }
 
 impl LogManager {
@@ -124,6 +130,7 @@ impl LogManager {
             producer_id_expiration_check_interval_ms:
                 DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS,
             lock_file: DEFAULT_LOCK_FILE.to_string(),
+            dir_locks: vec![],
         })
     }
 
@@ -138,6 +145,7 @@ impl LogManager {
         self.create_and_validate_live_log_dirs().await?;
         let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
+        self.lock_log_dirs();
         Ok(())
     }
 
@@ -156,15 +164,17 @@ impl LogManager {
 
     /// Creates and validates the directories that are not offline.
     /// Directories must not be duplicated and must be readable
+    /// RAFKA TODO: When a directory is invalidated it is still in self.log_dirs, should be cleaned
+    /// maybe?
     async fn create_and_validate_live_log_dirs(&mut self) -> Result<(), AsyncTaskError> {
         let mut live_log_dirs = vec![];
         let mut canonical_paths: HashSet<String> = HashSet::new();
         for dir in self.log_dirs.clone() {
             let dir_absolute_path = match dir.canonicalize() {
-                Ok(val) => val.to_str().unwrap().to_string(),
+                Ok(val) => val.display().to_string(),
                 Err(err) => {
                     self.send_maybe_add_offline_log_dir(
-                        dir.to_str().unwrap_or("RAFKA_INVALID_DIR").to_string(),
+                        dir.display().to_string(),
                         LogManagerError::Io(err),
                     )
                     .await?;
@@ -228,6 +238,36 @@ impl LogManager {
         }
         Ok(())
     }
+
+    /// Locks all the log directories
+    /// RAFKA TODO: When a lock cannot be acquired, the `live_log_dirs` is not updated.
+    async fn lock_log_dirs(&mut self) -> Result<(), AsyncTaskError> {
+        let mut res = vec![];
+        for dir in self.live_log_dirs.clone() {
+            let options = FileOptions::new().create(true);
+
+            // Path's canonicalize has been previously validated so we can unwrap() it.
+            let dir_absolute_path = dir.canonicalize().unwrap();
+            let dir_absolute_path = dir_absolute_path.display();
+            let lock_absolute_path = format!("{}/{}", dir_absolute_path, self.lock_file);
+            match FileLock::lock(&lock_absolute_path, false, options) {
+                Ok(lock) => res.push(lock),
+                Err(err) => {
+                    self.send_maybe_add_offline_log_dir(
+                        dir_absolute_path.to_string(),
+                        LogManagerError::AcquireLock(format!(
+                            "Error locking directory {}: {} ",
+                            &dir_absolute_path,
+                            err.to_string()
+                        )),
+                    )
+                    .await?;
+                },
+            }
+        }
+        self.dir_locks = res;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -261,6 +301,7 @@ pub mod tests {
             majordomo_tx,
             time: Instant::now(),
             lock_file: DEFAULT_LOCK_FILE.to_string(),
+            dir_locks: vec![],
         }
     }
 }
