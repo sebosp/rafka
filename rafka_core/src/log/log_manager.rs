@@ -9,6 +9,7 @@ use crate::log::log::Log;
 use crate::log::log_config::{LogConfig, LogConfigProperties};
 use crate::majordomo::{AsyncTask, AsyncTaskError, MajordomoCoordinator};
 use crate::server::broker_states::BrokerState;
+use crate::server::checkpoints::offset_checkpoint_file::OffsetCheckpointFile;
 use crate::server::kafka_config::{ConfigSet, KafkaConfig};
 use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
 use crate::utils::kafka_scheduler::KafkaScheduler;
@@ -134,6 +135,20 @@ impl LogManager {
         })
     }
 
+    pub fn create_checkpoint_file(
+        &self,
+        dir: &PathBuf,
+        file_name: &str,
+    ) -> (PathBuf, Result<OffsetCheckpointFile, io::Error>) {
+        let checkpoint_file = PathBuf::from(format!("{}/{}", dir.display(), file_name));
+        (
+            dir.clone(),
+            OffsetCheckpointFile::new(checkpoint_file, self.majordomo_tx.clone()),
+            /* The OffsetCheckpointFile may fail due to io error, RAFKA TODO: maybe add
+             * offline dir? */
+        )
+    }
+
     pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
         let log_creation_or_deletion_lock: Option<()> = None; // XXX: Was set as object, figure out what to d
         let current_logs: HashMap<TopicPartition, Log> = HashMap::new();
@@ -145,7 +160,14 @@ impl LogManager {
         self.create_and_validate_live_log_dirs().await?;
         let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
-        self.lock_log_dirs();
+        self.lock_log_dirs().await?;
+        let recovery_point_checkpoints: HashMap<PathBuf, OffsetCheckpointFile> = self
+            .live_log_dirs
+            .iter()
+            .map(|dir| self.create_checkpoint_file(&dir, RECOVERY_POINT_CHECKPOINT_FILE))
+            .filter(|x| x.1.is_ok())
+            .map(|x| (x.0, x.1.unwrap()))
+            .collect();
         Ok(())
     }
 
@@ -246,7 +268,7 @@ impl LogManager {
         for dir in self.live_log_dirs.clone() {
             let options = FileOptions::new().create(true);
 
-            // Path's canonicalize has been previously validated so we can unwrap() it.
+            // Path's canonicalize has been previously validated so we can unwrap() it maybe.
             let dir_absolute_path = dir.canonicalize().unwrap();
             let dir_absolute_path = dir_absolute_path.display();
             let lock_absolute_path = format!("{}/{}", dir_absolute_path, self.lock_file);
