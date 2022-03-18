@@ -5,7 +5,7 @@
 
 use crate::common::topic_partition::TopicPartition;
 use crate::log::cleaner_config::CleanerConfig;
-use crate::log::log::Log;
+use crate::log::log::{self, Log};
 use crate::log::log_config::{LogConfig, LogConfigProperties};
 use crate::majordomo::{AsyncTask, AsyncTaskError, MajordomoCoordinator};
 use crate::server::broker_states::BrokerState;
@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{error, info, trace};
+use tracing::{debug, error, info, trace};
 
 use super::log_cleaner::LogCleaner;
 
@@ -137,16 +137,22 @@ impl LogManager {
 
     pub fn create_checkpoint_file(
         &self,
-        dir: &PathBuf,
         file_name: &str,
-    ) -> (PathBuf, Result<OffsetCheckpointFile, io::Error>) {
-        let checkpoint_file = PathBuf::from(format!("{}/{}", dir.display(), file_name));
-        (
-            dir.clone(),
-            OffsetCheckpointFile::new(checkpoint_file, self.majordomo_tx.clone()),
-            /* The OffsetCheckpointFile may fail due to io error, RAFKA TODO: maybe add
-             * offline dir? */
-        )
+    ) -> HashMap<PathBuf, OffsetCheckpointFile> {
+        self.live_log_dirs
+            .iter()
+            .map(|dir| {
+                let checkpoint_file = PathBuf::from(format!("{}/{}", dir.display(), file_name));
+                (
+                    dir.clone(),
+                    OffsetCheckpointFile::new(checkpoint_file, self.majordomo_tx.clone()),
+                    /* The OffsetCheckpointFile may fail due to io error, RAFKA TODO: maybe add
+                     * offline dir? */
+                )
+            })
+            .filter(|x| x.1.is_ok())
+            .map(|x| (x.0, x.1.unwrap()))
+            .collect()
     }
 
     pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
@@ -161,13 +167,32 @@ impl LogManager {
         let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
         self.lock_log_dirs().await?;
-        let recovery_point_checkpoints: HashMap<PathBuf, OffsetCheckpointFile> = self
-            .live_log_dirs
-            .iter()
-            .map(|dir| self.create_checkpoint_file(&dir, RECOVERY_POINT_CHECKPOINT_FILE))
-            .filter(|x| x.1.is_ok())
-            .map(|x| (x.0, x.1.unwrap()))
-            .collect();
+        let recovery_point_checkpoints: HashMap<PathBuf, OffsetCheckpointFile> =
+            self.create_checkpoint_file(RECOVERY_POINT_CHECKPOINT_FILE);
+        let log_start_offset_checkpoints: HashMap<PathBuf, OffsetCheckpointFile> =
+            self.create_checkpoint_file(LOG_START_OFFSET_CHECKPOINT_FILE);
+        let preferred_log_dirs: HashMap<TopicPartition, String> = HashMap::new();
+        self.load_logs().await?;
+        Ok(())
+    }
+
+    async fn load_logs(&mut self) -> Result<(), AsyncTaskError> {
+        info!("Loading logs");
+        let init_time = self.time;
+        for dir in &self.live_log_dirs {
+            let clean_shutdown_file =
+                PathBuf::from(format!("{}/{}", dir.display(), log::CLEAN_SHUTDOWN_FILE));
+            if clean_shutdown_file.exists() {
+                debug!(
+                    "Clean shutdown file exists: {} Skipping recovery of logs.",
+                    clean_shutdown_file.display()
+                );
+            } else {
+                // log recovery itself is being performed by `Log` class during initialization
+                // RAKFA TODO: Should this be broadcasted to the MajordomoCoordinator ?
+                self.broker_state = BrokerState::RecoveringFromUncleanShutdown;
+            }
+        }
         Ok(())
     }
 
