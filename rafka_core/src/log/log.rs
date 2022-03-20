@@ -1,10 +1,12 @@
 //! From core/bin/main/kafka/log/Log.scala
 
+use super::log_config::LogConfig;
+use crate::common::topic_partition::TopicPartition;
 use std::{path::PathBuf, time::Instant};
 
-use crate::common::topic_partition::TopicPartition;
-
-use super::log_config::LogConfig;
+// Used by kafka 0.8 and higher to indicate kafka was shutdown properly.
+// This helps avoiding recovering a log.
+pub const CLEAN_SHUTDOWN_FILE: &str = ".kafka_cleanshutdown";
 
 /// Append-only log for storing messages, it is a sequence of segments.
 /// Each segment has a base offset showing the first message in such segment.
