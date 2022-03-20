@@ -7,7 +7,8 @@ use std::hash::{Hash, Hasher};
 pub const SERIAL_VERSION_UID: i64 = -613627415771699627;
 
 /// A topic name and partition number
-#[derive(Debug)]
+/// RAFKA TODO: The hash is for now unused
+#[derive(Debug, Hash, Eq)]
 pub struct TopicPartition {
     topic: String,
     partition: u32,
