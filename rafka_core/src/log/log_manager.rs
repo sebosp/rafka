@@ -9,6 +9,7 @@ use crate::log::log::{self, Log};
 use crate::log::log_config::{LogConfig, LogConfigProperties};
 use crate::majordomo::{AsyncTask, AsyncTaskError, MajordomoCoordinator};
 use crate::server::broker_states::BrokerState;
+use crate::server::checkpoints::checkpoint_file::TopicPartitionCheckpointFileError;
 use crate::server::checkpoints::offset_checkpoint_file::OffsetCheckpointFile;
 use crate::server::kafka_config::{ConfigSet, KafkaConfig};
 use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
@@ -22,7 +23,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 
 use super::log_cleaner::LogCleaner;
 
@@ -52,6 +53,8 @@ pub enum LogManagerError {
         "Failed to acquire lock on file in {0}. Another kafka process may be using that log-dir"
     )]
     AcquireLock(String),
+    #[error("Topic Partition Checkpoint File: {0}")]
+    TopicPartitionCheckpointFile(#[from] TopicPartitionCheckpointFileError),
 }
 
 #[derive(Debug)]
@@ -77,6 +80,7 @@ pub struct LogManager {
     time: Instant,
     lock_file: String,
     dir_locks: Vec<FileLock>,
+    recovery_point_checkpoints: HashMap<PathBuf, OffsetCheckpointFile>,
 }
 
 impl LogManager {
@@ -132,6 +136,7 @@ impl LogManager {
                 DEFAULT_PRODUCER_ID_EXPIRATION_CHECK_INTERVAL_MS,
             lock_file: DEFAULT_LOCK_FILE.to_string(),
             dir_locks: vec![],
+            recovery_point_checkpoints: HashMap::new(),
         })
     }
 
@@ -145,7 +150,11 @@ impl LogManager {
                 let checkpoint_file = PathBuf::from(format!("{}/{}", dir.display(), file_name));
                 (
                     dir.clone(),
-                    OffsetCheckpointFile::new(checkpoint_file, self.majordomo_tx.clone()),
+                    OffsetCheckpointFile::new(
+                        checkpoint_file,
+                        self.majordomo_tx.clone(),
+                        dir.clone(),
+                    ),
                     /* The OffsetCheckpointFile may fail due to io error, RAFKA TODO: maybe add
                      * offline dir? */
                 )
@@ -167,7 +176,7 @@ impl LogManager {
         let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
         self.lock_log_dirs().await?;
-        let recovery_point_checkpoints: HashMap<PathBuf, OffsetCheckpointFile> =
+        self.recovery_point_checkpoints =
             self.create_checkpoint_file(RECOVERY_POINT_CHECKPOINT_FILE);
         let log_start_offset_checkpoints: HashMap<PathBuf, OffsetCheckpointFile> =
             self.create_checkpoint_file(LOG_START_OFFSET_CHECKPOINT_FILE);
@@ -192,21 +201,27 @@ impl LogManager {
                 // RAKFA TODO: Should this be broadcasted to the MajordomoCoordinator ?
                 self.broker_state = BrokerState::RecoveringFromUncleanShutdown;
             }
+            let mut recovery_points: HashMap<TopicPartition, i64> = HashMap::new();
+            match self.recovery_point_checkpoints.get(dir) {
+                Some(val) => match val.read() {
+                    Ok(val) => {
+                        recovery_points = val;
+                    },
+                    Err(err) => {
+                        warn!(
+                            "Error reading recovery-point-offset-checkpoint dir {}: {:?}. \
+                             Resetting the recovery checkpoint to 0.",
+                            dir.display(),
+                            err
+                        );
+                    },
+                },
+                None => {
+                    unreachable!();
+                },
+            };
         }
         Ok(())
-    }
-
-    async fn send_maybe_add_offline_log_dir(
-        &mut self,
-        path: String,
-        err: LogManagerError,
-    ) -> Result<(), AsyncTaskError> {
-        Ok(self
-            .majordomo_tx
-            .send(AsyncTask::LogDirFailureChannel(
-                LogDirFailureChannelAsyncTask::MaybeAddOfflineLogDir(path, err),
-            ))
-            .await?)
     }
 
     /// Creates and validates the directories that are not offline.
@@ -220,7 +235,8 @@ impl LogManager {
             let dir_absolute_path = match dir.canonicalize() {
                 Ok(val) => val.display().to_string(),
                 Err(err) => {
-                    self.send_maybe_add_offline_log_dir(
+                    LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                        self.majordomo_tx.clone(),
                         dir.display().to_string(),
                         LogManagerError::Io(err),
                     )
@@ -229,7 +245,8 @@ impl LogManager {
                 },
             };
             if self.initial_offline_dirs.contains(&dir) {
-                self.send_maybe_add_offline_log_dir(
+                LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                    self.majordomo_tx.clone(),
                     dir_absolute_path.clone(),
                     LogManagerError::FailedToLoadDuringStartup(dir_absolute_path),
                 )
@@ -240,7 +257,8 @@ impl LogManager {
                 info!("Log directory {dir_absolute_path} not found, creating it.");
                 match create_dir(&dir) {
                     Err(err) => {
-                        self.send_maybe_add_offline_log_dir(
+                        LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                            self.majordomo_tx.clone(),
                             dir_absolute_path,
                             LogManagerError::Io(err),
                         )
@@ -252,7 +270,8 @@ impl LogManager {
             }
             if !dir.is_dir() {
                 error!("dir: {dir_absolute_path} not a directory");
-                self.send_maybe_add_offline_log_dir(
+                LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                    self.majordomo_tx.clone(),
                     dir_absolute_path.clone(),
                     LogManagerError::NotADirectory(dir_absolute_path),
                 )
@@ -262,12 +281,17 @@ impl LogManager {
             if let Err(err) = dir.read_dir() {
                 // RAFKA TODO: Check if we can read the directory there may be a better way.
                 error!("dir: {dir_absolute_path} unable to read directory");
-                self.send_maybe_add_offline_log_dir(dir_absolute_path, LogManagerError::Io(err))
-                    .await?;
+                LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                    self.majordomo_tx.clone(),
+                    dir_absolute_path,
+                    LogManagerError::Io(err),
+                )
+                .await?;
                 continue;
             }
             if !canonical_paths.insert(dir_absolute_path.clone()) {
-                self.send_maybe_add_offline_log_dir(
+                LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                    self.majordomo_tx.clone(),
                     dir_absolute_path.clone(),
                     LogManagerError::DuplicateLogDirectory(dir_absolute_path),
                 )
@@ -349,6 +373,7 @@ pub mod tests {
             time: Instant::now(),
             lock_file: DEFAULT_LOCK_FILE.to_string(),
             dir_locks: vec![],
+            recovery_point_checkpoints: HashMap::new(),
         }
     }
 }
