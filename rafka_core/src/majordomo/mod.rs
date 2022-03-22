@@ -25,7 +25,7 @@ use crate::server::finalize_feature_change_listener::{
 use crate::server::kafka_config::KafkaConfig;
 use crate::server::kafka_config::KafkaConfigError;
 use crate::server::kafka_server::KafkaServerError;
-use crate::server::log_failure_channel::LogDirFailureChannel;
+use crate::server::log_failure_channel::{LogDirFailureChannel, LogDirFailureChannelAsyncTask};
 use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
@@ -50,6 +50,7 @@ pub enum AsyncTask {
     FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask),
     Coordinator(CoordinatorTask),
     ClusterResource(ClusterResource),
+    LogDirFailureChannel(LogDirFailureChannelAsyncTask),
 }
 
 #[derive(Error, Debug)]
@@ -180,6 +181,12 @@ impl MajordomoCoordinator {
                 },
                 AsyncTask::ClusterResource(cluster_resource) => {
                     self.notify_cluster_listeners(cluster_resource).await?;
+                },
+                AsyncTask::LogDirFailureChannel(task) => {
+                    LogDirFailureChannelAsyncTask::process_task(
+                        &mut self.log_dir_failure_channel,
+                        task,
+                    );
                 },
             }
         }
