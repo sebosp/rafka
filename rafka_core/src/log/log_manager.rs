@@ -17,7 +17,7 @@ use crate::utils::kafka_scheduler::KafkaScheduler;
 use crate::zk::kafka_zk_client::KafkaZkClient;
 use file_lock::{FileLock, FileOptions};
 use std::collections::{HashMap, HashSet};
-use std::fs::create_dir;
+use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -185,9 +185,21 @@ impl LogManager {
         Ok(())
     }
 
+    fn load_dir_logs(&self, dir: &PathBuf) -> Result<(), io::Error> {
+        if dir.is_dir() {
+            for dir_content in fs::read_dir(dir)? {
+                let path = dir_content?.path();
+                if path.is_dir() {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Recovers and loads all the logs from the log_dirs data directories
     async fn load_logs(&mut self) -> Result<(), AsyncTaskError> {
         info!("Loading logs");
         let init_time = self.time;
+        let mut offline_dirs: Vec<(PathBuf, io::Error)> = vec![];
         for dir in &self.live_log_dirs {
             let clean_shutdown_file =
                 PathBuf::from(format!("{}/{}", dir.display(), log::CLEAN_SHUTDOWN_FILE));
@@ -220,6 +232,9 @@ impl LogManager {
                     unreachable!();
                 },
             };
+            if let Err(err) = self.load_dir_logs(&dir) {
+                offline_dirs.push((dir.clone(), err));
+            }
         }
         Ok(())
     }
@@ -255,7 +270,7 @@ impl LogManager {
             }
             if !dir.exists() {
                 info!("Log directory {dir_absolute_path} not found, creating it.");
-                match create_dir(&dir) {
+                match fs::create_dir(&dir) {
                     Err(err) => {
                         LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
                             self.majordomo_tx.clone(),

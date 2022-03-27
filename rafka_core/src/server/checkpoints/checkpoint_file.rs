@@ -1,6 +1,6 @@
 //! From core/src/main/scala/kafka/server/checkpoints/CheckpointFile.scala
 
-use crate::common::topic_partition::{self, TopicPartition};
+use crate::common::topic_partition::TopicPartition;
 use crate::majordomo::AsyncTask;
 use std::collections::HashMap;
 use std::fs::File;
