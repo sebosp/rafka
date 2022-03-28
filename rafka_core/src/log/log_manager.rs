@@ -23,7 +23,6 @@ use std::path::PathBuf;
 use std::time::Instant;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, trace, warn};
 
 use super::log_cleaner::LogCleaner;
 
@@ -197,14 +196,14 @@ impl LogManager {
 
     /// Recovers and loads all the logs from the log_dirs data directories
     async fn load_logs(&mut self) -> Result<(), AsyncTaskError> {
-        info!("Loading logs");
+        tracing::info!("Loading logs");
         let init_time = self.time;
         let mut offline_dirs: Vec<(PathBuf, io::Error)> = vec![];
         for dir in &self.live_log_dirs {
             let clean_shutdown_file =
                 PathBuf::from(format!("{}/{}", dir.display(), log::CLEAN_SHUTDOWN_FILE));
             if clean_shutdown_file.exists() {
-                debug!(
+                tracing::debug!(
                     "Clean shutdown file exists: {} Skipping recovery of logs.",
                     clean_shutdown_file.display()
                 );
@@ -220,7 +219,7 @@ impl LogManager {
                         recovery_points = val;
                     },
                     Err(err) => {
-                        warn!(
+                        tracing::warn!(
                             "Error reading recovery-point-offset-checkpoint dir {}: {:?}. \
                              Resetting the recovery checkpoint to 0.",
                             dir.display(),
@@ -269,7 +268,7 @@ impl LogManager {
                 continue;
             }
             if !dir.exists() {
-                info!("Log directory {dir_absolute_path} not found, creating it.");
+                tracing::info!("Log directory {dir_absolute_path} not found, creating it.");
                 match fs::create_dir(&dir) {
                     Err(err) => {
                         LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
@@ -280,11 +279,11 @@ impl LogManager {
                         .await?;
                         continue;
                     },
-                    Ok(_) => trace!("Successfully created dir: {dir_absolute_path}"),
+                    Ok(_) => tracing::trace!("Successfully created dir: {dir_absolute_path}"),
                 };
             }
             if !dir.is_dir() {
-                error!("dir: {dir_absolute_path} not a directory");
+                tracing::error!("dir: {dir_absolute_path} not a directory");
                 LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
                     self.majordomo_tx.clone(),
                     dir_absolute_path.clone(),
@@ -295,7 +294,7 @@ impl LogManager {
             }
             if let Err(err) = dir.read_dir() {
                 // RAFKA TODO: Check if we can read the directory there may be a better way.
-                error!("dir: {dir_absolute_path} unable to read directory");
+                tracing::error!("dir: {dir_absolute_path} unable to read directory");
                 LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
                     self.majordomo_tx.clone(),
                     dir_absolute_path,
@@ -315,7 +314,7 @@ impl LogManager {
             live_log_dirs.push(dir.clone());
         }
         if live_log_dirs.is_empty() {
-            error!(
+            tracing::error!(
                 "Shutting down broker because none of the specified log dirs from {:?} can be \
                  created or validated",
                 self.log_dirs
@@ -339,7 +338,8 @@ impl LogManager {
             match FileLock::lock(&lock_absolute_path, false, options) {
                 Ok(lock) => res.push(lock),
                 Err(err) => {
-                    self.send_maybe_add_offline_log_dir(
+                    LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                        self.majordomo_tx.clone(),
                         dir_absolute_path.to_string(),
                         LogManagerError::AcquireLock(format!(
                             "Error locking directory {}: {} ",
@@ -353,6 +353,56 @@ impl LogManager {
         }
         self.dir_locks = res;
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub enum LogManagerAsyncTask {
+    /// loads the logs on a given dir.
+    LoadLogs(mpsc::Sender<Log>, PathBuf),
+}
+
+pub struct LogManagerCoordinator {
+    tx: mpsc::Sender<LogManagerAsyncTask>,
+    rx: mpsc::Receiver<LogManagerAsyncTask>,
+}
+impl LogManagerCoordinator {
+    /// Creates a new instance of the LogManagerCoordinator
+    pub async fn new(kafka_config: KafkaConfig) -> Result<Self, AsyncTaskError> {
+        let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let init_time = Instant::now();
+        let mut kafka_zk_client = KafkaZkClient::build(
+            &kafka_config.zookeeper.zk_connect,
+            &kafka_config,
+            Some(String::from("Async Coordinator")),
+            init_time,
+            None,
+        );
+        kafka_zk_client.init(&kafka_config).await?;
+        Ok(Self { tx, rx })
+    }
+
+    /// `main_tx` clones the current transmission endpoint in the coordinator channel.
+    pub fn main_tx(&self) -> mpsc::Sender<LogManagerAsyncTask> {
+        self.tx.clone()
+    }
+
+    /// `process_message_queue` receives LogManagerAsyncTask requests from clients
+    /// If a client wants a response it may use a oneshot::channel for it
+    pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
+        while let Some(task) = self.rx.recv().await {
+            tracing::info!("LogManager coordinator {:?}", task);
+            match task {
+                LogManagerAsyncTask::LoadLogs(tx, path) => {
+                    tokio::spawn(async move { Self::load_logs(tx, path) });
+                },
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn load_logs(tx: mpsc::Sender<Log>, path: PathBuf) {
+        tracing::debug!("Loading log '{}'", path.display());
     }
 }
 
