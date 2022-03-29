@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 use tokio::sync::mpsc::Sender;
-use tracing::error;
 
 use super::checkpoint_file::TopicPartitionCheckpointFile;
 use super::checkpoint_file::TopicPartitionCheckpointReadBuffer;
@@ -41,24 +40,30 @@ impl OffsetCheckpointFile {
         Ok(Self { file, async_task_tx, checkpoint, log_dir })
     }
 
-    pub fn read(&self) -> Result<HashMap<TopicPartition, i64>, AsyncTaskError> {
-        let mut res: HashMap<TopicPartition, i64> = HashMap::new();
+    pub async fn read(&self) -> Result<HashMap<TopicPartition, i64>, AsyncTaskError> {
         // RAFKA TODO: Figure out why canonicalize could fail here:
-        let abs_path = self.file.canonicalize().unwrap().display();
+        let abs_path = self.file.canonicalize().unwrap();
+        let abs_path = abs_path.display();
         let topic_partition_buf_reader = TopicPartitionCheckpointReadBuffer::new(
             abs_path.to_string(),
-            self.file,
+            self.file.clone(),
             self.checkpoint.get_version(),
         );
-        topic_partition_buf_reader.read().map_err(|err| {
-            error!("Error while reading checkpoint file {abs_path}: {:?}", err);
-            LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
-                self.async_task_tx.clone(),
-                self.log_dir.display().to_string(),
-                err.into(),
-            );
-            // RAFKA TODO: Originally KafkaStorageException, maybe create KafkaStorageException
-            AsyncTaskError::LogManager(err.into())
-        })
+        match topic_partition_buf_reader.read() {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                tracing::error!("Error while reading checkpoint file {abs_path}: {:?}", err);
+                LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                    self.async_task_tx.clone(),
+                    self.log_dir.display().to_string(),
+                    err.into(),
+                )
+                .await?;
+                // RAFKA TODO: Originally KafkaStorageException, maybe create KafkaStorageException
+                // io::Error cannot be cloned, so the error sent to LogDirsFailureChannel is
+                // already consumed there. Otherwise we could return the cause:
+                Err(AsyncTaskError::KafkaStorageException(self.file.clone()))
+            },
+        }
     }
 }
