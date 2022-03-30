@@ -662,7 +662,7 @@ pub enum KafkaZkClientAsyncTask {
 #[derive(Debug)]
 pub struct KafkaZkClientCoordinator {
     kafka_zk_client: KafkaZkClient,
-    pub tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    tx: mpsc::Sender<KafkaZkClientAsyncTask>,
     rx: mpsc::Receiver<KafkaZkClientAsyncTask>,
 }
 
