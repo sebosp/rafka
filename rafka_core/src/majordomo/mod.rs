@@ -30,6 +30,7 @@ use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
 use std::error::Error;
+use std::path::PathBuf;
 use std::thread;
 use thiserror::Error;
 use tokio::runtime::Handle;
@@ -77,6 +78,8 @@ pub enum AsyncTaskError {
     KafkaConfig(#[from] KafkaConfigError),
     #[error("LogManager {0:?}")]
     LogManager(#[from] LogManagerError),
+    #[error("KafkaStorageException on dir {0:?}")]
+    KafkaStorageException(PathBuf),
 }
 
 impl AsyncTaskError {
