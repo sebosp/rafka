@@ -10,12 +10,11 @@ use std::num;
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
-use tracing::trace;
 
 pub trait CheckpointFileFormatter {
     type Data;
     fn to_line(entry: Self::Data) -> String;
-    fn from_line(line: String) -> Option<Self::Data>;
+    fn from_line(line: &str) -> Option<Self::Data>;
 }
 
 #[derive(Debug, Error)]
@@ -38,6 +37,7 @@ pub struct TopicPartitionCheckpointFile {
     async_task_tx: Sender<AsyncTask>,
     version: i32,
     log_dir: String,
+    temp_path: PathBuf,
 }
 
 impl TopicPartitionCheckpointFile {
@@ -57,7 +57,7 @@ impl TopicPartitionCheckpointFile {
             None => String::from("/"),
         };
         let path = file.canonicalize().unwrap();
-        let temp_path = format!("{log_dir}.tmp");
+        let temp_path = PathBuf::from(format!("{log_dir}.tmp"));
 
         // Create the file early to catch Io errors, the file may already exist and it's ok
         match File::create(&path) {
@@ -65,9 +65,11 @@ impl TopicPartitionCheckpointFile {
                 io::ErrorKind::AlreadyExists => {},
                 _ => return Err(why),
             },
-            Ok(_file) => trace!("TopicPartitionCheckpointFile: Created File: {}", path.display()),
+            Ok(_file) => {
+                tracing::trace!("TopicPartitionCheckpointFile: Created File: {}", path.display())
+            },
         };
-        Ok(Self { file, async_task_tx, version, log_dir })
+        Ok(Self { file, async_task_tx, version, log_dir, temp_path })
     }
 
     pub fn get_version(&self) -> i32 {
@@ -88,7 +90,7 @@ impl TopicPartitionCheckpointReadBuffer {
 
     pub fn read(&self) -> Result<HashMap<TopicPartition, i64>, TopicPartitionCheckpointFileError> {
         let mut res = HashMap::new();
-        let f = File::open(self.file)?;
+        let f = File::open(self.file.clone())?;
         let mut reader = BufReader::new(f);
         let mut line = String::new();
         // Get and validate the version of the TopicPartitionCheckpointFile
@@ -113,7 +115,7 @@ impl TopicPartitionCheckpointReadBuffer {
 
         while reader.read_line(&mut line)? != 0 {
             // Ok(0) is EOF
-            match TopicPartitionCheckpointReadBuffer::from_line(line) {
+            match TopicPartitionCheckpointReadBuffer::from_line(&line) {
                 Some((topic_partition, offset)) => res.insert(topic_partition, offset),
                 None => {
                     return Err(TopicPartitionCheckpointFileError::MalformedLineException(
@@ -141,7 +143,7 @@ impl CheckpointFileFormatter for TopicPartitionCheckpointReadBuffer {
         format!("{} {} {}", entry.0.topic(), entry.0.partition(), entry.1)
     }
 
-    fn from_line(line: String) -> Option<Self::Data> {
+    fn from_line(line: &str) -> Option<Self::Data> {
         let fragments: Vec<&str> = line.split(' ').collect();
         if fragments.len() != 3 {
             return None;
