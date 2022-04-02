@@ -214,7 +214,7 @@ impl LogManager {
             }
             let mut recovery_points: HashMap<TopicPartition, i64> = HashMap::new();
             match self.recovery_point_checkpoints.get(dir) {
-                Some(val) => match val.read() {
+                Some(val) => match val.read().await {
                     Ok(val) => {
                         recovery_points = val;
                     },
