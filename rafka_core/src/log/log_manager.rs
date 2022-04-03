@@ -80,6 +80,7 @@ pub struct LogManager {
     lock_file: String,
     dir_locks: Vec<FileLock>,
     recovery_point_checkpoints: HashMap<PathBuf, OffsetCheckpointFile>,
+    log_start_offset_checkpoints: HashMap<PathBuf, OffsetCheckpointFile>,
 }
 
 impl LogManager {
@@ -136,6 +137,7 @@ impl LogManager {
             lock_file: DEFAULT_LOCK_FILE.to_string(),
             dir_locks: vec![],
             recovery_point_checkpoints: HashMap::new(),
+            log_start_offset_checkpoints: HashMap::new(),
         })
     }
 
@@ -177,7 +179,7 @@ impl LogManager {
         self.lock_log_dirs().await?;
         self.recovery_point_checkpoints =
             self.create_checkpoint_file(RECOVERY_POINT_CHECKPOINT_FILE);
-        let log_start_offset_checkpoints: HashMap<PathBuf, OffsetCheckpointFile> =
+        self.log_start_offset_checkpoints =
             self.create_checkpoint_file(LOG_START_OFFSET_CHECKPOINT_FILE);
         let preferred_log_dirs: HashMap<TopicPartition, String> = HashMap::new();
         self.load_logs().await?;
@@ -227,9 +229,22 @@ impl LogManager {
                         );
                     },
                 },
-                None => {
-                    unreachable!();
+                None => unreachable!(),
+            };
+            let mut log_start_offsets: HashMap<TopicPartition, i64> = HashMap::new();
+            match self.log_start_offset_checkpoints.get(dir) {
+                Some(val) => match val.read().await {
+                    Ok(val) => log_start_offsets = val,
+                    Err(err) => {
+                        tracing::warn!(
+                            "Error occurred while reading log-start-offset-checkpoint file of \
+                             directory {}: {:?}",
+                            dir.display(),
+                            err
+                        );
+                    },
                 },
+                None => unreachable!(),
             };
             if let Err(err) = self.load_dir_logs(&dir) {
                 offline_dirs.push((dir.clone(), err));
@@ -439,6 +454,7 @@ pub mod tests {
             lock_file: DEFAULT_LOCK_FILE.to_string(),
             dir_locks: vec![],
             recovery_point_checkpoints: HashMap::new(),
+            log_start_offset_checkpoints: HashMap::new(),
         }
     }
 }
