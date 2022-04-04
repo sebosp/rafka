@@ -186,9 +186,11 @@ impl LogManager {
         Ok(())
     }
 
-    fn load_dir_logs(&self, dir: &PathBuf) -> Result<(), io::Error> {
-        if dir.is_dir() {
-            for dir_content in fs::read_dir(dir)? {
+    /// We have iterated over each log.dirs and from there listed, they would look like
+    /// `topic`-`partition_number` and must be dir
+    fn load_potential_dir_logs(&self, partition_dir: &PathBuf) -> Result<(), io::Error> {
+        if partition_dir.is_dir() {
+            for dir_content in fs::read_dir(partition_dir)? {
                 let path = dir_content?.path();
                 if path.is_dir() {}
             }
@@ -246,7 +248,7 @@ impl LogManager {
                 },
                 None => unreachable!(),
             };
-            if let Err(err) = self.load_dir_logs(&dir) {
+            if let Err(err) = self.load_potential_dir_logs(&dir) {
                 offline_dirs.push((dir.clone(), err));
             }
         }
