@@ -36,8 +36,7 @@ pub enum KafkaZkClientError {
     InvalidPath,
     #[error("Create zookeeper path:  already exists")]
     CreatePathExists,
-    // RAFA NOTE: Originally, the ClusterId error is a KafkaException, maybe worth create a
-    // KafkaServerError enum
+    // RAFA NOTE: Originally, the ClusterId error is a KafkaException, consider moving to it.
     #[error(
         "Failed to get cluster id from Zookeeper. This can happen if /cluster/id is deleted from \
          Zookeeper."
