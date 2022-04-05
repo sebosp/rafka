@@ -42,7 +42,7 @@ impl EndPoint {
                 captures.get(3).map_or("", |m| m.as_str()),
             ))
         } else {
-            error!(
+            tracing::error!(
                 "Does not regex match listener_name_string://[host]:port with input '{}'",
                 input
             );
