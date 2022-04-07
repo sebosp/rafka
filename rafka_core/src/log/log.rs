@@ -2,11 +2,36 @@
 
 use super::log_config::LogConfig;
 use crate::common::topic_partition::TopicPartition;
+use crate::KafkaException;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::{path::PathBuf, time::Instant};
 
 // Used by kafka 0.8 and higher to indicate kafka was shutdown properly.
 // This helps avoiding recovering a log.
 pub const CLEAN_SHUTDOWN_FILE: &str = ".kafka_cleanshutdown";
+// A directory to be deleted
+pub const DELETE_DIR_SUFFIX: &str = "-delete";
+
+// A directory that is used for future partition, for example for a partition being sent to/from
+// another broker/log-dir
+pub const FUTURE_DIR_SUFFIX: &str = "-future";
+
+pub fn delete_dir_pattern(input: &str) -> Option<String> {
+    lazy_static! {
+        static ref DELETE_DIR_PATTERN: Regex =
+            Regex::new(format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", DELETE_DIR_SUFFIX)).unwrap();
+    }
+    DELETE_DIR_PATTERN.captures(input).map(|val| val.to_string())
+}
+
+pub fn future_dir_pattern(input: &str) -> Option<String> {
+    lazy_static! {
+        static ref FUTURE_DIR_PATTERN: Regex =
+            Regex::new(format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", FUTURE_DIR_SUFFIX)).unwrap();
+    }
+    FUTURE_DIR_PATTERN.captures(input).map(|val| val.to_string())
+}
 
 /// Append-only log for storing messages, it is a sequence of segments.
 /// Each segment has a base offset showing the first message in such segment.
@@ -43,9 +68,18 @@ pub struct Log {
     log_ident: String,
 }
 
-// impl Log {
-// pub fn new(topic_partition: TopicPartition, dir: PathBuf) -> Self {
-//    let dir_parent = dir.parent().unwrap_or(PathBuf::from("/"));
-// Self {
-// log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ")
-//}
+impl Log {
+    // pub fn new(topic_partition: TopicPartition, dir: PathBuf) -> Self {
+    //    let dir_parent = dir.parent().unwrap_or(PathBuf::from("/"));
+    // Self {
+    // log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ")
+    /// Gets the topic, partition from a directory of a log
+    pub fn parse_topic_partition_name(dir: PathBuf) -> Result<TopicPartition, KafkaException> {
+        match TopicPartition::try_from(dir) {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                return Err(InvalidTopicPartitionDir(dir.canonicalize()?.display(), dir.display()))
+            },
+        }
+    }
+}
