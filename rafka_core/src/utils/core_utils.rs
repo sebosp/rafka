@@ -51,18 +51,18 @@ pub fn validate_endpoint(
 }
 
 pub fn listener_list_to_end_points(listeners: &str) -> Result<Vec<EndPoint>, KafkaConfigError> {
-    trace!("listener_list_to_end_points: listeners {}", listeners);
+    tracing::trace!("listener_list_to_end_points: listeners {}", listeners);
     let mut end_points: Vec<EndPoint> = vec![];
     let listener_list = parse_csv_list(listeners);
-    trace!("listener_list_to_end_points parse_csv_list() -> {:?}", listener_list);
+    tracing::trace!("listener_list_to_end_points parse_csv_list() -> {:?}", listener_list);
     for listener in listener_list {
         match EndPoint::create_end_point(&listener) {
             Ok(val) => {
-                debug!("Successfully parsed endpoint for listener: {}", listener);
+                tracing::debug!("Successfully parsed endpoint for listener: {}", listener);
                 end_points.push(val);
             },
             Err(err) => {
-                error!("Error parsing broker listeners from '{}': {}", listener, err);
+                tracing::error!("Error parsing broker listeners from '{}': {}", listener, err);
                 return Err(err);
             },
         }
