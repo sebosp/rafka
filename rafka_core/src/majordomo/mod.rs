@@ -80,6 +80,8 @@ pub enum AsyncTaskError {
     LogManager(#[from] LogManagerError),
     #[error("KafkaStorageException on dir {0:?}")]
     KafkaStorageException(PathBuf),
+    #[error("KafkaException {0:?}")]
+    KafkaException(#[from] crate::KafkaException),
 }
 
 impl AsyncTaskError {
