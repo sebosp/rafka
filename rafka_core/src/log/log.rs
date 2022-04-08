@@ -5,7 +5,10 @@ use crate::common::topic_partition::TopicPartition;
 use crate::KafkaException;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{path::PathBuf, time::Instant};
+use std::{
+    path::{Display, PathBuf},
+    time::Instant,
+};
 
 // Used by kafka 0.8 and higher to indicate kafka was shutdown properly.
 // This helps avoiding recovering a log.
@@ -20,7 +23,7 @@ pub const FUTURE_DIR_SUFFIX: &str = "-future";
 pub fn delete_dir_pattern(input: &str) -> Option<String> {
     lazy_static! {
         static ref DELETE_DIR_PATTERN: Regex =
-            Regex::new(format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", DELETE_DIR_SUFFIX)).unwrap();
+            Regex::new(&format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", DELETE_DIR_SUFFIX)).unwrap();
     }
     DELETE_DIR_PATTERN.captures(input).map(|val| val.to_string())
 }
@@ -28,7 +31,7 @@ pub fn delete_dir_pattern(input: &str) -> Option<String> {
 pub fn future_dir_pattern(input: &str) -> Option<String> {
     lazy_static! {
         static ref FUTURE_DIR_PATTERN: Regex =
-            Regex::new(format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", FUTURE_DIR_SUFFIX)).unwrap();
+            Regex::new(&format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", FUTURE_DIR_SUFFIX)).unwrap();
     }
     FUTURE_DIR_PATTERN.captures(input).map(|val| val.to_string())
 }
@@ -74,11 +77,14 @@ impl Log {
     // Self {
     // log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ")
     /// Gets the topic, partition from a directory of a log
-    pub fn parse_topic_partition_name(dir: PathBuf) -> Result<TopicPartition, KafkaException> {
-        match TopicPartition::try_from(dir) {
+    pub fn parse_topic_partition_name(dir: &PathBuf) -> Result<TopicPartition, KafkaException> {
+        match TopicPartition::try_from(dir.clone()) {
             Ok(val) => Ok(val),
             Err(err) => {
-                return Err(InvalidTopicPartitionDir(dir.canonicalize()?.display(), dir.display()))
+                return Err(KafkaException::InvalidTopicPartitionDir(
+                    dir.canonicalize().unwrap().display().to_string(),
+                    dir.display().to_string(),
+                ))
             },
         }
     }
