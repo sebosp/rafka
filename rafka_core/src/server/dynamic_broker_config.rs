@@ -118,20 +118,22 @@ impl DynamicBrokerConfig {
                     props1.insert(prop_key.to_string(), prop_value.to_string());
                     match Self::validate_config_types(&props1) {
                         Ok(()) => {
-                            debug!("Property {} is valid", prop_key);
+                            tracing::debug!("Property {} is valid", prop_key);
                         },
                         Err(_) => {
-                            debug!("Property {} is invalid, will ignore value", prop_key);
+                            tracing::debug!("Property {} is invalid, will ignore value", prop_key);
                             valid_props.remove(prop_key);
                             invalid_props.insert(prop_key.to_string(), prop_value.to_string());
                         },
                     };
                 }
                 let config_source = if per_broker_config { "broker" } else { "default cluster" };
-                error!(
+                tracing::error!(
                     "Dynamic {} config contains invalid values: {:?}, these configs will be \
                      ignored. {:?}",
-                    config_source, invalid_props, err
+                    config_source,
+                    invalid_props,
+                    err
                 );
                 valid_props
             },
@@ -163,7 +165,7 @@ impl DynamicBrokerConfig {
             for invalid_prop_name in &invalid_prop_names {
                 properties.remove(invalid_prop_name);
             }
-            error!("{}: {:?}", error_message, invalid_prop_names);
+            tracing::error!("{}: {:?}", error_message, invalid_prop_names);
         }
     }
 
@@ -258,7 +260,7 @@ impl DynamicBrokerConfig {
                         // Add <configName> as a synonym in both cases. RAFKA NOTE: This is all
                         // about SASL and Auth which is not the target for
                         // this yet.
-                        error!(
+                        tracing::error!(
                             "broker_config_synonyms: Property name {} may not be supported, no \
                              sasl config is done yet",
                             name
@@ -327,9 +329,11 @@ impl DynamicBrokerConfig {
                 // RAFKA TODO: The broker_reconfigurables_to_update should be a
                 // Vec<BrokerReconfigurable> and then for each item that needs to be updated, we
                 // should iterate so that it can move from previouus config to new config
-                error!(
+                tracing::error!(
                     "NOT implemented: Should reconfigure {} from {:?} to {:?}",
-                    reconfigurable, old_config, self.kafka_config
+                    reconfigurable,
+                    old_config,
+                    self.kafka_config
                 );
             }
         }
@@ -350,9 +354,10 @@ impl DynamicBrokerConfig {
             Ok(()) => Ok(()),
             Err(err) => {
                 // RAFKA TODO: Is this an AsyncTaskError ? Who should act on it?
-                error!(
+                tracing::error!(
                     "Cluster default configs could not be applied: {:?}: {:?}",
-                    persistent_props, err
+                    persistent_props,
+                    err
                 );
                 Ok(())
             },
@@ -373,9 +378,11 @@ impl DynamicBrokerConfig {
         match self.update_current_config() {
             Ok(()) => Ok(()),
             Err(err) => {
-                error!(
+                tracing::error!(
                     "Per-broker configs of {} could not be applied: {:?}: {:?}",
-                    broker_id, persistent_props, err
+                    broker_id,
+                    persistent_props,
+                    err
                 );
                 Ok(())
             },
