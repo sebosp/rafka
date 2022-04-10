@@ -62,7 +62,6 @@ pub struct LogManager {
     log_dirs: Vec<PathBuf>,
     live_log_dirs: Vec<PathBuf>,
     initial_offline_dirs: Vec<PathBuf>,
-    topic_configs: HashMap<String, LogConfig>, // note that this doesn't get updated after creation
     initial_default_config: LogConfig,
     cleaner_config: CleanerConfig,
     recovery_threads_per_data_dir: i32,
@@ -95,18 +94,6 @@ impl LogManager {
         // RAFKA NOTE:
         // - broker_topic_stats has been removed for now.
         // - log_dirs was a String of absolute/canonicalized paths before.
-        let majordomo_tx_cp = majordomo_tx.clone();
-        // read the log configurations from zookeeper
-        let (topic_configs, failed) = KafkaZkClient::get_log_configs(
-            majordomo_tx.clone(),
-            KafkaZkClient::get_all_topics_in_cluster(majordomo_tx_cp).await?,
-            &config,
-        )
-        .await;
-        if !failed.is_empty() {
-            return Err(AsyncTaskError::LogManager(LogManagerError::FailedLogConfigs(failed)));
-        }
-
         let cleaner_config = LogCleaner::cleaner_config(&config);
 
         let broker_defaults = LogConfigProperties::try_from(&config)?.build()?;
@@ -117,7 +104,6 @@ impl LogManager {
                 .iter()
                 .map(|path| PathBuf::from(path))
                 .collect(),
-            topic_configs,
             initial_default_config: broker_defaults,
             cleaner_config,
             recovery_threads_per_data_dir: config.log.num_recovery_threads_per_data_dir,
@@ -376,27 +362,40 @@ impl LogManager {
 #[derive(Debug)]
 pub enum LogManagerAsyncTask {
     /// loads the logs on a given dir.
-    LoadLogs(mpsc::Sender<Log>, PathBuf),
+    LoadLogs(mpsc::Sender<Result<Log, AsyncTaskError>>, PathBuf),
 }
 
 pub struct LogManagerCoordinator {
     tx: mpsc::Sender<LogManagerAsyncTask>,
     rx: mpsc::Receiver<LogManagerAsyncTask>,
+    topic_configs: HashMap<String, LogConfig>, // note that this doesn't get updated after creation
 }
 impl LogManagerCoordinator {
     /// Creates a new instance of the LogManagerCoordinator
-    pub async fn new(kafka_config: KafkaConfig) -> Result<Self, AsyncTaskError> {
+    pub async fn new(config: KafkaConfig, majordomo_tx: mpsc::Sender<AsyncTask>) -> Result<Self, AsyncTaskError> {
         let (tx, rx) = mpsc::channel(4_096); // TODO: Magic number removal
         let init_time = Instant::now();
         let mut kafka_zk_client = KafkaZkClient::build(
-            &kafka_config.zookeeper.zk_connect,
-            &kafka_config,
+            &config.zookeeper.zk_connect,
+            &config,
             Some(String::from("Async Coordinator")),
             init_time,
             None,
         );
-        kafka_zk_client.init(&kafka_config).await?;
-        Ok(Self { tx, rx })
+        kafka_zk_client.init(&config).await?;
+        let majordomo_tx_cp = majordomo_tx.clone();
+        // read the log configurations from zookeeper
+        let (topic_configs, failed) = KafkaZkClient::get_log_configs(
+            majordomo_tx.clone(),
+            KafkaZkClient::get_all_topics_in_cluster(majordomo_tx_cp).await?,
+            &config,
+        )
+        .await;
+        if !failed.is_empty() {
+            return Err(AsyncTaskError::LogManager(LogManagerError::FailedLogConfigs(failed)));
+        }
+
+        Ok(Self { tx, rx, topic_configs })
     }
 
     /// `main_tx` clones the current transmission endpoint in the coordinator channel.
