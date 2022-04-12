@@ -62,7 +62,6 @@ pub struct LogManager {
     log_dirs: Vec<PathBuf>,
     live_log_dirs: Vec<PathBuf>,
     initial_offline_dirs: Vec<PathBuf>,
-    initial_default_config: LogConfig,
     cleaner_config: CleanerConfig,
     recovery_threads_per_data_dir: i32,
     flush_check_ms: i64,
@@ -104,7 +103,6 @@ impl LogManager {
                 .iter()
                 .map(|path| PathBuf::from(path))
                 .collect(),
-            initial_default_config: broker_defaults,
             cleaner_config,
             recovery_threads_per_data_dir: config.log.num_recovery_threads_per_data_dir,
             flush_check_ms: config.log.log_flush_scheduler_interval_ms,
@@ -153,14 +151,11 @@ impl LogManager {
 
     pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
         let log_creation_or_deletion_lock: Option<()> = None; // XXX: Was set as object, figure out what to d
-        let current_logs: HashMap<TopicPartition, Log> = HashMap::new();
         // The logs being moved across kafka (as with partition reassigment) contain a '-future',
         // later on when they catch up with partitions they would be removed the '-future'
-        let future_logs: HashMap<TopicPartition, Log> = HashMap::new();
         let logs_to_be_deleted: HashMap<Log, u64> = HashMap::new();
 
         self.create_and_validate_live_log_dirs().await?;
-        let current_default_config = self.initial_default_config.clone();
         let num_recovery_threads_per_data_dir = self.recovery_threads_per_data_dir;
         self.lock_log_dirs().await?;
         self.recovery_point_checkpoints =
@@ -369,6 +364,9 @@ pub struct LogManagerCoordinator {
     tx: mpsc::Sender<LogManagerAsyncTask>,
     rx: mpsc::Receiver<LogManagerAsyncTask>,
     topic_configs: HashMap<String, LogConfig>, // note that this doesn't get updated after creation
+    initial_default_config: LogConfig,
+    future_logs: HashMap<TopicPartition, Log>,
+    current_logs: HashMap<TopicPartition, Log>,
 }
 impl LogManagerCoordinator {
     /// Creates a new instance of the LogManagerCoordinator
@@ -383,6 +381,7 @@ impl LogManagerCoordinator {
             None,
         );
         kafka_zk_client.init(&config).await?;
+        let broker_defaults = LogConfigProperties::try_from(&config)?.build()?;
         let majordomo_tx_cp = majordomo_tx.clone();
         // read the log configurations from zookeeper
         let (topic_configs, failed) = KafkaZkClient::get_log_configs(
@@ -394,8 +393,17 @@ impl LogManagerCoordinator {
         if !failed.is_empty() {
             return Err(AsyncTaskError::LogManager(LogManagerError::FailedLogConfigs(failed)));
         }
+        let future_logs: HashMap<TopicPartition, Log> = HashMap::new();
+        let current_logs: HashMap<TopicPartition, Log> = HashMap::new();
 
-        Ok(Self { tx, rx, topic_configs })
+        Ok(Self {
+            tx,
+            rx,
+            topic_configs,
+            future_logs,
+            current_logs,
+            initial_default_config: broker_defaults,
+        })
     }
 
     /// `main_tx` clones the current transmission endpoint in the coordinator channel.
@@ -435,8 +443,6 @@ pub mod tests {
             log_dirs: vec![],
             live_log_dirs: vec![],
             initial_offline_dirs: vec![],
-            topic_configs: HashMap::new(),
-            initial_default_config: LogConfig::default(),
             cleaner_config: CleanerConfig::default(),
             recovery_threads_per_data_dir: kafka_config.log.num_recovery_threads_per_data_dir,
             flush_check_ms: kafka_config.log.log_flush_scheduler_interval_ms,
