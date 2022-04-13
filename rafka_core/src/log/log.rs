@@ -2,13 +2,13 @@
 
 use super::log_config::LogConfig;
 use crate::common::topic_partition::TopicPartition;
+use crate::majordomo::AsyncTask;
 use crate::KafkaException;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::{
-    path::{Display, PathBuf},
-    time::Instant,
-};
+use std::path::PathBuf;
+use std::time::Instant;
+use tokio::sync::mpsc;
 
 // Used by kafka 0.8 and higher to indicate kafka was shutdown properly.
 // This helps avoiding recovering a log.
@@ -69,13 +69,40 @@ pub struct Log {
     topic_partition: TopicPartition,
     // The identifier of a Log
     log_ident: String,
+    majordomo_tx: mpsc::Sender<AsyncTask>,
 }
 
 impl Log {
-    // pub fn new(topic_partition: TopicPartition, dir: PathBuf) -> Self {
-    //    let dir_parent = dir.parent().unwrap_or(PathBuf::from("/"));
-    // Self {
-    // log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ")
+    pub fn new(
+        dir: PathBuf,
+        config: LogConfig,
+        log_start_offset: i64,
+        recovery_point: i64,
+        // broker_topic_stats: BrokerTopicStats,
+        time: Instant,
+        max_producer_id_expiration_ms: u32,
+        producer_id_expiration_check_interval_ms: u32,
+        majordomo_tx: mpsc::Sender<AsyncTask>,
+    ) -> Result<Log, KafkaException> {
+        let topic_partition = Self::parse_topic_partition_name(&dir)?;
+        let dir_parent = dir.parent().unwrap_or(&PathBuf::from("/")).display();
+        let log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ");
+        // let producer_state_manager = ProducerStateManager::new(topic_partition, &dir,
+        // max_producer_id_expiration_ms);
+        Ok(Self {
+            dir,
+            config,
+            log_start_offset,
+            recovery_point,
+            time,
+            max_producer_id_expiration_ms,
+            producer_id_expiration_check_interval_ms,
+            topic_partition,
+            log_ident,
+            majordomo_tx,
+        })
+    }
+
     /// Gets the topic, partition from a directory of a log
     pub fn parse_topic_partition_name(dir: &PathBuf) -> Result<TopicPartition, KafkaException> {
         match TopicPartition::try_from(dir.clone()) {
