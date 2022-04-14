@@ -64,7 +64,7 @@ impl TryFrom<PathBuf> for TopicPartition {
     type Error = KafkaException;
 
     fn try_from(dir: PathBuf) -> Result<Self, Self::Error> {
-        let full_path = dir.canonicalize()?.display().to_string();
+        let full_path = dir.canonicalize().unwrap().display().to_string();
 
         let dir_name: String = match dir.file_name() {
             Some(val) => *val.to_string(),

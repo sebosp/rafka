@@ -7,7 +7,6 @@ use crate::common::network::listener_name::ListenerName;
 use crate::common::security::auth::security_protocol::SecurityProtocol;
 use crate::server::kafka_config::KafkaConfigError;
 use regex::Regex;
-use tracing::error;
 
 #[derive(PartialOrd, PartialEq, Clone, Debug)]
 pub struct EndPoint {

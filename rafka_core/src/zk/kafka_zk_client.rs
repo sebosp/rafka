@@ -316,6 +316,7 @@ impl KafkaZkClient {
     /// zookeeper location.
     #[instrument]
     pub async fn init(&mut self, kafka_config: &KafkaConfig) -> Result<(), AsyncTaskError> {
+        // TODO: Consider making a copy of kafka_config to the local instance
         self.create_chroot_path_if_set(&kafka_config.zookeeper.zk_connect, &kafka_config).await?;
         self.connect().await?;
         self.create_top_level_paths().await
