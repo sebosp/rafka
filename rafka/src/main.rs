@@ -71,6 +71,11 @@ async fn main_processor() -> Result<()> {
     let (majordomo_tx, majordomo_rx) = mpsc::channel(4096); // TODO: Magic number removal
     let majordomo_tx_clone = majordomo_tx.clone();
     tokio::spawn(async move {
+        LogManagerCoordinator::new(kafka_config_clone, majordomo_tx_clone).await?
+    });
+    let kafka_config_clone = kafka_config.clone();
+    let majordomo_tx_clone = majordomo_tx.clone();
+    tokio::spawn(async move {
         let mut kafka_server = KafkaServer::new(
             kafka_config_clone,
             Instant::now(),
@@ -90,12 +95,12 @@ async fn main_processor() -> Result<()> {
         };
     });
     // Start the main messaging bus
-    let kafka_server_async_tx = kafka_zk.main_tx();
+    let kafka_zk_async_tx = kafka_zk.main_tx();
     let majordomo_tx_clone = majordomo_tx.clone();
     tokio::spawn(async move {
         MajordomoCoordinator::init_coordinator_thread(
             kafka_config.clone(),
-            kafka_server_async_tx,
+            kafka_zk_async_tx,
             majordomo_tx_clone,
             majordomo_rx,
         )
