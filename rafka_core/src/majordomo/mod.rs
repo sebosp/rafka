@@ -18,7 +18,9 @@
 
 use crate::common::cluster_resource::ClusterResource;
 use crate::common::internals::cluster_resource_listeners::ClusterResourceListeners;
-use crate::log::log_manager::LogManagerError;
+use crate::log::log_manager::{LogManagerAsyncTask, LogManagerError};
+use crate::server::broker_states::BrokerState;
+use crate::server::broker_states::BrokerState;
 use crate::server::finalize_feature_change_listener::{
     FeatureCacheUpdater, FeatureCacheUpdaterAsyncTask, FeatureCacheUpdaterError,
 };
@@ -52,6 +54,7 @@ pub enum AsyncTask {
     Coordinator(CoordinatorTask),
     ClusterResource(ClusterResource),
     LogDirFailureChannel(LogDirFailureChannelAsyncTask),
+    LogManager(LogManagerAsyncTask),
 }
 
 #[derive(Error, Debug)]
@@ -122,16 +125,19 @@ pub struct MajordomoCoordinator {
     feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
     kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    log_manager_async_tx: mpsc::Sender<LogManagerAsyncTask>,
     tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
     cluster_resource_listeners: ClusterResourceListeners,
     log_dir_failure_channel: LogDirFailureChannel,
+    broker_state: BrokerState,
 }
 
 impl MajordomoCoordinator {
     pub async fn new(
         kafka_config: KafkaConfig,
         kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        log_manager_async_tx: mpsc::Sender<LogManagerAsyncTask>,
         main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
@@ -145,9 +151,11 @@ impl MajordomoCoordinator {
             rx: main_rx,
             feature_cache_updater,
             kafka_zk_tx,
+            log_manager_async_tx,
             supported_features,
             cluster_resource_listeners,
             log_dir_failure_channel,
+            broker_state: BrokerState::default(),
         })
     }
 
@@ -192,6 +200,12 @@ impl MajordomoCoordinator {
                         &mut self.log_dir_failure_channel,
                         task,
                     );
+                },
+                AsyncTask::LogManager(task) => {
+                    let log_manager_async_tx_cp = self.log_manager_async_tx.clone();
+                    tokio::spawn(async move {
+                        log_manager_async_tx_cp.send(task).await.unwrap();
+                    });
                 },
             }
         }
