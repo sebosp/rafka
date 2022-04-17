@@ -8,7 +8,7 @@
 //!   KafkaServer has a Dynamic Broker Config field that owns the KafkaConfig (inversed)
 
 use crate::common::cluster_resource::ClusterResource;
-use crate::log::log_manager::LogManager;
+use crate::log::log_manager::LogManagerCoordinator;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
@@ -86,8 +86,6 @@ pub struct KafkaServer {
                                          * Option<> */
     pub control_plane_request_handler_pool: Option<KafkaRequestHandlerPool>, /* was null, changed to
                                                                               * Option<> */
-    pub log_manager: Option<LogManager>, // was null, changed to Option<>
-
     pub replica_manager: Option<ReplicaManager>, // was null, changed to Option<>
     pub admin_manager: Option<AdminManager>,     // was null, changed to Option<>
     pub token_manager: Option<DelegationTokenManager>, // was null, changed to Option<>
@@ -148,6 +146,7 @@ impl KafkaServer {
         Self {
             cluster_id: None,
             metrics: None,
+            // RAFKA TODO: The broker state should be owned by the MajordomoCoordinator
             broker_state: BrokerState::default(),
             data_plane_request_processor: None,
             control_plane_request_processor: None,
@@ -155,7 +154,6 @@ impl KafkaServer {
             socket_server: None,
             data_plane_request_handler_pool: None,
             control_plane_request_handler_pool: None,
-            log_manager: None,
             replica_manager: None,
             admin_manager: None,
             token_manager: None,
@@ -257,20 +255,12 @@ impl KafkaServer {
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
         self.notify_cluster_listeners().await?;
 
-        self.log_manager = Some(
-            LogManager::new(
-                self.config.clone(),
-                initial_offline_dirs.clone(),
-                &self.broker_state,
-                self.kafka_scheduler.clone(),
-                self.init_time, // should this be re-calculated?
-                //&self.broker_topic_stats,
-                self.async_task_tx.clone(), /* RAFKA TODO: log_dir_failure_channel needs to be
-                                             * acquaired through the async_task_tx */
-            )
-            .await?,
-        );
-
+        LogManagerCoordinator::send_offline_dirs(
+            self.async_task_tx.clone(),
+            initial_offline_dirs,
+            self.init_time.clone(),
+        )
+        .await?;
         Ok(())
     }
 
