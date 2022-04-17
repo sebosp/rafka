@@ -2,10 +2,12 @@
 
 use super::log_config::LogConfig;
 use crate::common::topic_partition::TopicPartition;
-use crate::majordomo::AsyncTask;
+use crate::log::producer_state_manager::ProducerStateManager;
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::KafkaException;
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -63,13 +65,28 @@ pub struct Log {
     recovery_point: i64,
     time: Instant,
     /// Maximum amount of time to wait before considering the producer id as expired
-    max_producer_id_expiration_ms: u32,
+    max_producer_id_expiration_ms: i64,
     /// Interval to check for expiration of producer ids
-    producer_id_expiration_check_interval_ms: u32,
+    producer_id_expiration_check_interval_ms: u64,
     topic_partition: TopicPartition,
+    producer_state_manager: ProducerStateManager,
     // The identifier of a Log
     log_ident: String,
     majordomo_tx: mpsc::Sender<AsyncTask>,
+}
+
+impl PartialEq for Log {
+    fn eq(&self, rhs: &Log) -> bool {
+        self.dir == rhs.dir
+    }
+}
+
+impl Eq for Log {}
+
+impl Hash for Log {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.dir.hash(state);
+    }
 }
 
 impl Log {
@@ -80,15 +97,18 @@ impl Log {
         recovery_point: i64,
         // broker_topic_stats: BrokerTopicStats,
         time: Instant,
-        max_producer_id_expiration_ms: u32,
-        producer_id_expiration_check_interval_ms: u32,
+        max_producer_id_expiration_ms: i64,
+        producer_id_expiration_check_interval_ms: u64,
         majordomo_tx: mpsc::Sender<AsyncTask>,
-    ) -> Result<Log, KafkaException> {
+    ) -> Result<Log, AsyncTaskError> {
         let topic_partition = Self::parse_topic_partition_name(&dir)?;
         let dir_parent = dir.parent().unwrap_or(&PathBuf::from("/")).display();
         let log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ");
-        // let producer_state_manager = ProducerStateManager::new(topic_partition, &dir,
-        // max_producer_id_expiration_ms);
+        let producer_state_manager = ProducerStateManager::new(
+            topic_partition,
+            dir.clone(),
+            Some(max_producer_id_expiration_ms),
+        );
         Ok(Self {
             dir,
             config,
@@ -98,9 +118,14 @@ impl Log {
             max_producer_id_expiration_ms,
             producer_id_expiration_check_interval_ms,
             topic_partition,
+            producer_state_manager,
             log_ident,
             majordomo_tx,
         })
+    }
+
+    pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
+        Ok(())
     }
 
     /// Gets the topic, partition from a directory of a log
@@ -114,5 +139,17 @@ impl Log {
                 ))
             },
         }
+    }
+
+    pub fn is_future(&self) -> bool {
+        self.dir.display().to_string().ends_with(FUTURE_DIR_SUFFIX)
+    }
+
+    pub fn log_ident(&self) -> &str {
+        &self.log_ident
+    }
+
+    pub fn dir(&self) -> &PathBuf {
+        &self.dir
     }
 }
