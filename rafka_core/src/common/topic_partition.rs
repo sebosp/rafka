@@ -12,7 +12,7 @@ pub const SERIAL_VERSION_UID: i64 = -613627415771699627;
 
 /// A topic name and partition number
 /// RAFKA TODO: The hash is for now unused
-#[derive(Debug, Hash, Eq)]
+#[derive(Debug, Hash, Eq, Clone)]
 pub struct TopicPartition {
     topic: String,
     partition: u32,
@@ -66,15 +66,19 @@ impl TryFrom<PathBuf> for TopicPartition {
     fn try_from(dir: PathBuf) -> Result<Self, Self::Error> {
         let full_path = dir.canonicalize().unwrap().display().to_string();
 
-        let dir_name: String = match dir.file_name() {
-            Some(val) => *val.to_string(),
-            None => {
-                return Err(KafkaException::InvalidTopicPartitionDir(full_path, String::from("")));
-            },
-        };
+        let dir_name = dir
+            .file_name()
+            .ok_or(KafkaException::InvalidTopicPartitionDir(full_path.clone(), String::from("")))?
+            .to_str()
+            .ok_or(KafkaException::InvalidTopicPartitionDir(full_path.clone(), String::from("")))?
+            .to_string();
         if dir_name.is_empty() || !dir_name.contains('-') {
             return Err(KafkaException::InvalidTopicPartitionDir(full_path, dir_name));
         }
+        // RAFKA TODO: By the time we can inspect the is_none(), we have already ran the Regex
+        // engine and would have already captured the topic-partition-<maybe delete/future>,
+        // consider catching early the <topic>-<partition> by the regex and then fall back to parse
+        // it manually with rsplit/rfind
         if dir_name.ends_with(DELETE_DIR_SUFFIX) && log::delete_dir_pattern(&dir_name).is_none()
             || dir_name.ends_with(FUTURE_DIR_SUFFIX) && log::future_dir_pattern(&dir_name).is_none()
         {
@@ -83,23 +87,27 @@ impl TryFrom<PathBuf> for TopicPartition {
 
         let name: String =
             if dir_name.ends_with(DELETE_DIR_SUFFIX) || dir_name.ends_with(FUTURE_DIR_SUFFIX) {
-                dir_name.substring(0, dir_name.last_index_of('.'))
+                dir_name.split_at(dir_name.rfind('.').unwrap()).0.to_string()
             } else {
-                dirName
+                dir_name
             };
 
-        let index = name.last_index_of('-');
-        let topic = name.substring(0, index);
-        let partition_string = name.substring(index + 1);
-        if topic.isEmpty || partition_string.is_empty() {
-            return Err(KafkaException::InvalidTopicPartitionDir(full_path, dir_name));
+        let (topic, partition_string) = name.rsplit_once('-').unwrap();
+        if topic.is_empty() || partition_string.is_empty() {
+            return Err(KafkaException::InvalidTopicPartitionDir(full_path, name));
         }
 
-        let partition = match partition_string.parse::<i32>() {
-            Ok(val) => val,
-            Err(err) => return Err(KafkaException::InvalidTopicPartitionDir(full_path, dir_name)),
-        };
-
-        Ok(TopicPartition::new(topic, partition))
+        match partition_string.parse::<u32>() {
+            Ok(val) => Ok(TopicPartition::new(topic.to_string(), val)),
+            Err(err) => {
+                tracing::error!(
+                    "Unable to parse partition number from {partition_string} in full_path '{}' : \
+                     {:?}",
+                    full_path,
+                    err
+                );
+                Err(KafkaException::InvalidTopicPartitionDir(full_path, name))
+            },
+        }
     }
 }
