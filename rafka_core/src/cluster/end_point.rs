@@ -6,6 +6,7 @@ use std::str::FromStr;
 use crate::common::network::listener_name::ListenerName;
 use crate::common::security::auth::security_protocol::SecurityProtocol;
 use crate::server::kafka_config::KafkaConfigError;
+use lazy_static::lazy_static;
 use regex::Regex;
 
 #[derive(PartialOrd, PartialEq, Clone, Debug)]
@@ -32,9 +33,11 @@ impl EndPoint {
 
     pub fn uri_parse_exp(input: &str) -> Result<(&str, &str, &str), KafkaConfigError> {
         // RAFKA NOTE: It seems port could be a negative number?
-        let captures =
-            Regex::new(r"^(.*)://\[?([0-9a-zA-Z\-%._:]*)\]?:(-?[0-9]+)").unwrap().captures(input);
-        if let Some(captures) = captures {
+        lazy_static! {
+            static ref RE: Regex =
+                Regex::new(r"^(.*)://\[?([0-9a-zA-Z\-%._:]*)\]?:(-?[0-9]+)").unwrap();
+        }
+        if let Some(captures) = RE.captures(input) {
             Ok((
                 captures.get(1).map_or("", |m| m.as_str()),
                 captures.get(2).map_or("", |m| m.as_str()),
