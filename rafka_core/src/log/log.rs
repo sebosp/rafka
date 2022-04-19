@@ -22,20 +22,30 @@ pub const DELETE_DIR_SUFFIX: &str = "-delete";
 // another broker/log-dir
 pub const FUTURE_DIR_SUFFIX: &str = "-future";
 
-pub fn delete_dir_pattern(input: &str) -> Option<String> {
+pub fn delete_dir_pattern(input: &str) -> Option<(&str, &str, &str)> {
     lazy_static! {
         static ref DELETE_DIR_PATTERN: Regex =
-            Regex::new(&format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", DELETE_DIR_SUFFIX)).unwrap();
+            Regex::new(&format!(r"^(\S+)-(\S+)\.(\S+){}", DELETE_DIR_SUFFIX)).unwrap();
     }
-    DELETE_DIR_PATTERN.captures(input).map(|val| val.to_string())
+    let captures = DELETE_DIR_PATTERN.captures(input)?;
+    Some((
+        captures.get(1).map_or("", |m| m.as_str()),
+        captures.get(2).map_or("", |m| m.as_str()),
+        captures.get(3).map_or("", |m| m.as_str()),
+    ))
 }
 
-pub fn future_dir_pattern(input: &str) -> Option<String> {
+pub fn future_dir_pattern(input: &str) -> Option<(&str, &str, &str)> {
     lazy_static! {
         static ref FUTURE_DIR_PATTERN: Regex =
-            Regex::new(&format!(r"^(\\S+)-(\\S+)\\.(\\S+){}", FUTURE_DIR_SUFFIX)).unwrap();
+            Regex::new(&format!(r"^(\S+)-(\S+)\.(\S+){}", FUTURE_DIR_SUFFIX)).unwrap();
     }
-    FUTURE_DIR_PATTERN.captures(input).map(|val| val.to_string())
+    let captures = FUTURE_DIR_PATTERN.captures(input)?;
+    Some((
+        captures.get(1).map_or("", |m| m.as_str()),
+        captures.get(2).map_or("", |m| m.as_str()),
+        captures.get(3).map_or("", |m| m.as_str()),
+    ))
 }
 
 /// Append-only log for storing messages, it is a sequence of segments.
