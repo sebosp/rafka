@@ -1,13 +1,21 @@
 //! From core/src/main/scala/kafka/log/ProducerStateManager.scala
 
+use std::{
+    collections::{BTreeMap, HashMap},
+    path::PathBuf,
+};
+
+use crate::common::topic_partition::TopicPartition;
+
 // RAFKA TODO:
-#[derive(Clone, Hash, Ord)]
+#[derive(Debug)]
 pub struct ProducerStateEntry;
 
 // RAFKA TODO:
-#[derive(Clone, Hash, Ord)]
+#[derive(Debug)]
 pub struct TxnMetadata;
 
+#[derive(Debug)]
 pub struct ProducerStateManager {
     topic_partition: TopicPartition,
     log_dir: PathBuf,
@@ -41,6 +49,7 @@ impl ProducerStateManager {
             last_map_offset: 0,
             last_snap_offset: 0,
             ongoing_txns: BTreeMap::new(),
+            unreplicated_txns: BTreeMap::new(),
         }
     }
 }
