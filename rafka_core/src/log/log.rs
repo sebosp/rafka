@@ -112,10 +112,13 @@ impl Log {
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<Log, AsyncTaskError> {
         let topic_partition = Self::parse_topic_partition_name(&dir)?;
-        let dir_parent = dir.parent().unwrap_or(&PathBuf::from("/")).display();
+        let dir_parent = match dir.parent() {
+            Some(val) => val.display().to_string(),
+            None => PathBuf::from("/").display().to_string(),
+        };
         let log_ident = format!("[Log partition={topic_partition}, dir={dir_parent}] ");
         let producer_state_manager = ProducerStateManager::new(
-            topic_partition,
+            topic_partition.clone(),
             dir.clone(),
             Some(max_producer_id_expiration_ms),
         );
@@ -143,10 +146,11 @@ impl Log {
         match TopicPartition::try_from(dir.clone()) {
             Ok(val) => Ok(val),
             Err(err) => {
+                tracing::error!("Unable to parse TopicPartition: {:?}", err);
                 return Err(KafkaException::InvalidTopicPartitionDir(
                     dir.canonicalize().unwrap().display().to_string(),
                     dir.display().to_string(),
-                ))
+                ));
             },
         }
     }
