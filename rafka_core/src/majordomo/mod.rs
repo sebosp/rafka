@@ -20,7 +20,6 @@ use crate::common::cluster_resource::ClusterResource;
 use crate::common::internals::cluster_resource_listeners::ClusterResourceListeners;
 use crate::log::log_manager::{LogManagerAsyncTask, LogManagerError};
 use crate::server::broker_states::BrokerState;
-use crate::server::broker_states::BrokerState;
 use crate::server::finalize_feature_change_listener::{
     FeatureCacheUpdater, FeatureCacheUpdaterAsyncTask, FeatureCacheUpdaterError,
 };
@@ -44,6 +43,7 @@ use tracing_attributes::instrument;
 #[derive(Debug)]
 pub enum CoordinatorTask {
     Shutdown,
+    UpdateBrokerState(BrokerState),
 }
 
 /// `AsyncTask` contains message types that majordomo coordinator can work on
@@ -125,7 +125,7 @@ pub struct MajordomoCoordinator {
     feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
     kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
-    log_manager_async_tx: mpsc::Sender<LogManagerAsyncTask>,
+    log_manager_tx: mpsc::Sender<LogManagerAsyncTask>,
     tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
     cluster_resource_listeners: ClusterResourceListeners,
@@ -137,7 +137,7 @@ impl MajordomoCoordinator {
     pub async fn new(
         kafka_config: KafkaConfig,
         kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
-        log_manager_async_tx: mpsc::Sender<LogManagerAsyncTask>,
+        log_manager_tx: mpsc::Sender<LogManagerAsyncTask>,
         main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
@@ -151,7 +151,7 @@ impl MajordomoCoordinator {
             rx: main_rx,
             feature_cache_updater,
             kafka_zk_tx,
-            log_manager_async_tx,
+            log_manager_tx,
             supported_features,
             cluster_resource_listeners,
             log_dir_failure_channel,
@@ -180,7 +180,13 @@ impl MajordomoCoordinator {
                     });
                 },
                 AsyncTask::Coordinator(task) => {
-                    info!("coordinator coord_task is {:?}", task);
+                    tracing::info!("coordinator coord_task is {:?}", task);
+                    match task {
+                        CoordinatorTask::Shutdown => break,
+                        CoordinatorTask::UpdateBrokerState(state) => {
+                            self.broker_state = state;
+                        },
+                    }
                 },
                 AsyncTask::FinalizedFeatureCache(task) => {
                     info!("finalized feature cache task is {:?}", task);
@@ -202,15 +208,15 @@ impl MajordomoCoordinator {
                     );
                 },
                 AsyncTask::LogManager(task) => {
-                    let log_manager_async_tx_cp = self.log_manager_async_tx.clone();
+                    let log_manager_tx_cp = self.log_manager_tx.clone();
                     tokio::spawn(async move {
-                        log_manager_async_tx_cp.send(task).await.unwrap();
+                        log_manager_tx_cp.send(task).await.unwrap();
                     });
                 },
             }
         }
         self.kafka_zk_tx.send(KafkaZkClientAsyncTask::Shutdown).await?;
-        error!("majordomo coordinator: Exiting.");
+        tracing::info!("majordomo coordinator: Exiting.");
         Ok(())
     }
 
@@ -225,6 +231,7 @@ impl MajordomoCoordinator {
     pub async fn init_coordinator_thread(
         kafka_config: KafkaConfig,
         kfk_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        log_manager_tx: mpsc::Sender<LogManagerAsyncTask>,
         main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<thread::JoinHandle<()>, AsyncTaskError> {
@@ -234,7 +241,7 @@ impl MajordomoCoordinator {
             .spawn(move || {
                 current_tokio_handle.spawn(async move {
                     let mut majordomo_coordinator =
-                        Self::new(kafka_config, kfk_zk_tx, main_tx, main_rx)
+                        Self::new(kafka_config, kfk_zk_tx, log_manager_tx, main_tx, main_rx)
                             .await
                             .expect("Unable to create Majordomo Coordinator");
                     majordomo_coordinator
