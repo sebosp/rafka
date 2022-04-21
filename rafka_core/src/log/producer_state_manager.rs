@@ -38,7 +38,7 @@ impl ProducerStateManager {
         max_producer_id_expiration_ms: Option<i64>,
     ) -> Self {
         Self {
-            topic_partition,
+            topic_partition: topic_partition.clone(),
             log_dir,
             max_producer_id_expiration_ms: max_producer_id_expiration_ms.unwrap_or(60 * 60 * 1000),
             log_ident: format!(
