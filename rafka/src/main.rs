@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::{App, Arg};
+use rafka_core::log::log_manager::LogManagerCoordinator;
 use rafka_core::majordomo::MajordomoCoordinator;
 use rafka_core::server::kafka_config::KafkaConfigProperties;
 use rafka_core::server::kafka_server::KafkaServer;
@@ -68,17 +69,30 @@ async fn main_processor() -> Result<()> {
     let (kafka_server_tx, kafka_server_rx) = mpsc::channel(4_096); // TODO: Magic number removal
     let kafka_config_clone = kafka_config.clone();
     let mut kafka_zk = KafkaZkClientCoordinator::new(kafka_config.clone()).await.unwrap();
-    let (majordomo_tx, majordomo_rx) = mpsc::channel(4096); // TODO: Magic number removal
+    let (majordomo_tx, majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+    let (log_manager_tx, log_manager_rx) = mpsc::channel(4_096); // TODO: Magic number removal
     let majordomo_tx_clone = majordomo_tx.clone();
+    let init_time = Instant::now();
+    let init_time_cp = init_time.clone();
+    let log_manager_tx_cp = log_manager_tx.clone();
     tokio::spawn(async move {
-        LogManagerCoordinator::new(kafka_config_clone, majordomo_tx_clone).await?
+        let mut log_manager = LogManagerCoordinator::new(
+            kafka_config_clone,
+            init_time_cp,
+            log_manager_tx_cp,
+            log_manager_rx,
+            majordomo_tx_clone,
+        )
+        .await
+        .unwrap();
+        log_manager.process_message_queue().await.unwrap();
     });
     let kafka_config_clone = kafka_config.clone();
     let majordomo_tx_clone = majordomo_tx.clone();
     tokio::spawn(async move {
         let mut kafka_server = KafkaServer::new(
             kafka_config_clone,
-            Instant::now(),
+            init_time,
             majordomo_tx_clone.clone(),
             kafka_server_rx,
         );
@@ -101,6 +115,7 @@ async fn main_processor() -> Result<()> {
         MajordomoCoordinator::init_coordinator_thread(
             kafka_config.clone(),
             kafka_zk_async_tx,
+            log_manager_tx,
             majordomo_tx_clone,
             majordomo_rx,
         )
