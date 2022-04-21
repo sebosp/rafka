@@ -141,6 +141,8 @@ impl MajordomoCoordinator {
         main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
+        // RAFKA TODO: Consider creating a builder for this since the number of params may grow even
+        // more.
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
         let cluster_resource_listeners = ClusterResourceListeners::default();
