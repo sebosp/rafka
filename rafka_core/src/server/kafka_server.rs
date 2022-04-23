@@ -8,6 +8,7 @@
 //!   KafkaServer has a Dynamic Broker Config field that owns the KafkaConfig (inversed)
 
 use crate::common::cluster_resource::ClusterResource;
+use crate::log::log_manager::LogManagerCoordinator;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::broker_metadata_checkpoint::{BrokerMetadata, BrokerMetadataCheckpoint};
 use crate::server::broker_states::BrokerState;
@@ -39,8 +40,6 @@ pub struct SocketServer;
 #[derive(Debug)]
 pub struct KafkaRequestHandlerPool;
 #[derive(Debug)]
-pub struct LogManager;
-#[derive(Debug)]
 pub struct ReplicaManager;
 #[derive(Debug)]
 pub struct AdminManager;
@@ -56,8 +55,9 @@ pub struct TransactionCoordinator;
 pub struct KafkaController;
 #[derive(Debug)]
 pub struct MetadataCache;
+/// `BrokerTopicStats` contains metrics per topic, bytes in, bytes out, messages in, etc.
 #[derive(Debug)]
-struct BrokerTopicStats;
+pub struct BrokerTopicStats;
 
 #[derive(Debug)]
 pub enum KafkaServerAsyncTask {
@@ -86,8 +86,6 @@ pub struct KafkaServer {
                                          * Option<> */
     pub control_plane_request_handler_pool: Option<KafkaRequestHandlerPool>, /* was null, changed to
                                                                               * Option<> */
-    pub log_manager: Option<LogManager>, // was null, changed to Option<>
-
     pub replica_manager: Option<ReplicaManager>, // was null, changed to Option<>
     pub admin_manager: Option<AdminManager>,     // was null, changed to Option<>
     pub token_manager: Option<DelegationTokenManager>, // was null, changed to Option<>
@@ -110,10 +108,11 @@ pub struct KafkaServer {
 
     pub correlation_id: AtomicU32, /* = new AtomicInteger(0) TODO: Can this be a U32? Maybe less
                                     * capacity? */
+    pub config: KafkaConfig,
     pub broker_meta_props_file: String,
     pub broker_metadata_checkpoints: HashMap<String, BrokerMetadataCheckpoint>,
     _cluster_id: Option<String>, // was null, changed to Option<>
-    _broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>$
+    broker_topic_stats: Option<BrokerTopicStats>, // was null, changed to Option<>
 
     feature_change_listener: Option<FinalizedFeatureChangeListener>, /* was null, changed to
                                                                       * Option<> */
@@ -132,22 +131,22 @@ pub struct KafkaServer {
 // credentialProvider: CredentialProvider = null
 // tokenCache: DelegationTokenCache = null
 
-impl Default for KafkaServer {
-    fn default() -> Self {
-        // TODO: Consider removing this implementation in favor of new() as the channel is basically
-        // unusable, maybe this is usable for testing
-        let (majordomo_tx, _majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let majordomo_tx_cp = majordomo_tx.clone();
-        let (_main_tx, main_rx) = mpsc::channel(4_096); // TODO: Magic number removal
-        let dynamic_broker_config = DynamicBrokerConfig::default();
-        let time = Instant::now();
-        KafkaServer {
-            // startup_complete: Arc::new(AtomicBool::new(false)),
-            // is_shutting_down: Arc::new(AtomicBool::new(false)),
-            // is_starting_up: Arc::new(AtomicBool::new(false)),
-            // shutdown_latch: CountDownLatch(1),
+impl KafkaServer {
+    /// `new` creates a new instance, expects a parsed config
+    pub fn new(
+        config: KafkaConfig,
+        init_time: std::time::Instant,
+        async_task_tx: mpsc::Sender<AsyncTask>,
+        rx: mpsc::Receiver<KafkaServerAsyncTask>,
+    ) -> Self {
+        // TODO: these configs are now unsynchronized, figure out how to sync them if needed.
+        let config_cp = config.clone();
+        let config_cp2 = config.clone();
+        let majordomo_tx_cp = async_task_tx.clone();
+        Self {
             cluster_id: None,
             metrics: None,
+            // RAFKA TODO: The broker state should be owned by the MajordomoCoordinator
             broker_state: BrokerState::default(),
             data_plane_request_processor: None,
             control_plane_request_processor: None,
@@ -155,7 +154,6 @@ impl Default for KafkaServer {
             socket_server: None,
             data_plane_request_handler_pool: None,
             control_plane_request_handler_pool: None,
-            log_manager: None,
             replica_manager: None,
             admin_manager: None,
             token_manager: None,
@@ -166,48 +164,41 @@ impl Default for KafkaServer {
             kafka_controller: None,
             kafka_scheduler: KafkaScheduler::default(),
             metadata_cache: None,
+            // TODO: In the future we can implement SSL/etc.
+            // In the kotlin code, zkClientConfigFromKafkaConfig is used to build an
+            // Option<ZkClientConfig>, it returns None if there's no SSL setup, we are not using SSL
+            // so we can bypass that and return just the default() value
             zk_client_config: ZKClientConfig::default(),
             _zk_client: KafkaZkClient::default(),
             correlation_id: AtomicU32::new(0),
             broker_meta_props_file: String::from("meta.properties"),
             broker_metadata_checkpoints: HashMap::new(),
             _cluster_id: None,
-            _broker_topic_stats: None,
+            broker_topic_stats: None,
             feature_change_listener: None,
-            init_time: Instant::now(),
-            dynamic_broker_config: dynamic_broker_config.clone(),
-            async_task_tx: majordomo_tx,
-            rx: main_rx,
-            quota_managers: QuotaFactory::instantiate(&dynamic_broker_config.kafka_config, time),
+            init_time,
+            dynamic_broker_config: DynamicBrokerConfig::new(config_cp),
+            config,
+            async_task_tx,
+            rx,
+            quota_managers: QuotaFactory::instantiate(&config_cp2, init_time),
         }
     }
-}
 
-impl KafkaServer {
-    /// `new` creates a new instance, expects a parsed config
-    pub fn new(
-        config: KafkaConfig,
-        time: std::time::Instant,
-        async_task_tx: mpsc::Sender<AsyncTask>,
-        rx: mpsc::Receiver<KafkaServerAsyncTask>,
-    ) -> Self {
-        let mut kafka_server = KafkaServer { async_task_tx, rx, ..KafkaServer::default() };
-        // TODO: In the future we can implement SSL/etc.
-        // In the kotlin code, zkClientConfigFromKafkaConfig is used to build an
-        // Option<ZkClientConfig>, it returns None if there's no SSL setup, we are not using SSL so
-        // we can bypass that and return just the default() value
-        kafka_server.zk_client_config = ZKClientConfig::default();
+    pub fn load_broker_metadata_checkpoints(&mut self) {
+        error!("load_broker_metadata_checkpoints::init()");
         let broker_meta_props_file = String::from("meta.properties");
         // Using File.separator as "/" since this is going to just work on Linux.
-        for bmc_log_dir in &config.log_dirs {
+        for bmc_log_dir in &self.config.log.log_dirs {
             let filename = format!("{}/{}", bmc_log_dir, broker_meta_props_file);
-            kafka_server
-                .broker_metadata_checkpoints
+            self.broker_metadata_checkpoints
                 .insert(bmc_log_dir.clone(), BrokerMetadataCheckpoint::new(&filename));
         }
-        kafka_server.init_time = time;
-        kafka_server.dynamic_broker_config = DynamicBrokerConfig::new(config);
-        kafka_server
+        error!("load_broker_metadata_checkpoints::done()");
+    }
+
+    pub fn init(&mut self) {
+        self.load_broker_metadata_checkpoints();
     }
 
     /// `startup` initializes local and zookeeper resources
@@ -255,15 +246,21 @@ impl KafkaServer {
             }
         }
         self.cluster_id = Some(cluster_id);
-        self.dynamic_broker_config.kafka_config.broker_id =
+        self.dynamic_broker_config.kafka_config.general.broker_id =
             self.get_or_generate_broker_id(preloaded_broker_metadata_checkpoint).await?;
-        debug!("KafkaServer id = {}", self.dynamic_broker_config.kafka_config.broker_id);
+        debug!("KafkaServer id = {}", self.dynamic_broker_config.kafka_config.general.broker_id);
 
         // initialize dynamic broker configs from ZooKeeper. Any updates made after this will be
         // applied after DynamicConfigManager starts.
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
         self.notify_cluster_listeners().await?;
 
+        LogManagerCoordinator::send_offline_dirs(
+            self.async_task_tx.clone(),
+            initial_offline_dirs,
+            self.init_time.clone(),
+        )
+        .await?;
         Ok(())
     }
 
@@ -290,7 +287,7 @@ impl KafkaServer {
         let mut broker_metadata_found = String::from("");
         let mut offline_dirs: Vec<String> = vec![];
 
-        for log_dir in &self.dynamic_broker_config.kafka_config.log_dirs {
+        for log_dir in &self.dynamic_broker_config.kafka_config.log.log_dirs {
             if let Some(checkpoint_dir) = self.broker_metadata_checkpoints.get(log_dir) {
                 match checkpoint_dir.read() {
                     Ok(res) => {
@@ -301,7 +298,7 @@ impl KafkaServer {
                     Err(err) => {
                         offline_dirs.push(log_dir.to_string());
                         error!(
-                            "Fail to read {} under log directory {}: {:?}",
+                            "Failed to read {} under log directory {}: {:?}",
                             self.broker_meta_props_file, log_dir, err
                         );
                     },
@@ -370,7 +367,7 @@ impl KafkaServer {
         self.async_task_tx
             .send(AsyncTask::Zookeeper(KafkaZkClientAsyncTask::GenerateBrokerId(tx)))
             .await?;
-        Ok(rx.await? + self.dynamic_broker_config.kafka_config.reserved_broker_max_id)
+        Ok(rx.await? + self.dynamic_broker_config.kafka_config.general.reserved_broker_max_id)
     }
 
     /// Generates new broker_id if enabled or reads from meta.properties based on following
@@ -387,7 +384,7 @@ impl KafkaServer {
         &mut self,
         broker_metadata: BrokerMetadata,
     ) -> Result<i32, AsyncTaskError> {
-        let broker_id = self.dynamic_broker_config.kafka_config.broker_id;
+        let broker_id = self.dynamic_broker_config.kafka_config.general.broker_id;
 
         if broker_id >= 0
             && broker_metadata.broker_id >= 0
@@ -399,7 +396,7 @@ impl KafkaServer {
             )))
         } else if broker_metadata.broker_id < 0
             && broker_id < 0
-            && self.dynamic_broker_config.kafka_config.broker_id_generation_enable
+            && self.dynamic_broker_config.kafka_config.general.broker_id_generation_enable
         {
             // generate a new brokerId from Zookeeper
             self.generate_broker_id().await
@@ -439,16 +436,42 @@ pub enum KafkaServerError {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
-    // #[test_env_log::test]
+    use crate::server::kafka_config::{self, KafkaConfigProperties};
+    use tracing::error;
+
+    pub struct KafkaServerTestWithChannels {
+        pub majordomo_tx: tokio::sync::mpsc::Sender<AsyncTask>,
+        pub majordomo_rx: tokio::sync::mpsc::Receiver<AsyncTask>,
+        pub kafka_server_tx: tokio::sync::mpsc::Sender<KafkaServerAsyncTask>,
+        pub kafka_server: KafkaServer,
+    }
+
+    pub fn default_server_for_test(
+        config_props: Option<KafkaConfigProperties>,
+    ) -> KafkaServerTestWithChannels {
+        // Used only for testing
+        let (majordomo_tx, majordomo_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let (kafka_server_tx, kafka_server_rx) = mpsc::channel(4_096); // TODO: Magic number removal
+        let kafka_config = match config_props {
+            Some(mut val) => val.build().unwrap(),
+            None => kafka_config::tests::default_config_for_test(),
+        };
+        let kafka_server =
+            KafkaServer::new(kafka_config, Instant::now(), majordomo_tx.clone(), kafka_server_rx);
+        KafkaServerTestWithChannels { majordomo_tx, majordomo_rx, kafka_server_tx, kafka_server }
+    }
+
+    // #[test_log::test]
     #[test]
     fn it_loads_brokermetadata() {
         let mut good_broker_metadata_set: HashSet<BrokerMetadata> = HashSet::new();
         good_broker_metadata_set.insert(BrokerMetadata::new(1, None));
         good_broker_metadata_set.insert(BrokerMetadata::new(1, None));
         let broker_metadata_found = String::from("test");
-        let kafka_server = KafkaServer::default();
+        let kafka_server_test = default_server_for_test(None);
+        let kafka_server = kafka_server_test.kafka_server;
         assert!(kafka_server
             .load_broker_metadata(good_broker_metadata_set, broker_metadata_found.clone())
             .is_ok());
@@ -497,13 +520,9 @@ mod tests {
         let bm_b1 = BrokerMetadata::new(1, None);
         let bm_b2 = BrokerMetadata::new(2, None);
         let bm_b_unset = BrokerMetadata::new(-1, None);
-        let ks_b1 = KafkaServer {
-            dynamic_broker_config: DynamicBrokerConfig::new(KafkaConfig {
-                broker_id: 1,
-                ..KafkaConfig::default()
-            }),
-            ..KafkaServer::default()
-        };
+        let mut ks_b1_config = kafka_config::tests::default_props_for_test();
+        ks_b1_config.try_set_property("broker.id", "1").unwrap();
+        let mut ks_b1 = default_server_for_test(Some(ks_b1_config)).kafka_server;
         let same_broker_id = ks_b1.get_or_generate_broker_id(bm_b1.clone()).await;
         assert!(same_broker_id.is_ok());
         let same_broker_id = same_broker_id.unwrap();
@@ -514,7 +533,7 @@ mod tests {
         assert!(with_bm_b_unset.is_ok());
         let with_bm_b_unset = with_bm_b_unset.unwrap();
         assert_eq!(with_bm_b_unset, 1);
-        let ks_b_unset = KafkaServer::default();
+        let mut ks_b_unset = default_server_for_test(None).kafka_server;
         let broker_1 = ks_b_unset.get_or_generate_broker_id(bm_b1).await.unwrap();
         assert_eq!(broker_1, 1);
         // NOTE: We cannot test with both KafaServer.config.broker_id being -1 and

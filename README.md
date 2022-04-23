@@ -31,7 +31,10 @@ Several threads are created, they talk through tokio::sync::mpsc/oneshot channel
 ### Create the config file
 
 ```bash
-$ cat rafka-config zookeeper.connect = 127.0.0.1:2181/my-chroot
+$ bat basic-config
+zookeeper.connect = 127.0.0.1:2181/chroot
+zookeeper.connection.timeout.ms = 1000
+log.dirs = bad-broker-metadata, non-existent-dir
 ```
 
 ### Start zookeeper
@@ -43,7 +46,7 @@ $ docker run -d --name zkp -p 2181:2181 zookeeper:3.6.2
 ### Run rafka
 
 ```bash
-$ cargo run -- -v info rafka-config
+$ cargo run -- -v info basic-config
 ```
 
 
@@ -53,17 +56,24 @@ $ cargo run -- -v info rafka-config
 - Finalized Feature Change Listeners
 - Dynamic Config can be recognized from zookeeper, but the reconfiguration is not done
 yet, that should be done later, will focus on functionality and deal with this later.
+- Dynamic Broker Configurations
 
 ## Next
-- Dynamic Broker Configurations
+- LogManager Start
 
 ## Current issues
 -  If zookeeper is not available, the CPU usage goes crazy, using connection timeout/etc doesn't seem to help.
 
 ## TODO
+- The properties from KafkaConfig for example could be defined but unreferenced (i.e. when we read the config file, a specific property could not be in the `match{}`
+  Find a way to derive maybe something that requires a setteable?
+  This has been partially alleviated by having an enum for every ConfigProperties so that at least
+  the clippy lints/cargo complaints about it.
+- Create a KafkaConfigDefaults that contains the default values when they are computed, i.e. `pub const fn default_something((24 * 7).to_string())`
 
+## In Progress
 - PR created for zookeeper_async to fix watching over the chroot. Waiting for merge.
-
+  The repo doesn't seem active.
 
 ## Current java/scala process flow.
 - core/src/main/scala/kafka/Kafka.scala parses flags such as --version and creates KafkaServerStartable

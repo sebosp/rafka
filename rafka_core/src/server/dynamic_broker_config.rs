@@ -46,7 +46,7 @@ fn listener_config_regex_captures(text: &str) -> Option<String> {
     LISTENER_CONFIG_REGEX.captures(text).map(|val| val[1].to_string())
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct DynamicBrokerConfig {
     pub kafka_config: KafkaConfig,
     dynamic_default_configs: HashMap<String, String>,
@@ -58,7 +58,8 @@ pub struct DynamicBrokerConfig {
 
 impl DynamicBrokerConfig {
     pub fn new(kafka_config: KafkaConfig) -> Self {
-        let cluster_level_listener_configs = vec![kafka_config::MAX_CONNECTIONS_PROP.to_string()];
+        let cluster_level_listener_configs =
+            vec![kafka_config::socket_server::MAX_CONNECTIONS_PROP.to_string()];
         let (_, per_broker_configs): (Vec<_>, Vec<_>) =
             DynamicListenerConfig::reconfigurable_configs()
                 .into_iter()
@@ -79,9 +80,10 @@ impl DynamicBrokerConfig {
         let admin_zk_client = AdminZkClient::new(tx.clone());
         let default_broker_config = admin_zk_client.fetch_default_broker_config().await?;
         self.update_default_config(default_broker_config)?;
-        let props =
-            admin_zk_client.fetch_specific_broker_config(self.kafka_config.broker_id).await?;
-        self.update_broker_config(self.kafka_config.broker_id, props)?;
+        let props = admin_zk_client
+            .fetch_specific_broker_config(self.kafka_config.general.broker_id)
+            .await?;
+        self.update_broker_config(self.kafka_config.general.broker_id, props)?;
         Ok(())
     }
 
@@ -116,20 +118,22 @@ impl DynamicBrokerConfig {
                     props1.insert(prop_key.to_string(), prop_value.to_string());
                     match Self::validate_config_types(&props1) {
                         Ok(()) => {
-                            debug!("Property {} is valid", prop_key);
+                            tracing::debug!("Property {} is valid", prop_key);
                         },
                         Err(_) => {
-                            debug!("Property {} is invalid, will ignore value", prop_key);
+                            tracing::debug!("Property {} is invalid, will ignore value", prop_key);
                             valid_props.remove(prop_key);
                             invalid_props.insert(prop_key.to_string(), prop_value.to_string());
                         },
                     };
                 }
                 let config_source = if per_broker_config { "broker" } else { "default cluster" };
-                error!(
+                tracing::error!(
                     "Dynamic {} config contains invalid values: {:?}, these configs will be \
                      ignored. {:?}",
-                    config_source, invalid_props, err
+                    config_source,
+                    invalid_props,
+                    err
                 );
                 valid_props
             },
@@ -161,7 +165,7 @@ impl DynamicBrokerConfig {
             for invalid_prop_name in &invalid_prop_names {
                 properties.remove(invalid_prop_name);
             }
-            error!("{}: {:?}", error_message, invalid_prop_names);
+            tracing::error!("{}: {:?}", error_message, invalid_prop_names);
         }
     }
 
@@ -222,31 +226,30 @@ impl DynamicBrokerConfig {
 
     fn broker_config_synonyms(name: &str, match_listener_override: bool) -> Vec<String> {
         let res = match name {
-            kafka_config::LOG_ROLL_TIME_MILLIS_PROP | kafka_config::LOG_ROLL_TIME_HOURS_PROP => {
-                vec![
-                    kafka_config::LOG_ROLL_TIME_MILLIS_PROP,
-                    kafka_config::LOG_ROLL_TIME_HOURS_PROP,
-                ]
-            },
-            kafka_config::LOG_ROLL_TIME_JITTER_MILLIS_PROP
-            | kafka_config::LOG_ROLL_TIME_JITTER_HOURS_PROP => vec![
-                kafka_config::LOG_ROLL_TIME_JITTER_MILLIS_PROP,
-                kafka_config::LOG_ROLL_TIME_JITTER_HOURS_PROP,
+            kafka_config::log::LOG_ROLL_TIME_MILLIS_PROP
+            | kafka_config::log::LOG_ROLL_TIME_HOURS_PROP => vec![
+                kafka_config::log::LOG_ROLL_TIME_MILLIS_PROP,
+                kafka_config::log::LOG_ROLL_TIME_HOURS_PROP,
             ],
-            kafka_config::LOG_FLUSH_INTERVAL_MS_PROP =>
+            kafka_config::log::LOG_ROLL_TIME_JITTER_MILLIS_PROP
+            | kafka_config::log::LOG_ROLL_TIME_JITTER_HOURS_PROP => vec![
+                kafka_config::log::LOG_ROLL_TIME_JITTER_MILLIS_PROP,
+                kafka_config::log::LOG_ROLL_TIME_JITTER_HOURS_PROP,
+            ],
+            kafka_config::log::LOG_FLUSH_INTERVAL_MS_PROP =>
             // LogFlushSchedulerIntervalMsProp is used as default
             {
                 vec![
-                    kafka_config::LOG_FLUSH_INTERVAL_MS_PROP,
-                    kafka_config::LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP,
+                    kafka_config::log::LOG_FLUSH_INTERVAL_MS_PROP,
+                    kafka_config::log::LOG_FLUSH_SCHEDULER_INTERVAL_MS_PROP,
                 ]
             },
-            kafka_config::LOG_RETENTION_TIME_MILLIS_PROP
-            | kafka_config::LOG_RETENTION_TIME_MINUTES_PROP
-            | kafka_config::LOG_RETENTION_TIME_HOURS_PROP => vec![
-                kafka_config::LOG_RETENTION_TIME_MILLIS_PROP,
-                kafka_config::LOG_RETENTION_TIME_MINUTES_PROP,
-                kafka_config::LOG_RETENTION_TIME_HOURS_PROP,
+            kafka_config::log::LOG_RETENTION_TIME_MILLIS_PROP
+            | kafka_config::log::LOG_RETENTION_TIME_MINUTES_PROP
+            | kafka_config::log::LOG_RETENTION_TIME_HOURS_PROP => vec![
+                kafka_config::log::LOG_RETENTION_TIME_MILLIS_PROP,
+                kafka_config::log::LOG_RETENTION_TIME_MINUTES_PROP,
+                kafka_config::log::LOG_RETENTION_TIME_HOURS_PROP,
             ],
             _ => {
                 if match_listener_override {
@@ -257,7 +260,7 @@ impl DynamicBrokerConfig {
                         // Add <configName> as a synonym in both cases. RAFKA NOTE: This is all
                         // about SASL and Auth which is not the target for
                         // this yet.
-                        error!(
+                        tracing::error!(
                             "broker_config_synonyms: Property name {} may not be supported, no \
                              sasl config is done yet",
                             name
@@ -326,9 +329,11 @@ impl DynamicBrokerConfig {
                 // RAFKA TODO: The broker_reconfigurables_to_update should be a
                 // Vec<BrokerReconfigurable> and then for each item that needs to be updated, we
                 // should iterate so that it can move from previouus config to new config
-                error!(
+                tracing::error!(
                     "NOT implemented: Should reconfigure {} from {:?} to {:?}",
-                    reconfigurable, old_config, self.kafka_config
+                    reconfigurable,
+                    old_config,
+                    self.kafka_config
                 );
             }
         }
@@ -349,9 +354,10 @@ impl DynamicBrokerConfig {
             Ok(()) => Ok(()),
             Err(err) => {
                 // RAFKA TODO: Is this an AsyncTaskError ? Who should act on it?
-                error!(
+                tracing::error!(
                     "Cluster default configs could not be applied: {:?}: {:?}",
-                    persistent_props, err
+                    persistent_props,
+                    err
                 );
                 Ok(())
             },
@@ -372,9 +378,11 @@ impl DynamicBrokerConfig {
         match self.update_current_config() {
             Ok(()) => Ok(()),
             Err(err) => {
-                error!(
+                tracing::error!(
                     "Per-broker configs of {} could not be applied: {:?}: {:?}",
-                    broker_id, persistent_props, err
+                    broker_id,
+                    persistent_props,
+                    err
                 );
                 Ok(())
             },
@@ -388,11 +396,11 @@ impl DynamicListenerConfig {
     pub fn reconfigurable_configs() -> Vec<String> {
         vec![
             // Listener configs
-            kafka_config::ADVERTISED_LISTENERS_PROP.to_string(),
-            kafka_config::LISTENERS_PROP.to_string(),
+            kafka_config::socket_server::ADVERTISED_LISTENERS_PROP.to_string(),
+            kafka_config::socket_server::LISTENERS_PROP.to_string(),
             // RAFKA NOTE: No SSL, No SASL
             // Connection limit
-            kafka_config::MAX_CONNECTIONS_PROP.to_string(),
+            kafka_config::socket_server::MAX_CONNECTIONS_PROP.to_string(),
         ]
     }
 }
@@ -403,4 +411,20 @@ pub trait BrokerReconfigurable {
     fn validate_reconfiguration(&self, new_config: KafkaConfig);
 
     fn reconfigure(&self, old_config: KafkaConfig, new_config: KafkaConfig);
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::server::kafka_config;
+    pub fn default_for_test() -> DynamicBrokerConfig {
+        DynamicBrokerConfig {
+            kafka_config: kafka_config::tests::default_config_for_test(),
+            dynamic_default_configs: HashMap::new(),
+            dynamic_broker_configs: HashMap::new(),
+            per_broker_configs: vec![],
+            cluster_level_listener_configs: vec![],
+            static_broker_configs: HashMap::new(),
+        }
+    }
 }

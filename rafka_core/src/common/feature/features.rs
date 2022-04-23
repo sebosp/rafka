@@ -1,6 +1,6 @@
 // From clients/src/main/java/org/apache/kafka/common/feature/Features.java
 
-use super::base_version_range::{BaseVersionRange, BaseVersionRangeError};
+use super::base_version_range::BaseVersionRangeError;
 use super::finalized_version_range::FinalizedVersionRange;
 use super::supported_version_range::SupportedVersionRange;
 use std::collections::HashMap;

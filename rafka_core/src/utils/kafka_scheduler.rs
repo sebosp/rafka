@@ -10,7 +10,7 @@ use std::time::Duration;
 pub struct KafkaScheludedTask;
 
 /// RAFKA TODO: Maybe :Sync?
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KafkaScheduler {
     /// The name of this task
     name: String,
@@ -26,7 +26,7 @@ pub struct KafkaScheduler {
 impl Default for KafkaScheduler {
     fn default() -> Self {
         Self {
-            name: String::from("Kafka-Scheduler-unnanmed"),
+            name: String::from("Kafka-Scheduler-unnamed"),
             delay: Duration::from_millis(0),
             period: -1i32,
         }

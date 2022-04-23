@@ -99,7 +99,7 @@ impl BrokerMetadataCheckpoint {
 
     /// `read` performs the I/O operation of reading the file
     pub fn read(&self) -> Result<BrokerMetadata, VerifiablePropertiesError> {
-        trace!("Reading {}", self.filename.display());
+        trace!("BrokerMetadataCheckpoint read({})", self.filename.display());
         // try to delete any existing temp files for cleanliness
         let temp_file_name = format!("{}.tmp", self.filename.display());
         let temp_path = PathBuf::from(&temp_file_name);
@@ -110,18 +110,11 @@ impl BrokerMetadataCheckpoint {
                     // TODO: PANIC? Maybe one of the filesystems/disks is read-only.
                     return Err(VerifiablePropertiesError::Io(err));
                 },
-                Ok(()) => {
-                    debug!("Successfully deleted leftover .tmp BrokerMetadataCheckpoint file")
-                },
+                Ok(()) => info!("Successfully deleted leftover .tmp BrokerMetadataCheckpoint file"),
             }
         }
-        if !self.filename.is_file() {
-            warn!(
-                "No meta.properties file under dir: {}",
-                self.filename.parent().unwrap_or(&Path::new("/")).display()
-            );
-        }
 
+        // If the file does not exist, read_lines would emit Io Error(Kind::NotFound) to the caller
         let lines = read_lines(&self.filename)?;
         let mut config_content = String::from("");
         for line_data in lines {
@@ -152,7 +145,7 @@ where
 mod tests {
     use super::*;
 
-    // #[test_env_log::test]
+    // #[test_log::test]
     #[test]
     fn parse_config_string() {
         let filename = String::from("somepath");

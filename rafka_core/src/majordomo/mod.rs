@@ -18,16 +18,20 @@
 
 use crate::common::cluster_resource::ClusterResource;
 use crate::common::internals::cluster_resource_listeners::ClusterResourceListeners;
+use crate::log::log_manager::{LogManagerAsyncTask, LogManagerError};
+use crate::server::broker_states::BrokerState;
 use crate::server::finalize_feature_change_listener::{
     FeatureCacheUpdater, FeatureCacheUpdaterAsyncTask, FeatureCacheUpdaterError,
 };
 use crate::server::kafka_config::KafkaConfig;
+use crate::server::kafka_config::KafkaConfigError;
 use crate::server::kafka_server::KafkaServerError;
-use crate::server::log_failure_channel::LogDirFailureChannel;
+use crate::server::log_failure_channel::{LogDirFailureChannel, LogDirFailureChannelAsyncTask};
 use crate::server::supported_features::SupportedFeatures;
 use crate::zk::kafka_zk_client::KafkaZkClientAsyncTask;
 use crate::zk::zk_data::FeatureZNode;
 use std::error::Error;
+use std::path::PathBuf;
 use std::thread;
 use thiserror::Error;
 use tokio::runtime::Handle;
@@ -39,6 +43,7 @@ use tracing_attributes::instrument;
 #[derive(Debug)]
 pub enum CoordinatorTask {
     Shutdown,
+    UpdateBrokerState(BrokerState),
 }
 
 /// `AsyncTask` contains message types that majordomo coordinator can work on
@@ -48,6 +53,8 @@ pub enum AsyncTask {
     FinalizedFeatureCache(FeatureCacheUpdaterAsyncTask),
     Coordinator(CoordinatorTask),
     ClusterResource(ClusterResource),
+    LogDirFailureChannel(LogDirFailureChannelAsyncTask),
+    LogManager(LogManagerAsyncTask),
 }
 
 #[derive(Error, Debug)]
@@ -70,6 +77,14 @@ pub enum AsyncTaskError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("KafkaServer {0:?}")]
     KafkaServer(#[from] KafkaServerError),
+    #[error("KafkaConfig {0:?}")]
+    KafkaConfig(#[from] KafkaConfigError),
+    #[error("LogManager {0:?}")]
+    LogManager(#[from] LogManagerError),
+    #[error("KafkaStorageException on dir {0:?}")]
+    KafkaStorageException(PathBuf),
+    #[error("KafkaException {0:?}")]
+    KafkaException(#[from] crate::KafkaException),
 }
 
 impl AsyncTaskError {
@@ -110,32 +125,39 @@ pub struct MajordomoCoordinator {
     feature_cache_updater: FeatureCacheUpdater,
     supported_features: SupportedFeatures,
     kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+    log_manager_tx: mpsc::Sender<LogManagerAsyncTask>,
     tx: mpsc::Sender<AsyncTask>,
     rx: mpsc::Receiver<AsyncTask>,
     cluster_resource_listeners: ClusterResourceListeners,
     log_dir_failure_channel: LogDirFailureChannel,
+    broker_state: BrokerState,
 }
 
 impl MajordomoCoordinator {
     pub async fn new(
         kafka_config: KafkaConfig,
         kafka_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        log_manager_tx: mpsc::Sender<LogManagerAsyncTask>,
         main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
+        // RAFKA TODO: Consider creating a builder for this since the number of params may grow even
+        // more.
         let supported_features = SupportedFeatures::default();
         let feature_cache_updater = FeatureCacheUpdater::new(FeatureZNode::default_path());
         let cluster_resource_listeners = ClusterResourceListeners::default();
-        let log_dir_failure_channel = LogDirFailureChannel::new(kafka_config.log_dirs.len());
+        let log_dir_failure_channel = LogDirFailureChannel::new(kafka_config.log.log_dirs.len());
         Ok(MajordomoCoordinator {
             kafka_config,
             tx: main_tx,
             rx: main_rx,
             feature_cache_updater,
             kafka_zk_tx,
+            log_manager_tx,
             supported_features,
             cluster_resource_listeners,
             log_dir_failure_channel,
+            broker_state: BrokerState::default(),
         })
     }
 
@@ -143,7 +165,10 @@ impl MajordomoCoordinator {
     pub async fn process_message_queue(&mut self) -> Result<(), AsyncTaskError> {
         debug!("majordomo coordinator: Preparing",);
         self.feature_cache_updater
-            .init_or_throw(self.tx.clone(), self.kafka_config.zk_connection_timeout_ms.into())
+            .init_or_throw(
+                self.tx.clone(),
+                self.kafka_config.zookeeper.zk_connection_timeout_ms.into(),
+            )
             .await?;
         debug!("majordomo coordinator: Main loop starting");
         while let Some(message) = self.rx.recv().await {
@@ -157,7 +182,13 @@ impl MajordomoCoordinator {
                     });
                 },
                 AsyncTask::Coordinator(task) => {
-                    info!("coordinator coord_task is {:?}", task);
+                    tracing::info!("coordinator coord_task is {:?}", task);
+                    match task {
+                        CoordinatorTask::Shutdown => break,
+                        CoordinatorTask::UpdateBrokerState(state) => {
+                            self.broker_state = state;
+                        },
+                    }
                 },
                 AsyncTask::FinalizedFeatureCache(task) => {
                     info!("finalized feature cache task is {:?}", task);
@@ -172,10 +203,22 @@ impl MajordomoCoordinator {
                 AsyncTask::ClusterResource(cluster_resource) => {
                     self.notify_cluster_listeners(cluster_resource).await?;
                 },
+                AsyncTask::LogDirFailureChannel(task) => {
+                    LogDirFailureChannelAsyncTask::process_task(
+                        &mut self.log_dir_failure_channel,
+                        task,
+                    );
+                },
+                AsyncTask::LogManager(task) => {
+                    let log_manager_tx_cp = self.log_manager_tx.clone();
+                    tokio::spawn(async move {
+                        log_manager_tx_cp.send(task).await.unwrap();
+                    });
+                },
             }
         }
         self.kafka_zk_tx.send(KafkaZkClientAsyncTask::Shutdown).await?;
-        error!("majordomo coordinator: Exiting.");
+        tracing::info!("majordomo coordinator: Exiting.");
         Ok(())
     }
 
@@ -190,6 +233,7 @@ impl MajordomoCoordinator {
     pub async fn init_coordinator_thread(
         kafka_config: KafkaConfig,
         kfk_zk_tx: mpsc::Sender<KafkaZkClientAsyncTask>,
+        log_manager_tx: mpsc::Sender<LogManagerAsyncTask>,
         main_tx: mpsc::Sender<AsyncTask>,
         main_rx: mpsc::Receiver<AsyncTask>,
     ) -> Result<thread::JoinHandle<()>, AsyncTaskError> {
@@ -199,7 +243,7 @@ impl MajordomoCoordinator {
             .spawn(move || {
                 current_tokio_handle.spawn(async move {
                     let mut majordomo_coordinator =
-                        Self::new(kafka_config, kfk_zk_tx, main_tx, main_rx)
+                        Self::new(kafka_config, kfk_zk_tx, log_manager_tx, main_tx, main_rx)
                             .await
                             .expect("Unable to create Majordomo Coordinator");
                     majordomo_coordinator

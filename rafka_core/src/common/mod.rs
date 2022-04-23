@@ -1,4 +1,9 @@
 pub mod cluster_resource;
+pub mod config;
 pub mod config_def;
 pub mod feature;
 pub mod internals;
+pub mod network;
+pub mod record;
+pub mod security;
+pub mod topic_partition;

@@ -1,6 +1,6 @@
+//! From core/src/main/scala/kafka/utils/VerifiableProperties.scala
 use std::collections::HashMap;
 use std::num;
-/// From core/src/main/scala/kafka/utils/VerifiableProperties.scala
 use thiserror::Error;
 
 // RAFKA TODO: This is very similar to KafkaConfigError, maybe join them

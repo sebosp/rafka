@@ -18,7 +18,7 @@ use crate::zk::zk_data;
 use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, oneshot};
-use tracing::{debug, error, info, trace, warn};
+use tracing::{error, info, trace, warn};
 use tracing_attributes::instrument;
 #[derive(Debug)]
 pub struct FinalizedFeatureChangeListener {
@@ -77,17 +77,17 @@ impl FeatureCacheUpdater {
             )
             .await
             {
-                Ok(()) => {
-                    trace!("Successfully requested {} through KafkaZkClient", "GetDataAndVersion")
-                },
+                Ok(()) => trace!("Successfully requested GetDataAndVersion through KafkaZkClient"),
                 // RAFKA TODO: Send a Result through tx/rx so that we can send Errors to callers
-                Err(err) => panic!("Error requesting read through KafkaZkClient"),
+                Err(err) => {
+                    panic!("Error requesting GetDataAndVersion through KafkaZkClient: {:?}", err)
+                },
             };
             let response = rx.await.unwrap();
             match FeatureCacheUpdaterAsyncTask::rep_update_latest(majordomo_tx, response).await {
-                Ok(()) => trace!("Successfully replied {} to caller", "GetDataAndVersion"),
+                Ok(()) => trace!("Successfully replied GetDataAndVersion to caller"),
                 // RAFKA TODO: Send a Result through tx/rx so that we can send Errors to callers
-                Err(err) => panic!("Error requesting read through KafkaZkClient"),
+                Err(err) => panic!("Error replying GetDataAndVersion to caller: {:?}", err),
             };
         });
         Ok(())

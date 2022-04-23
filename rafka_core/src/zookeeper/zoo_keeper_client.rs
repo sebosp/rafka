@@ -148,6 +148,17 @@ impl ZooKeeperClient {
         }
     }
 
+    /// `get_children_request` Peforms a get children operation to zookeeper.
+    /// For now not enabling "watching" the node
+    #[instrument]
+    pub async fn get_children_request(&self, path: &str) -> Result<Vec<String>, AsyncTaskError> {
+        if let Some(zk) = &self.zookeeper {
+            Ok(zk.get_children(path, false).await?)
+        } else {
+            Err(AsyncTaskError::ZooKeeperClient(ZooKeeperClientError::NotInitialized))
+        }
+    }
+
     /// `create_request` Creates an operation request for zookeeper, we do not seem to get a
     /// create_response, and we seem to be returned a string?
     #[instrument]

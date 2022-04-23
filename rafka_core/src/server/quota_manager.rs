@@ -62,15 +62,15 @@ impl QuotaFactory {
 
     pub fn client_fetch_config(cfg: &KafkaConfig) -> ClientQuotaManagerConfig {
         ClientQuotaManagerConfig::new(
-            cfg.consumer_quota_bytes_per_second_default,
-            cfg.quota_window_size_seconds,
+            cfg.quota.consumer_quota_bytes_per_second_default,
+            cfg.quota.quota_window_size_seconds,
         )
     }
 
     pub fn client_produce_config(cfg: &KafkaConfig) -> ClientQuotaManagerConfig {
         ClientQuotaManagerConfig::new(
-            cfg.consumer_quota_bytes_per_second_default,
-            cfg.quota_window_size_seconds,
+            cfg.quota.consumer_quota_bytes_per_second_default,
+            cfg.quota.quota_window_size_seconds,
         )
     }
 }
