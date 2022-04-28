@@ -22,8 +22,24 @@ original repo and moving some stuff here
 
 ## Threads and message passing
 
-Several threads are created, they talk through tokio::sync::mpsc/oneshot channels.
-- ./rafka_core/src/majordomo/mod.rs Majordomo Coordinator. This is the main thread that coordinates services/messages/state
+Several threads are created, they talk through tokio::sync::mpsc/oneshot channels, these threads
+are currently not mapped to kafka's numthread variables.
+
+
+### The pattern
+A variable is shared mutable/locked through different threads in the original code.
+An AsyncTask is created for its class. Optionally a Coordinator is created for it,
+mostly in its own thread.
+
+The job of a coordinator is to synchronize access to values from multiple requesters.
+This is probably a big limitant and may in the end need to be moved to Mutex/Arcs/etc
+
+### Coordinators
+Message coordinators are used to handle communication between threads.
+
+- MajordomoCoordinator: Main entry point, a thread is started for it. Receives channels to communicate with LogDirFailureChannel,
+KafkaZkClientCoordinator, LogManagerCoordinator.
+
 - ./rafka_core/src/zk/kafka_zk_client.rs KafkaZKClient. zookeeper watches/data-requests should not block the coordinator.
 
 ## Running
@@ -49,7 +65,6 @@ $ docker run -d --name zkp -p 2181:2181 zookeeper:3.6.2
 $ cargo run -- -v info basic-config
 ```
 
-
 ## Status
 - Reading configuration file.
 - Creation of persistent paths in zookeeper.
@@ -57,9 +72,10 @@ $ cargo run -- -v info basic-config
 - Dynamic Config can be recognized from zookeeper, but the reconfiguration is not done
 yet, that should be done later, will focus on functionality and deal with this later.
 - Dynamic Broker Configurations
+- LogManager Start
 
 ## Next
-- LogManager Start
+- Log(Segment) start.
 
 ## Current issues
 -  If zookeeper is not available, the CPU usage goes crazy, using connection timeout/etc doesn't seem to help.
