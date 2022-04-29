@@ -203,7 +203,10 @@ impl LogManager {
                                     tx,
                                 },
                             )))
-                            .await;
+                            .await
+                            .expect(
+                                "Unable to queue potential dir log load to majordomo coordinator",
+                            );
                     });
                 }
             }
@@ -572,13 +575,13 @@ impl LogManagerCoordinator {
                             .await
                             .expect("Unable to send ResLoadLogs to LogManagerCoordinator"),
                         Err(err) => {
-                            req.tx.send(Err(err.into()));
+                            req.tx.send(Err(err.into())).expect("Oneshot receiver handle dropped.");
                         },
                     }
                 },
                 Err(err) => {
                     tracing::error!("Unable to load log: {:?}", err);
-                    req.tx.send(Err(err.into()));
+                    req.tx.send(Err(err.into())).expect("Oneshot receiver handle dropped.");
                 },
             };
         });
