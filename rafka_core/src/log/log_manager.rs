@@ -130,6 +130,8 @@ impl LogManager {
             initial_offline_dirs.iter().map(|path| PathBuf::from(path)).collect();
     }
 
+    /// Creates a file on each [`live_log_dirs`] directory for either a recovery point or a log
+    /// start offset.
     pub fn create_checkpoint_file(
         &self,
         file_name: &str,
@@ -154,6 +156,8 @@ impl LogManager {
             .collect()
     }
 
+    /// Initializes the LogManager. It validates log.dirs, checkpoint files and starts the log
+    /// loading process.
     pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
         let log_creation_or_deletion_lock: Option<()> = None; // XXX: Was set as object, figure out what to d
                                                               // The logs being moved across kafka (as with partition reassigment) contain a '-future',
@@ -217,7 +221,7 @@ impl LogManager {
     /// Recovers and loads all the logs from the log_dirs data directories
     async fn load_logs(&mut self) -> Result<(), AsyncTaskError> {
         tracing::info!("Loading logs");
-        let init_time = self.time;
+        let _init_time = self.time;
         let mut offline_dirs: Vec<(PathBuf, io::Error)> = vec![];
         // Store the log_dir and a response channel that contains the result from the async task to
         // load the logs.
@@ -301,6 +305,8 @@ impl LogManager {
                 };
             }
         }
+
+        // RAFKA NEXT: delete clean shutdown files
         Ok(())
     }
 
@@ -510,10 +516,10 @@ impl LogManagerCoordinator {
             tracing::info!("LogManager coordinator {:?}", task);
             match task {
                 LogManagerAsyncTask::ReqLoadLogs(req) => {
-                    self.req_load_log(req).await;
+                    self.req_load_log(req).await.expect("Unable to process ReqLoadLogs");
                 },
                 LogManagerAsyncTask::ResLoadLogs(res) => {
-                    self.res_load_log(res).await;
+                    self.res_load_log(res).await.expect("Unable to process ResLoadLogs");
                 },
                 LogManagerAsyncTask::LoadInitialOfflineDirs(initial_offline_dirs, time) => {
                     self.log_manager.set_initial_offline_dirs(initial_offline_dirs);
@@ -588,6 +594,9 @@ impl LogManagerCoordinator {
         Ok(())
     }
 
+    /// Handles the finish Response triggered by a previous async LoadLogRequest. The Request was
+    /// previously spawned and once finished it would send a message to process LoadLogResponse
+    /// here.
     pub async fn res_load_log(&mut self, res: LoadLogResponse) -> Result<(), AsyncTaskError> {
         if res.log_dir.display().to_string().ends_with(log::DELETE_DIR_SUFFIX) {
             self.logs_to_be_deleted.insert(res.log, Instant::now());
