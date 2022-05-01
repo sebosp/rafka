@@ -56,9 +56,8 @@ impl VerifiableProperties {
     pub fn new(content: String, source_filename: &str) -> Result<Self, VerifiablePropertiesError> {
         let mut props = HashMap::new();
         for (line_number, config_line) in content.split('\n').enumerate() {
-            if config_line.is_empty() {
-                // Allow empty strings.
-                // TODO: allow comments
+            if config_line.is_empty() || config_line.starts_with('#') {
+                // Allow empty strings or comments
                 continue;
             }
             let config_line_parts: Vec<&str> = config_line.splitn(2, '=').collect();
@@ -76,6 +75,8 @@ impl VerifiableProperties {
         Ok(Self { props })
     }
 
+    /// Ensures a key is present in the HashMap or return
+    /// [`VerifiablePropertiesError::MissingRequiredKey`]
     pub fn get_required_i32(&self, name: &str) -> Result<i32, VerifiablePropertiesError> {
         // TODO: Make generic
         if let Some(val) = self.props.get(name) {
@@ -92,6 +93,8 @@ impl VerifiableProperties {
         }
     }
 
+    /// Ensures a key is present in the the [`VerifiableProperties.props`] HashMap. The property
+    /// must also match a expected `rhs` value.
     pub fn validate_key_has_i32_value(
         &self,
         name: &str,
