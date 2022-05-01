@@ -116,17 +116,14 @@ impl BrokerMetadataCheckpoint {
 
         // If the file does not exist, read_lines would emit Io Error(Kind::NotFound) to the caller
         let lines = read_lines(&self.filename)?;
-        let mut config_content = String::from("");
+        let mut config_content = vec![];
         for line_data in lines {
-            match line_data {
-                Ok(config_line) => config_content.push_str(&config_line),
-                Err(err) => {
-                    error!("Unable to read line from file: {:?}", err);
-                    return Err(VerifiablePropertiesError::Io(err));
-                },
-            }
+            config_content.push(line_data?);
         }
-        BrokerMetadata::from_multiline_string(config_content, &self.filename.display().to_string())
+        BrokerMetadata::from_multiline_string(
+            config_content.join("\n"),
+            &self.filename.display().to_string(),
+        )
     }
 }
 
