@@ -454,6 +454,12 @@ pub enum LogManagerAsyncTask {
     ResLoadLogs(LoadLogResponse),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum LogManagerState {
+    PreInit,
+    Initialized,
+}
+
 #[derive(Debug)]
 pub struct LogManagerCoordinator {
     tx: mpsc::Sender<LogManagerAsyncTask>,
@@ -464,6 +470,7 @@ pub struct LogManagerCoordinator {
     future_logs: HashMap<TopicPartition, Log>,
     current_logs: HashMap<TopicPartition, Log>,
     logs_to_be_deleted: HashMap<Log, Instant>,
+    state: LogManagerState,
 }
 impl LogManagerCoordinator {
     /// Creates a new instance of the LogManagerCoordinator
@@ -489,8 +496,11 @@ impl LogManagerCoordinator {
         }
         let future_logs: HashMap<TopicPartition, Log> = HashMap::new();
         let current_logs: HashMap<TopicPartition, Log> = HashMap::new();
+        // res.log_manager.init().await?;
+        // The LogManagerCoordinator cannot yet initialize, it must first wait for the
+        // LoadInitialOfflineDirs from the KafkaServer
 
-        let mut res = Self {
+        Ok(Self {
             tx,
             rx,
             topic_configs,
@@ -499,9 +509,8 @@ impl LogManagerCoordinator {
             initial_default_config: broker_defaults,
             log_manager: LogManager::new(config, KafkaScheduler::default(), time, majordomo_tx)?,
             logs_to_be_deleted: HashMap::new(),
-        };
-        res.log_manager.init().await?;
-        Ok(res)
+            state: LogManagerState::PreInit,
+        })
     }
 
     /// `main_tx` clones the current transmission endpoint in the coordinator channel.
@@ -516,13 +525,25 @@ impl LogManagerCoordinator {
             tracing::info!("LogManager coordinator {:?}", task);
             match task {
                 LogManagerAsyncTask::ReqLoadLogs(req) => {
-                    self.req_load_log(req).await.expect("Unable to process ReqLoadLogs");
+                    // RAKA TODO: handle sending back a AsyncTaskRetry for when the LogManagerState
+                    // is not Initialized, otherwise the req.tx would never be used and the waiting
+                    // process would be stuck forever
+                    if self.state == LogManagerState::Initialized {
+                        self.req_load_log(req).await.expect("Unable to process ReqLoadLogs");
+                    }
                 },
                 LogManagerAsyncTask::ResLoadLogs(res) => {
-                    self.res_load_log(res).await.expect("Unable to process ResLoadLogs");
+                    // RAKA TODO: handle sending back a AsyncTaskRetry for when the LogManagerState
+                    // is not Initialized, otherwise the req.tx would never be used and the waiting
+                    // process would be stuck forever
+                    if self.state == LogManagerState::Initialized {
+                        self.res_load_log(res).await.expect("Unable to process ResLoadLogs");
+                    }
                 },
                 LogManagerAsyncTask::LoadInitialOfflineDirs(initial_offline_dirs, time) => {
                     self.log_manager.set_initial_offline_dirs(initial_offline_dirs);
+                    self.log_manager.init().await?;
+                    self.state = LogManagerState::Initialized;
                     self.log_manager.time = time;
                 },
             }
