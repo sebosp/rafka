@@ -255,6 +255,8 @@ impl KafkaServer {
         self.dynamic_broker_config.initialize(self.async_task_tx.clone()).await?;
         self.notify_cluster_listeners().await?;
 
+        // Send the initial_offline_dirs to the LogManagerCoordinator so that it may continue
+        // initializing, validating segment dirs, loading logs, etc.
         LogManagerCoordinator::send_offline_dirs(
             self.async_task_tx.clone(),
             initial_offline_dirs,
