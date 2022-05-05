@@ -6,6 +6,7 @@ pub mod config_handler;
 pub mod dynamic_broker_config;
 pub mod dynamic_config;
 pub mod dynamic_config_manager;
+pub mod epoch;
 pub mod finalize_feature_change_listener;
 pub mod finalized_feature_cache;
 pub mod kafka_config;
