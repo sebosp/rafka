@@ -6,9 +6,10 @@ use crate::log::log;
 pub const UNKNOWN_FILE_POSITION: i32 = -1;
 
 /// A log offset structure
+#[derive(Debug)]
 pub struct LogOffsetMetadata {
     /// The message offset in the partition
-    message_offset: i64,
+    pub message_offset: i64,
     /// The base message offset of the located segment
     segment_base_offset: i64,
     /// The "physical" position on the located segment
