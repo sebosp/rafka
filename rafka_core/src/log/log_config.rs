@@ -781,7 +781,7 @@ pub struct LogConfig {
     min_in_sync_replicas: i32,
     compression_type: BrokerCompressionCodec,
     preallocate: bool,
-    message_format_version: KafkaApiVersion,
+    pub message_format_version: KafkaApiVersion,
     message_timestamp_type: String,
     message_timestamp_difference_max_ms: i64,
     leader_replication_throttled_replicas: Vec<String>,
