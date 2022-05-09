@@ -1,15 +1,20 @@
 //! From core/bin/main/kafka/log/Log.scala
 
 use super::log_config::LogConfig;
+use crate::common::record::record_version::RecordVersion;
 use crate::common::topic_partition::TopicPartition;
 use crate::log::producer_state_manager::ProducerStateManager;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::server::epoch::leader_epoch_file_cache::LeaderEpochFileCache;
+use crate::server::log_offset_metadata::LogOffsetMetadata;
 use crate::KafkaException;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::hash::{Hash, Hasher};
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::time::Instant;
+use std::{fs, io};
 use tokio::sync::mpsc;
 
 // Used by kafka 0.8 and higher to indicate kafka was shutdown properly.
@@ -21,6 +26,8 @@ pub const DELETE_DIR_SUFFIX: &str = "-delete";
 // A directory that is used for future partition, for example for a partition being sent to/from
 // another broker/log-dir
 pub const FUTURE_DIR_SUFFIX: &str = "-future";
+
+pub const UNKNOWN_OFFSET: i64 = -1;
 
 pub fn delete_dir_pattern(input: &str) -> Option<(&str, &str, &str)> {
     lazy_static! {
@@ -80,6 +87,8 @@ pub struct Log {
     producer_id_expiration_check_interval_ms: u64,
     topic_partition: TopicPartition,
     producer_state_manager: ProducerStateManager,
+    next_offset_metadata: LogOffsetMetadata,
+    leader_epoch_cache: Option<LeaderEpochFileCache>,
     // The identifier of a Log
     log_ident: String,
     majordomo_tx: mpsc::Sender<AsyncTask>,
@@ -132,12 +141,80 @@ impl Log {
             producer_id_expiration_check_interval_ms,
             topic_partition,
             producer_state_manager,
+            next_offset_metadata: LogOffsetMetadata::default(),
+            leader_epoch_cache: None,
             log_ident,
             majordomo_tx,
         })
     }
 
     pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
+        // Create the log directory path, it may already exist.
+        fs::create_dir_all(self.dir.clone());
+        self.initialize_leader_epoch_cache()?;
+        Ok(())
+    }
+
+    /// The offset of the next message that will be appended to the log
+    fn log_end_offset(&self) -> i64 {
+        self.next_offset_metadata.message_offset
+    }
+
+    fn record_version(&self) -> RecordVersion {
+        self.config.message_format_version.record_version
+    }
+
+    fn new_leader_epoch_file_cache(&self) -> Result<LeaderEpochFileCache, AsyncTaskError> {
+        let checkpoint_file =
+            LeaderEpochCheckpointFile::new(leader_epoch_file, self.majordomo_tx.clone());
+        LeaderEpochFileCache::new(
+            self.topic_partition,
+            self.log_end_offset(), /* RAFKA TODO: somehow make the FileCache use the value of
+                                    * log_end_offset */
+            checkpoint_file,
+        )?;
+        Ok(())
+    }
+
+    pub fn initialize_leader_epoch_cache(&mut self) -> Result<(), AsyncTaskError> {
+        let leader_epoch_file = LeaderEpochCheckpointFile::new_file(self.dir);
+        if record_version.precedes(RecordVersion.V2) {
+            let current_cache = if leader_epoch_file.exists() {
+                Some(self.new_leader_epoch_file_cache())
+            } else {
+                None
+            };
+            if let Some(cached_entry) = current_cache {
+                if !current_cache.is_empty() {
+                    tracing::warn!(
+                        "Deleting non-empty leader epoch cache due to incompatible message format \
+                         {record_version}"
+                    )
+                }
+            }
+            let leader_epoch_file_path = leader_epoch_file.to_path();
+            match std::fs::remove_file(leader_epoch_file_path) {
+                Ok(()) => {
+                    tracing::debug!(
+                        "Successfully deleted leader_epoch_file: {}",
+                        leader_epoch_file
+                    );
+                },
+                Err(io::Error(ErrorKind::NotFound)) => {
+                    tracing::debug!(
+                        "No need to delete {} as it doesn't exist",
+                        leader_epoch_file_path
+                    );
+                },
+                Err(err) => {
+                    tracing::error!("Unable to delete {}: {:?}", leader_epoch_file_path, err);
+                    return Err(err.into());
+                },
+            }
+            self.leader_epoch_cache = None;
+        } else {
+            self.leader_epoch_cache = Some(new_leader_epoch_file_cache());
+        }
         Ok(())
     }
 
