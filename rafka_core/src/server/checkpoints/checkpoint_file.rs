@@ -9,7 +9,7 @@ use std::io::{self, BufReader};
 use std::num;
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::{self, Sender};
 
 pub trait CheckpointFileFormatter {
     type Data;
@@ -32,19 +32,27 @@ pub enum TopicPartitionCheckpointFileError {
 }
 
 #[derive(Debug)]
-pub struct TopicPartitionCheckpointFile {
+pub enum CheckpointFileType {
+    TopicPartition,
+    LeaderEpoc,
+}
+
+#[derive(Debug)]
+pub struct CheckpointFile {
     file: PathBuf,
     async_task_tx: Sender<AsyncTask>,
     version: i32,
     log_dir: String,
     temp_path: PathBuf,
+    checkpoint_type: CheckpointFileType,
 }
 
-impl TopicPartitionCheckpointFile {
+impl CheckpointFileType {
     pub fn new(
         file: PathBuf,
         async_task_tx: Sender<AsyncTask>,
         version: i32,
+        checkpoint_type: CheckpointFileType,
     ) -> Result<Self, io::Error> {
         // RAFKA TODO: This is about the third time that we unwrap the canonicalization of the dir.
         // MAybe we should create a struct that holds:
@@ -65,11 +73,9 @@ impl TopicPartitionCheckpointFile {
                 io::ErrorKind::AlreadyExists => {},
                 _ => return Err(why),
             },
-            Ok(_file) => {
-                tracing::trace!("TopicPartitionCheckpointFile: Created File: {}", path.display())
-            },
+            Ok(_file) => tracing::trace!("CheckpointFile: Created File: {}", path.display()),
         };
-        Ok(Self { file, async_task_tx, version, log_dir, temp_path })
+        Ok(Self { file, async_task_tx, version, log_dir, temp_path, checkpoint_type })
     }
 
     pub fn get_version(&self) -> i32 {
