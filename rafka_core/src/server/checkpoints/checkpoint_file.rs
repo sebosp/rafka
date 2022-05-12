@@ -34,7 +34,7 @@ pub enum TopicPartitionCheckpointFileError {
 #[derive(Debug)]
 pub enum CheckpointFileType {
     TopicPartition,
-    LeaderEpoc,
+    LeaderEpoch,
 }
 
 #[derive(Debug)]

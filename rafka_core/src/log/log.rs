@@ -5,6 +5,7 @@ use crate::common::record::record_version::RecordVersion;
 use crate::common::topic_partition::TopicPartition;
 use crate::log::producer_state_manager::ProducerStateManager;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::server::checkpoints::leader_epoch_checkpoint_file::LeaderEpochCheckpointFile;
 use crate::server::epoch::leader_epoch_file_cache::LeaderEpochFileCache;
 use crate::server::log_offset_metadata::LogOffsetMetadata;
 use crate::KafkaException;
