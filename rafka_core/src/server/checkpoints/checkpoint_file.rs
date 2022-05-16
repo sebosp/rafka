@@ -18,7 +18,7 @@ pub trait CheckpointFileFormatter {
 }
 
 #[derive(Debug, Error)]
-pub enum TopicPartitionCheckpointFileError {
+pub enum CheckpointFileError {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
     #[error("Malformed line in checkpoint file {0}: '{1}'")]
@@ -43,11 +43,12 @@ pub struct CheckpointFile {
     async_task_tx: Sender<AsyncTask>,
     version: i32,
     log_dir: String,
+    path: PathBuf,
     temp_path: PathBuf,
     checkpoint_type: CheckpointFileType,
 }
 
-impl CheckpointFileType {
+impl CheckpointFile{
     pub fn new(
         file: PathBuf,
         async_task_tx: Sender<AsyncTask>,
@@ -75,7 +76,7 @@ impl CheckpointFileType {
             },
             Ok(_file) => tracing::trace!("CheckpointFile: Created File: {}", path.display()),
         };
-        Ok(Self { file, async_task_tx, version, log_dir, temp_path, checkpoint_type })
+        Ok(Self { file, async_task_tx, version, log_dir, path, temp_path, checkpoint_type })
     }
 
     pub fn get_version(&self) -> i32 {
@@ -83,18 +84,18 @@ impl CheckpointFileType {
     }
 }
 
-pub struct TopicPartitionCheckpointReadBuffer {
+pub struct CheckpointReadBuffer {
     location: String,
     file: PathBuf,
     version: i32,
 }
 
-impl TopicPartitionCheckpointReadBuffer {
+impl CheckpointReadBuffer {
     pub fn new(location: String, file: PathBuf, version: i32) -> Self {
         Self { location, file, version }
     }
 
-    pub fn read(&self) -> Result<HashMap<TopicPartition, i64>, TopicPartitionCheckpointFileError> {
+    pub fn read(&self) -> Result<HashMap<TopicPartition, i64>, CheckpointFileError> {
         let mut res = HashMap::new();
         let f = File::open(self.file.clone())?;
         let mut reader = BufReader::new(f);
@@ -106,7 +107,7 @@ impl TopicPartitionCheckpointReadBuffer {
         }
         let file_version = line.parse::<i32>()?;
         if file_version != self.version {
-            return Err(TopicPartitionCheckpointFileError::UnrecognizedVersion(
+            return Err(CheckpointFileError::UnrecognizedVersion(
                 self.location.clone(),
                 file_version,
             ));
@@ -121,10 +122,10 @@ impl TopicPartitionCheckpointReadBuffer {
 
         while reader.read_line(&mut line)? != 0 {
             // Ok(0) is EOF
-            match TopicPartitionCheckpointReadBuffer::from_line(&line) {
+            match CheckpointReadBuffer::from_line(&line) {
                 Some((topic_partition, offset)) => res.insert(topic_partition, offset),
                 None => {
-                    return Err(TopicPartitionCheckpointFileError::MalformedLineException(
+                    return Err(CheckpointFileError::MalformedLineException(
                         self.location.clone(),
                         line,
                     ))
@@ -132,7 +133,7 @@ impl TopicPartitionCheckpointReadBuffer {
             };
         }
         if res.len() != expected_size {
-            return Err(TopicPartitionCheckpointFileError::UnexpectedItemsLength(
+            return Err(CheckpointFileError::UnexpectedItemsLength(
                 expected_size,
                 self.location.clone(),
                 res.len(),
@@ -142,7 +143,7 @@ impl TopicPartitionCheckpointReadBuffer {
     }
 }
 
-impl CheckpointFileFormatter for TopicPartitionCheckpointReadBuffer {
+impl CheckpointFileFormatter for CheckpointReadBuffer {
     type Data = (TopicPartition, i64);
 
     fn to_line(entry: Self::Data) -> String {
