@@ -1,7 +1,10 @@
 //! From core/src/main/scala/kafka/server/checkpoints/CheckpointFile.scala
 
 use crate::common::topic_partition::TopicPartition;
+use crate::log::log_manager::LogManagerError;
 use crate::majordomo::AsyncTask;
+use crate::server::epoch::leader_epoch_file_cache::EpochEntry;
+use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
@@ -9,7 +12,7 @@ use std::io::{self, BufReader};
 use std::num;
 use std::path::PathBuf;
 use thiserror::Error;
-use tokio::sync::mpsc::{self, Sender};
+use tokio::sync::mpsc::Sender;
 
 pub trait CheckpointFileFormatter {
     type Data;
@@ -48,7 +51,7 @@ pub struct CheckpointFile {
     checkpoint_type: CheckpointFileType,
 }
 
-impl CheckpointFile{
+impl CheckpointFile {
     pub fn new(
         file: PathBuf,
         async_task_tx: Sender<AsyncTask>,
@@ -95,7 +98,12 @@ impl CheckpointReadBuffer {
         Self { location, file, version }
     }
 
-    pub fn read(&self) -> Result<HashMap<TopicPartition, i64>, CheckpointFileError> {
+    /// Previously a formatter was passed to this function that would transform the checkpoint file
+    /// into a specific type. In this version the types are defined separately and there's a bit of
+    /// duplication.
+    pub fn read_topic_partition_format(
+        &self,
+    ) -> Result<HashMap<TopicPartition, i64>, CheckpointFileError> {
         let mut res = HashMap::new();
         let f = File::open(self.file.clone())?;
         let mut reader = BufReader::new(f);
@@ -140,6 +148,10 @@ impl CheckpointReadBuffer {
             ));
         }
         Ok(res)
+    }
+
+    pub fn read_leader_epoch_format(&self) -> Result<Vec<EpochEntry>, CheckpointFileError> {
+        unimplemented!()
     }
 }
 
