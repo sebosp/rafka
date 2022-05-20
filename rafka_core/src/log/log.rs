@@ -5,6 +5,7 @@ use crate::common::record::record_version::RecordVersion;
 use crate::common::topic_partition::TopicPartition;
 use crate::log::producer_state_manager::ProducerStateManager;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
+use crate::server::checkpoints::checkpoint_file::{CheckpointFile, CheckpointFileType};
 use crate::server::checkpoints::leader_epoch_checkpoint_file::LeaderEpochCheckpointFile;
 use crate::server::epoch::leader_epoch_file_cache::LeaderEpochFileCache;
 use crate::server::log_offset_metadata::LogOffsetMetadata;
@@ -162,10 +163,13 @@ impl Log {
     }
 
     fn record_version(&self) -> RecordVersion {
-        self.config.message_format_version.record_version
+        self.config.message_format_version.record_version()
     }
 
-    fn new_leader_epoch_file_cache(&self) -> Result<LeaderEpochFileCache, AsyncTaskError> {
+    fn new_leader_epoch_file_cache(
+        &self,
+        leader_epoch_file: PathBuf,
+    ) -> Result<LeaderEpochFileCache, AsyncTaskError> {
         let checkpoint_file =
             LeaderEpochCheckpointFile::new(leader_epoch_file, self.majordomo_tx.clone());
         LeaderEpochFileCache::new(
@@ -173,15 +177,15 @@ impl Log {
             self.log_end_offset(), /* RAFKA TODO: somehow make the FileCache use the value of
                                     * log_end_offset */
             checkpoint_file,
-        )?;
-        Ok(())
+        )
     }
 
     pub fn initialize_leader_epoch_cache(&mut self) -> Result<(), AsyncTaskError> {
         let leader_epoch_file = LeaderEpochCheckpointFile::new_file(self.dir);
-        if record_version.precedes(RecordVersion.V2) {
+        let record_version = self.record_version();
+        if record_version.precedes(RecordVersion::V2) {
             let current_cache = if leader_epoch_file.exists() {
-                Some(self.new_leader_epoch_file_cache())
+                Some(self.new_leader_epoch_file_cache(leader_epoch_file))
             } else {
                 None
             };
