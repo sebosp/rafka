@@ -116,6 +116,11 @@ impl fmt::Display for KafkaApiVersion {
 }
 
 impl KafkaApiVersion {
+    // Returns the ApiVersionDefinition record_version mapping to the current version.
+    pub fn record_version(&self) -> RecordVersion {
+        ApiVersionDefinition::from(self.clone()).record_version
+    }
+
     // Keep the IDs in order of versions
     pub fn gen_kafka_0_8_0() -> ApiVersionDefinition {
         ApiVersionDefinition {
