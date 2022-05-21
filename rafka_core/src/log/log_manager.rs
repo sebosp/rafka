@@ -9,7 +9,7 @@ use crate::log::log::{self, Log};
 use crate::log::log_config::{LogConfig, LogConfigProperties};
 use crate::majordomo::{AsyncTask, AsyncTaskError, CoordinatorTask, MajordomoCoordinator};
 use crate::server::broker_states::BrokerState;
-use crate::server::checkpoints::checkpoint_file::TopicPartitionCheckpointFileError;
+use crate::server::checkpoints::checkpoint_file::CheckpointFileError;
 use crate::server::checkpoints::offset_checkpoint_file::OffsetCheckpointFile;
 use crate::server::kafka_config::{ConfigSet, KafkaConfig};
 use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
@@ -53,7 +53,7 @@ pub enum LogManagerError {
     )]
     AcquireLock(String),
     #[error("Topic Partition Checkpoint File: {0}")]
-    TopicPartitionCheckpointFile(#[from] TopicPartitionCheckpointFileError),
+    CheckpointFile(#[from] CheckpointFileError),
 }
 
 #[derive(Debug)]
