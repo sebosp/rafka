@@ -22,9 +22,10 @@ lazy_static! {
 
 const CURRENT_VERSION: u32 = 0;
 
+#[derive(Debug)]
 pub struct LeaderEpochCheckpointFile {
     file: PathBuf,
-    checkpoint: CheckpointFile<EpochEntry>,
+    checkpoint: CheckpointFile,
 }
 impl LeaderEpochCheckpointFile {
     pub fn new_file(dir: PathBuf) -> PathBuf {
@@ -36,7 +37,7 @@ impl LeaderEpochCheckpointFile {
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
         let dir_parent = match file.parent() {
-            Some(val) => match val.get_parent() {
+            Some(val) => match val.parent() {
                 Some(val) => val.display().to_string(),
                 None => String::from("/"),
             },
@@ -55,11 +56,11 @@ impl LeaderEpochCheckpoint for LeaderEpochCheckpointFile {
     }
 
     fn read(&self) -> Vec<EpochEntry> {
-        self.checkpoint.read()
+        self.checkpoint.read_leader_epoch_format()
     }
 }
 
-impl CheckpointFileFormatter for CheckpointFile<EpochEntry> {
+impl CheckpointFileFormatter for CheckpointFile {
     type Data = EpochEntry;
 
     fn to_line(entry: Self::Data) -> String {
@@ -67,7 +68,7 @@ impl CheckpointFileFormatter for CheckpointFile<EpochEntry> {
     }
 
     fn from_line(line: &str) -> Option<Self::Data> {
-        let split_line = line.split(&WHITE_SPACES_PATTERN).collect::<Vec<&str>>();
+        let split_line = WHITE_SPACES_PATTERN.split(line).collect::<Vec<&str>>();
         if split_line.len() != 2 {
             None
         } else {
