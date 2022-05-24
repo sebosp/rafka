@@ -12,11 +12,11 @@ use crate::server::log_offset_metadata::LogOffsetMetadata;
 use crate::KafkaException;
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::ErrorKind;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
-use std::{fs, io};
 use tokio::sync::mpsc;
 
 // Used by kafka 0.8 and higher to indicate kafka was shutdown properly.
@@ -171,13 +171,33 @@ impl Log {
         leader_epoch_file: PathBuf,
     ) -> Result<LeaderEpochFileCache, AsyncTaskError> {
         let checkpoint_file =
-            LeaderEpochCheckpointFile::new(leader_epoch_file, self.majordomo_tx.clone());
-        LeaderEpochFileCache::new(
+            LeaderEpochCheckpointFile::new(leader_epoch_file, self.majordomo_tx.clone())?;
+        Ok(LeaderEpochFileCache::new(
             self.topic_partition,
             self.log_end_offset(), /* RAFKA TODO: somehow make the FileCache use the value of
                                     * log_end_offset */
             checkpoint_file,
-        )
+        ))
+    }
+
+    /// Removes a file unless it exists.
+    // RAFKA TODO: Move to a utils module
+    pub fn delete_file_if_exists(file: &Path) -> Result<(), AsyncTaskError> {
+        match std::fs::remove_file(file) {
+            Ok(()) => {
+                tracing::debug!("Successfully deleted leader_epoch_file: {}", file.display());
+            },
+            Err(err) => match err.kind() {
+                ErrorKind::NotFound => {
+                    tracing::debug!("No need to delete {} as it doesn't exist", file.display())
+                },
+                errkind @ _ => {
+                    tracing::error!("Unable to delete {}: {:?}", file.display(), errkind);
+                    return Err(err.into());
+                },
+            },
+        };
+        Ok(())
     }
 
     pub fn initialize_leader_epoch_cache(&mut self) -> Result<(), AsyncTaskError> {
@@ -185,40 +205,22 @@ impl Log {
         let record_version = self.record_version();
         if record_version.precedes(RecordVersion::V2) {
             let current_cache = if leader_epoch_file.exists() {
-                Some(self.new_leader_epoch_file_cache(leader_epoch_file))
+                Some(self.new_leader_epoch_file_cache(leader_epoch_file)?)
             } else {
                 None
             };
             if let Some(cached_entry) = current_cache {
-                if !current_cache.is_empty() {
+                if !cached_entry.is_empty() {
                     tracing::warn!(
                         "Deleting non-empty leader epoch cache due to incompatible message format \
                          {record_version}"
                     )
                 }
             }
-            let leader_epoch_file_path = leader_epoch_file.to_path();
-            match std::fs::remove_file(leader_epoch_file_path) {
-                Ok(()) => {
-                    tracing::debug!(
-                        "Successfully deleted leader_epoch_file: {}",
-                        leader_epoch_file
-                    );
-                },
-                Err(io::Error(ErrorKind::NotFound)) => {
-                    tracing::debug!(
-                        "No need to delete {} as it doesn't exist",
-                        leader_epoch_file_path
-                    );
-                },
-                Err(err) => {
-                    tracing::error!("Unable to delete {}: {:?}", leader_epoch_file_path, err);
-                    return Err(err.into());
-                },
-            }
+            Self::delete_file_if_exists(leader_epoch_file.as_path())?;
             self.leader_epoch_cache = None;
         } else {
-            self.leader_epoch_cache = Some(new_leader_epoch_file_cache());
+            self.leader_epoch_cache = Some(self.new_leader_epoch_file_cache(leader_epoch_file)?);
         }
         Ok(())
     }
