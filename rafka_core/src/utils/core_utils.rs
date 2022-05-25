@@ -4,7 +4,6 @@ use crate::cluster::end_point::EndPoint;
 use crate::common::network::listener_name::ListenerName;
 use crate::server::kafka_config::KafkaConfigError;
 use regex::Regex;
-use tracing::{debug, error, trace};
 
 /// Parses comma separated string into Vec
 /// The whitespaces \s around the commas are removed
