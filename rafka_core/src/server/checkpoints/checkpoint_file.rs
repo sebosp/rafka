@@ -1,7 +1,6 @@
 //! From core/src/main/scala/kafka/server/checkpoints/CheckpointFile.scala
 
-use crate::common::topic_partition::TopicPartition;
-use crate::log::log_manager::LogManagerError;
+use crate::common::topic_partition::{TopicPartition, TopicPartitionOffset};
 use crate::majordomo::AsyncTask;
 use crate::server::epoch::leader_epoch_file_cache::EpochEntry;
 use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
@@ -15,9 +14,8 @@ use thiserror::Error;
 use tokio::sync::mpsc::Sender;
 
 pub trait CheckpointFileFormatter {
-    type Data;
-    fn to_line(entry: Self::Data) -> String;
-    fn from_line(line: &str) -> Option<Self::Data>;
+    fn to_line(&self) -> String;
+    fn from_line(line: &str) -> Option<Self>;
 }
 
 #[derive(Debug, Error)]
@@ -57,6 +55,7 @@ impl CheckpointFile {
         async_task_tx: Sender<AsyncTask>,
         version: i32,
         checkpoint_type: CheckpointFileType,
+        log_dir: String,
     ) -> Result<Self, io::Error> {
         // RAFKA TODO: This is about the third time that we unwrap the canonicalization of the dir.
         // MAybe we should create a struct that holds:
@@ -64,10 +63,6 @@ impl CheckpointFile {
         // - Absolute(canonicalized) path
         // - Absolute dir in String already unwrapped of above.
         // - If the above fails, then send to LogDirFailureChannel.
-        let log_dir = match file.parent() {
-            Some(val) => val.canonicalize().unwrap().display().to_string(),
-            None => String::from("/"),
-        };
         let path = file.canonicalize().unwrap();
         let temp_path = PathBuf::from(format!("{log_dir}.tmp"));
 
@@ -84,6 +79,22 @@ impl CheckpointFile {
 
     pub fn get_version(&self) -> i32 {
         self.version
+    }
+
+    pub fn read_topic_partition_format(&self) {
+        unimplemented!()
+    }
+
+    pub fn write_topic_partition_format(&self) {
+        unimplemented!()
+    }
+
+    pub fn read_leader_epoch_format(&self) {
+        unimplemented!()
+    }
+
+    pub fn write_leader_epoch_format(&self, epochs: Vec<EpochEntry>) {
+        unimplemented!()
     }
 }
 
@@ -130,8 +141,8 @@ impl CheckpointReadBuffer {
 
         while reader.read_line(&mut line)? != 0 {
             // Ok(0) is EOF
-            match CheckpointReadBuffer::from_line(&line) {
-                Some((topic_partition, offset)) => res.insert(topic_partition, offset),
+            match TopicPartitionOffset::from_line(&line) {
+                Some(tpo) => res.insert(tpo.topic_partition, tpo.offset),
                 None => {
                     return Err(CheckpointFileError::MalformedLineException(
                         self.location.clone(),
@@ -151,28 +162,49 @@ impl CheckpointReadBuffer {
     }
 
     pub fn read_leader_epoch_format(&self) -> Result<Vec<EpochEntry>, CheckpointFileError> {
-        unimplemented!()
-    }
-}
-
-impl CheckpointFileFormatter for CheckpointReadBuffer {
-    type Data = (TopicPartition, i64);
-
-    fn to_line(entry: Self::Data) -> String {
-        format!("{} {} {}", entry.0.topic(), entry.0.partition(), entry.1)
-    }
-
-    fn from_line(line: &str) -> Option<Self::Data> {
-        let fragments: Vec<&str> = line.split(' ').collect();
-        if fragments.len() != 3 {
-            return None;
-        } else {
-            // RAFKA TODO: Should parse() errors cause
-            // LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir() ?
-            Some((
-                TopicPartition::new(fragments[0].to_string(), fragments[1].parse::<u32>().unwrap()),
-                fragments[2].parse::<i64>().unwrap(),
-            ))
+        let mut res = vec![];
+        let f = File::open(self.file.clone())?;
+        let mut reader = BufReader::new(f);
+        let mut line = String::new();
+        // Get and validate the version of the TopicPartitionCheckpointFile
+        reader.read_line(&mut line)?;
+        if line.is_empty() {
+            return Ok(res);
         }
+        let file_version = line.parse::<i32>()?;
+        if file_version != self.version {
+            return Err(CheckpointFileError::UnrecognizedVersion(
+                self.location.clone(),
+                file_version,
+            ));
+        }
+
+        // Get the number of expected items.
+        reader.read_line(&mut line)?;
+        if line.is_empty() {
+            return Ok(res);
+        }
+        let expected_size = line.parse::<usize>()?;
+
+        while reader.read_line(&mut line)? != 0 {
+            // Ok(0) is EOF
+            match CheckpointReadBuffer::from_line(&line) {
+                Some(epoch_entry) => res.push(epoch_entry),
+                None => {
+                    return Err(CheckpointFileError::MalformedLineException(
+                        self.location.clone(),
+                        line,
+                    ))
+                },
+            };
+        }
+        if res.len() != expected_size {
+            return Err(CheckpointFileError::UnexpectedItemsLength(
+                expected_size,
+                self.location.clone(),
+                res.len(),
+            ));
+        }
+        Ok(res)
     }
 }
