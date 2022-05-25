@@ -85,6 +85,8 @@ pub enum AsyncTaskError {
     KafkaStorageException(PathBuf),
     #[error("KafkaException {0:?}")]
     KafkaException(#[from] crate::KafkaException),
+    #[error("Io {0:?}")]
+    Io(#[from] std::io::Error),
 }
 
 impl AsyncTaskError {
