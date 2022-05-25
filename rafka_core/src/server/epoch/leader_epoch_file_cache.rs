@@ -3,9 +3,7 @@
 use core::fmt;
 
 use crate::common::topic_partition::TopicPartition;
-use crate::server::checkpoints::leader_epoch_checkpoint_file::{
-    LeaderEpochCheckpoint, LeaderEpochCheckpointFile,
-};
+use crate::server::checkpoints::leader_epoch_checkpoint_file::LeaderEpochCheckpointFile;
 
 #[derive(Debug)]
 pub struct LeaderEpochFileCache {
@@ -42,6 +40,12 @@ impl LeaderEpochFileCache {
 pub struct EpochEntry {
     pub epoch: i32,
     pub start_offset: i64,
+}
+
+impl EpochEntry {
+    pub fn new(epoch: i32, start_offset: i64) -> Self {
+        Self { epoch, start_offset }
+    }
 }
 
 impl fmt::Display for EpochEntry {
