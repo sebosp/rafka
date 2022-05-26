@@ -1,6 +1,7 @@
 //! From clients/src/main/java/org/apache/kafka/common/TopicPartition.java
 
 use crate::log::log::{self, DELETE_DIR_SUFFIX, FUTURE_DIR_SUFFIX};
+use crate::server::checkpoints::checkpoint_file::CheckpointFileFormatter;
 use crate::KafkaException;
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryFrom;
@@ -108,6 +109,41 @@ impl TryFrom<PathBuf> for TopicPartition {
                 );
                 Err(KafkaException::InvalidTopicPartitionDir(full_path, name))
             },
+        }
+    }
+}
+
+/// A Helper struct to impl CheckpointFileFormatter for TopicPartition -> Offset
+#[derive(Debug)]
+pub struct TopicPartitionOffset {
+    pub topic_partition: TopicPartition,
+    pub offset: i64,
+}
+
+impl CheckpointFileFormatter for TopicPartitionOffset {
+    fn to_line(&self) -> String {
+        format!(
+            "{} {} {}",
+            self.topic_partition.topic(),
+            self.topic_partition.partition(),
+            self.offset
+        )
+    }
+
+    fn from_line(line: &str) -> Option<Self> {
+        let fragments: Vec<&str> = line.split(' ').collect();
+        if fragments.len() != 3 {
+            return None;
+        } else {
+            // RAFKA TODO: Should parse() errors cause
+            // LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir() ?
+            Some(Self {
+                topic_partition: TopicPartition::new(
+                    fragments[0].to_string(),
+                    fragments[1].parse::<u32>().unwrap(),
+                ),
+                offset: fragments[2].parse::<i64>().unwrap(),
+            })
         }
     }
 }
