@@ -3,7 +3,10 @@
 use core::fmt;
 
 use crate::common::topic_partition::TopicPartition;
-use crate::server::checkpoints::leader_epoch_checkpoint_file::LeaderEpochCheckpointFile;
+use crate::server::checkpoints::checkpoint_file::CheckpointFileFormatter;
+use crate::server::checkpoints::leader_epoch_checkpoint_file::{
+    LeaderEpochCheckpointFile, WHITE_SPACES_PATTERN,
+};
 
 #[derive(Debug)]
 pub struct LeaderEpochFileCache {
@@ -51,5 +54,23 @@ impl EpochEntry {
 impl fmt::Display for EpochEntry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "EpochEntry(epoch={}, startOffset={})", self.epoch, self.start_offset)
+    }
+}
+
+impl CheckpointFileFormatter for EpochEntry {
+    fn to_line(&self) -> String {
+        format!("{} {}", self.epoch, self.start_offset)
+    }
+
+    fn from_line(line: &str) -> Option<Self> {
+        let split_line = WHITE_SPACES_PATTERN.split(line).collect::<Vec<&str>>();
+        if split_line.len() != 2 {
+            None
+        } else {
+            Some(EpochEntry::new(
+                split_line[0].parse::<i32>().ok()?,
+                split_line[1].parse::<i64>().ok()?,
+            ))
+        }
     }
 }

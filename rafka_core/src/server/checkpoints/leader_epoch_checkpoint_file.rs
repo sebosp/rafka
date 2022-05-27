@@ -1,26 +1,19 @@
 //! From kafka/server/checkpoints/LeaderEpochCheckpointFile.scala
 
-use super::checkpoint_file::CheckpointFileFormatter;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
-use crate::server::checkpoints::checkpoint_file::CheckpointFile;
+use crate::server::checkpoints::checkpoint_file::{CheckpointFile, CheckpointFileType};
 use crate::server::epoch::leader_epoch_file_cache::EpochEntry;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 
-pub trait LeaderEpochCheckpoint {
-    // RAFKA TODO: Figure out why write returned Unit
-    fn write(&self, epochs: Vec<EpochEntry>) -> Result<(), AsyncTaskError>;
-    fn read(&self) -> Vec<EpochEntry>;
-}
-
 const LEADER_EPOCH_CHECKPOINT_FILENAME: &str = "leader-epoch-checkpoint";
 lazy_static! {
-    static ref WHITE_SPACES_PATTERN: Regex = Regex::new(r"\s+").unwrap();
+    pub static ref WHITE_SPACES_PATTERN: Regex = Regex::new(r"\s+").unwrap();
 }
 
-const CURRENT_VERSION: u32 = 0;
+const CURRENT_VERSION: i32 = 0;
 
 #[derive(Debug)]
 pub struct LeaderEpochCheckpointFile {
@@ -36,6 +29,12 @@ impl LeaderEpochCheckpointFile {
         file: PathBuf,
         majordomo_tx: mpsc::Sender<AsyncTask>,
     ) -> Result<Self, AsyncTaskError> {
+        // The leader epoch is inside a sub-dir of the log.dir and so we need to fetch two levels
+        // above to identify the log.dir to mark as offline.
+        // RAFKA TODO: Figure out what to do in case of symlink layers, maybe it's easier to pass
+        // the log_dir from the KafkaConfig all the way here to avoidh re-calculating the
+        // hierarchy all the time, because, if the directory is moved, should the process continue
+        // to work by means of inodes/fd caches?
         let dir_parent = match file.parent() {
             Some(val) => match val.parent() {
                 Some(val) => val.display().to_string(),
@@ -45,34 +44,21 @@ impl LeaderEpochCheckpointFile {
         };
         Ok(Self {
             file,
-            checkpoint: CheckpointFile::new(file, CURRENT_VERSION, (), majordomo_tx, dir_parent)?,
+            checkpoint: CheckpointFile::new(
+                file,
+                majordomo_tx,
+                CURRENT_VERSION,
+                CheckpointFileType::LeaderEpoch,
+                dir_parent,
+            )?,
         })
     }
-}
 
-impl LeaderEpochCheckpoint for LeaderEpochCheckpointFile {
-    fn write(&self, epochs: Vec<EpochEntry>) -> Result<(), AsyncTaskError> {
+    pub fn write(&self, epochs: Vec<EpochEntry>) -> Result<(), AsyncTaskError> {
         self.checkpoint.write(epochs)
     }
 
-    fn read(&self) -> Vec<EpochEntry> {
-        self.checkpoint.read_leader_epoch_format()
-    }
-}
-
-impl CheckpointFileFormatter for CheckpointFile {
-    type Data = EpochEntry;
-
-    fn to_line(entry: Self::Data) -> String {
-        format!("{} {}", entry.epoch, entry.start_offset)
-    }
-
-    fn from_line(line: &str) -> Option<Self::Data> {
-        let split_line = WHITE_SPACES_PATTERN.split(line).collect::<Vec<&str>>();
-        if split_line.len() != 2 {
-            None
-        } else {
-            Some(EpochEntry::new(split_line[0].parse::<i32>(), split_line[1].parse::<i64>()))
-        }
+    pub fn read(&self) -> Vec<EpochEntry> {
+        self.checkpoint.read()
     }
 }
