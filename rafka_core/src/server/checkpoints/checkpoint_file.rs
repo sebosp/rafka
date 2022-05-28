@@ -1,13 +1,12 @@
 //! From core/src/main/scala/kafka/server/checkpoints/CheckpointFile.scala
 
-use crate::common::topic_partition::{TopicPartition, TopicPartitionOffset};
-use crate::majordomo::AsyncTask;
-use crate::server::epoch::leader_epoch_file_cache::EpochEntry;
+use crate::log::log_manager::LogManagerError;
+use crate::log::log_manager::LogManagerError;
+use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
-use std::collections::HashMap;
 use std::fs::File;
-use std::io::prelude::*;
 use std::io::{self, BufReader};
+use std::io::{prelude::*, BufWriter};
 use std::num;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -15,7 +14,9 @@ use tokio::sync::mpsc::Sender;
 
 pub trait CheckpointFileFormatter {
     fn to_line(&self) -> String;
-    fn from_line(line: &str) -> Option<Self>;
+    fn from_line(line: &str) -> Option<Self>
+    where
+        Self: Sized;
 }
 
 #[derive(Debug, Error)]
@@ -81,20 +82,44 @@ impl CheckpointFile {
         self.version
     }
 
-    pub fn read_topic_partition_format(&self) {
-        unimplemented!()
+    pub fn write<T>(&self, entries: Vec<T>) -> Result<(), AsyncTaskError>
+    where
+        T: CheckpointFileFormatter,
+    {
+        match self._write(entries) {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                let abs_path = self.file.canonicalize().unwrap().display().to_string();
+                let msg = format!("Error while writing to checkpoint file {abs_path}");
+                LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                    self.async_task_tx,
+                    abs_path,
+                    err,
+                );
+                Err(AsyncTaskError::KafkaStorageException(self.file.clone()).into())
+            },
+        }
     }
 
-    pub fn write_topic_partition_format(&self) {
-        unimplemented!()
-    }
-
-    pub fn read_leader_epoch_format(&self) {
-        unimplemented!()
-    }
-
-    pub fn write_leader_epoch_format(&self, epochs: Vec<EpochEntry>) {
-        unimplemented!()
+    pub fn _write<T>(&self, entries: Vec<T>) -> Result<(), LogManagerError>
+    where
+        T: CheckpointFileFormatter,
+    {
+        // First write ta the temp file and then move it to the existing file for atomicity.
+        let file_output = File::create(self.temp_path)?;
+        {
+            let mut writer = BufWriter::new(file_output);
+            writer.write(self.version.to_string().as_bytes())?;
+            writer.write(&[0x0a])?;
+            writer.write(entries.len().to_string().as_bytes())?;
+            writer.write(&[0x0a])?;
+            for entry in entries {
+                writer.write(entry.to_line().as_bytes())?;
+                writer.write(&[0x0a])?;
+            }
+        }
+        std::fs::rename(self.temp_path, self.path)?;
+        Ok(())
     }
 }
 
@@ -109,59 +134,10 @@ impl CheckpointReadBuffer {
         Self { location, file, version }
     }
 
-    /// Previously a formatter was passed to this function that would transform the checkpoint file
-    /// into a specific type. In this version the types are defined separately and there's a bit of
-    /// duplication.
-    pub fn read_topic_partition_format(
-        &self,
-    ) -> Result<HashMap<TopicPartition, i64>, CheckpointFileError> {
-        let mut res = HashMap::new();
-        let f = File::open(self.file.clone())?;
-        let mut reader = BufReader::new(f);
-        let mut line = String::new();
-        // Get and validate the version of the TopicPartitionCheckpointFile
-        reader.read_line(&mut line)?;
-        if line.is_empty() {
-            return Ok(res);
-        }
-        let file_version = line.parse::<i32>()?;
-        if file_version != self.version {
-            return Err(CheckpointFileError::UnrecognizedVersion(
-                self.location.clone(),
-                file_version,
-            ));
-        }
-
-        // Get the number of expected items.
-        reader.read_line(&mut line)?;
-        if line.is_empty() {
-            return Ok(res);
-        }
-        let expected_size = line.parse::<usize>()?;
-
-        while reader.read_line(&mut line)? != 0 {
-            // Ok(0) is EOF
-            match TopicPartitionOffset::from_line(&line) {
-                Some(tpo) => res.insert(tpo.topic_partition, tpo.offset),
-                None => {
-                    return Err(CheckpointFileError::MalformedLineException(
-                        self.location.clone(),
-                        line,
-                    ))
-                },
-            };
-        }
-        if res.len() != expected_size {
-            return Err(CheckpointFileError::UnexpectedItemsLength(
-                expected_size,
-                self.location.clone(),
-                res.len(),
-            ));
-        }
-        Ok(res)
-    }
-
-    pub fn read_leader_epoch_format(&self) -> Result<Vec<EpochEntry>, CheckpointFileError> {
+    pub fn read<T>(&self) -> Result<Vec<T>, CheckpointFileError>
+    where
+        T: CheckpointFileFormatter,
+    {
         let mut res = vec![];
         let f = File::open(self.file.clone())?;
         let mut reader = BufReader::new(f);
@@ -188,7 +164,7 @@ impl CheckpointReadBuffer {
 
         while reader.read_line(&mut line)? != 0 {
             // Ok(0) is EOF
-            match CheckpointReadBuffer::from_line(&line) {
+            match T::from_line(&line) {
                 Some(epoch_entry) => res.push(epoch_entry),
                 None => {
                     return Err(CheckpointFileError::MalformedLineException(
