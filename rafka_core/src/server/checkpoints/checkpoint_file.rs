@@ -1,7 +1,6 @@
 //! From core/src/main/scala/kafka/server/checkpoints/CheckpointFile.scala
 
 use crate::log::log_manager::LogManagerError;
-use crate::log::log_manager::LogManagerError;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
 use crate::server::log_failure_channel::LogDirFailureChannelAsyncTask;
 use std::fs::File;
@@ -34,12 +33,6 @@ pub enum CheckpointFileError {
 }
 
 #[derive(Debug)]
-pub enum CheckpointFileType {
-    TopicPartition,
-    LeaderEpoch,
-}
-
-#[derive(Debug)]
 pub struct CheckpointFile {
     file: PathBuf,
     async_task_tx: Sender<AsyncTask>,
@@ -47,7 +40,6 @@ pub struct CheckpointFile {
     log_dir: String,
     path: PathBuf,
     temp_path: PathBuf,
-    checkpoint_type: CheckpointFileType,
 }
 
 impl CheckpointFile {
@@ -55,7 +47,6 @@ impl CheckpointFile {
         file: PathBuf,
         async_task_tx: Sender<AsyncTask>,
         version: i32,
-        checkpoint_type: CheckpointFileType,
         log_dir: String,
     ) -> Result<Self, io::Error> {
         // RAFKA TODO: This is about the third time that we unwrap the canonicalization of the dir.
@@ -75,14 +66,14 @@ impl CheckpointFile {
             },
             Ok(_file) => tracing::trace!("CheckpointFile: Created File: {}", path.display()),
         };
-        Ok(Self { file, async_task_tx, version, log_dir, path, temp_path, checkpoint_type })
+        Ok(Self { file, async_task_tx, version, log_dir, path, temp_path })
     }
 
     pub fn get_version(&self) -> i32 {
         self.version
     }
 
-    pub fn write<T>(&self, entries: Vec<T>) -> Result<(), AsyncTaskError>
+    pub async fn write<T>(&self, entries: Vec<T>) -> Result<(), AsyncTaskError>
     where
         T: CheckpointFileFormatter,
     {
@@ -90,12 +81,13 @@ impl CheckpointFile {
             Ok(()) => Ok(()),
             Err(err) => {
                 let abs_path = self.file.canonicalize().unwrap().display().to_string();
-                let msg = format!("Error while writing to checkpoint file {abs_path}");
+                tracing::error!("Error while writing to checkpoint file {abs_path}");
                 LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
-                    self.async_task_tx,
+                    self.async_task_tx.clone(),
                     abs_path,
                     err,
-                );
+                )
+                .await?;
                 Err(AsyncTaskError::KafkaStorageException(self.file.clone()).into())
             },
         }
@@ -106,7 +98,7 @@ impl CheckpointFile {
         T: CheckpointFileFormatter,
     {
         // First write ta the temp file and then move it to the existing file for atomicity.
-        let file_output = File::create(self.temp_path)?;
+        let file_output = File::create(&self.temp_path)?;
         {
             let mut writer = BufWriter::new(file_output);
             writer.write(self.version.to_string().as_bytes())?;
@@ -118,8 +110,29 @@ impl CheckpointFile {
                 writer.write(&[0x0a])?;
             }
         }
-        std::fs::rename(self.temp_path, self.path)?;
+        std::fs::rename(&self.temp_path, &self.path)?;
         Ok(())
+    }
+
+    pub async fn read<T>(&self) -> Result<Vec<T>, AsyncTaskError>
+    where
+        T: CheckpointFileFormatter,
+    {
+        let checkpoint_buffer = CheckpointReadBuffer::new(self.path.clone(), self.version);
+        match checkpoint_buffer.read::<T>() {
+            Ok(res) => Ok(res),
+            Err(err) => {
+                let abs_path = self.path.canonicalize().unwrap();
+                let msg = format!("Error while reading checkpoint file {abs_path:?}");
+                LogDirFailureChannelAsyncTask::send_maybe_add_offline_log_dir(
+                    self.async_task_tx.clone(),
+                    self.log_dir.clone(),
+                    err.into(),
+                )
+                .await?;
+                Err(AsyncTaskError::KafkaStorageException(self.path.clone()))
+            },
+        }
     }
 }
 
@@ -130,8 +143,10 @@ pub struct CheckpointReadBuffer {
 }
 
 impl CheckpointReadBuffer {
-    pub fn new(location: String, file: PathBuf, version: i32) -> Self {
-        Self { location, file, version }
+    pub fn new(file: PathBuf, version: i32) -> Self {
+        let abs_location = file.canonicalize().unwrap();
+        let abs_location = abs_location.display().to_string();
+        Self { location: abs_location, file, version }
     }
 
     pub fn read<T>(&self) -> Result<Vec<T>, CheckpointFileError>

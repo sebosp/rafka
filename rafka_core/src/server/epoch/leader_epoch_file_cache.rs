@@ -3,6 +3,7 @@
 use core::fmt;
 
 use crate::common::topic_partition::TopicPartition;
+use crate::majordomo::AsyncTaskError;
 use crate::server::checkpoints::checkpoint_file::CheckpointFileFormatter;
 use crate::server::checkpoints::leader_epoch_checkpoint_file::{
     LeaderEpochCheckpointFile, WHITE_SPACES_PATTERN,
@@ -19,18 +20,14 @@ pub struct LeaderEpochFileCache {
 }
 
 impl LeaderEpochFileCache {
-    pub fn new(
+    pub async fn new(
         topic_partition: TopicPartition,
         log_end_offset: i64,
         checkpoint: LeaderEpochCheckpointFile,
-    ) -> Self {
-        Self {
-            topic_partition,
-            log_end_offset,
-            checkpoint,
-            epochs: checkpoint.read(),
-            log_ident: format!("[LeaderEpochCache {topic_partition}] "),
-        }
+    ) -> Result<Self, AsyncTaskError> {
+        let epochs = checkpoint.read().await?;
+        let log_ident = format!("[LeaderEpochCache {topic_partition}] ");
+        Ok(Self { topic_partition, log_end_offset, checkpoint, epochs, log_ident })
     }
 
     pub fn is_empty(&self) -> bool {
