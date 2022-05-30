@@ -108,7 +108,7 @@ impl KafkaZkClient {
     /// `parent_path` returns the path from the start until the last slash.
     /// If there is no slash, an error is returned about an InvalidPath
     fn parent_path(path: &str) -> Result<String, KafkaZkClientError> {
-        // XXX: Change this to return a slice to avoid creating strings for no good reason.
+        // RAFKA TODO: Change this to return a slice to avoid creating strings for no good reason.
         match path.rfind('/') {
             Some(idx) => {
                 let (parent, _) = path.split_at(idx);
