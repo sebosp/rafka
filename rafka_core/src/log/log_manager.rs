@@ -54,6 +54,8 @@ pub enum LogManagerError {
     AcquireLock(String),
     #[error("Topic Partition Checkpoint File: {0}")]
     CheckpointFile(#[from] CheckpointFileError),
+    #[error("Log Segment Offset Overflow")]
+    LogSegmentOffsetOverflow,
 }
 
 #[derive(Debug)]
