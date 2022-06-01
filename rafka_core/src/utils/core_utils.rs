@@ -2,8 +2,25 @@
 
 use crate::cluster::end_point::EndPoint;
 use crate::common::network::listener_name::ListenerName;
+use crate::log::log_manager::LogManagerError;
 use crate::server::kafka_config::KafkaConfigError;
 use regex::Regex;
+
+/// Replaces a current suffix with a new suffix.
+/// If the current suffix is not found then Err
+pub fn replace_suffix(
+    s: &str,
+    current_suffix: &str,
+    new_suffix: &str,
+) -> Result<String, LogManagerError> {
+    match s.find(current_suffix) {
+        Some(idx) => {
+            let (without_suffix, _) = s.split_at(idx);
+            Ok(format!("{}{}", without_suffix, new_suffix))
+        },
+        None => Err(LogManagerError::UnexpectedSuffix(current_suffix.to_string(), s.to_string())),
+    }
+}
 
 /// Parses comma separated string into Vec
 /// The whitespaces \s around the commas are removed
