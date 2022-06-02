@@ -1,7 +1,7 @@
 //! From kafka/server/checkpoints/LeaderEpochCheckpointFile.scala
 
 use crate::majordomo::{AsyncTask, AsyncTaskError};
-use crate::server::checkpoints::checkpoint_file::{CheckpointFile, CheckpointFileType};
+use crate::server::checkpoints::checkpoint_file::CheckpointFile;
 use crate::server::epoch::leader_epoch_file_cache::EpochEntry;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -43,22 +43,16 @@ impl LeaderEpochCheckpointFile {
             None => String::from("/"),
         };
         Ok(Self {
-            file,
-            checkpoint: CheckpointFile::new(
-                file,
-                majordomo_tx,
-                CURRENT_VERSION,
-                CheckpointFileType::LeaderEpoch,
-                dir_parent,
-            )?,
+            file: file.clone(),
+            checkpoint: CheckpointFile::new(file, majordomo_tx, CURRENT_VERSION, dir_parent)?,
         })
     }
 
-    pub fn write(&self, epochs: Vec<EpochEntry>) -> Result<(), AsyncTaskError> {
-        self.checkpoint.write(epochs)
+    pub async fn write(&self, epochs: Vec<EpochEntry>) -> Result<(), AsyncTaskError> {
+        self.checkpoint.write(epochs).await
     }
 
-    pub fn read(&self) -> Vec<EpochEntry> {
-        self.checkpoint.read()
+    pub async fn read(&self) -> Result<Vec<EpochEntry>, AsyncTaskError> {
+        self.checkpoint.read().await
     }
 }
