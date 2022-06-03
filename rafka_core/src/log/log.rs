@@ -1,29 +1,54 @@
 //! From core/bin/main/kafka/log/Log.scala
 
 use super::log_config::LogConfig;
+use super::log_manager::LogManagerError;
 use crate::common::record::record_version::RecordVersion;
 use crate::common::topic_partition::TopicPartition;
 use crate::log::producer_state_manager::ProducerStateManager;
 use crate::majordomo::{AsyncTask, AsyncTaskError};
-use crate::server::checkpoints::checkpoint_file::{CheckpointFile, CheckpointFileType};
 use crate::server::checkpoints::leader_epoch_checkpoint_file::LeaderEpochCheckpointFile;
 use crate::server::epoch::leader_epoch_file_cache::LeaderEpochFileCache;
 use crate::server::log_offset_metadata::LogOffsetMetadata;
+use crate::utils::core_utils::replace_suffix;
+use crate::utils::delete_file_if_exists;
 use crate::KafkaException;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::fs;
+use std::num;
 use std::hash::{Hash, Hasher};
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 use tokio::sync::mpsc;
+use std::io;
+use std::fs::{self, DirEntry};
+use std::path::Path;
+
+/// Log file
+pub const LOG_FILE_SUFFIX: &str = ".log";
 
 // Used by kafka 0.8 and higher to indicate kafka was shutdown properly.
 // This helps avoiding recovering a log.
 pub const CLEAN_SHUTDOWN_FILE: &str = ".kafka_cleanshutdown";
 // A directory to be deleted
 pub const DELETE_DIR_SUFFIX: &str = "-delete";
+/// Index File
+pub const INDEX_FILE_SUFFIX: &str = ".index";
+
+/// Time index file
+pub const TIME_INDEX_FILE_SUFFIX: &str = ".timeindex";
+
+/// A potentially aborted transaction index
+pub const TXN_INDEX_FILE_SUFFIX: &str = ".txnindex";
+
+/// A file scheduled for deletion
+pub const DELETED_FILE_SUFFIX: &str = ".deleted";
+
+/// Temporary file used for log cleaning
+pub const CLEANED_FILE_SUFFIX: &str = ".cleaned";
+
+/// Temporary file used for swapping files into a log
+pub const SWAP_FILE_SUFFIX: &str = ".swap";
+
 
 // A directory that is used for future partition, for example for a partition being sent to/from
 // another broker/log-dir
@@ -55,6 +80,19 @@ pub fn future_dir_pattern(input: &str) -> Option<(&str, &str, &str)> {
         captures.get(2).map_or("", |m| m.as_str()),
         captures.get(3).map_or("", |m| m.as_str()),
     ))
+}
+
+/// A series of errors when handling log files, their `.swap`, `.clean`, etc. 
+#[derive(thiserror::Error, Debug)]
+pub enum LogError{
+    #[error("Parse error: {0}")]
+    ParseInt(#[from] num::ParseIntError),
+    #[error("dot separator not found on filename: {0}")]
+    MissingDotSeparator(String),
+    #[error("Io {0:?}")]
+    Io(#[from] std::io::Error),
+    #[error("Expected string to end with '{}' but string is '{}'")]
+    UnexpectedSuffix(String, String),
 }
 
 /// Append-only log for storing messages, it is a sequence of segments.
@@ -152,8 +190,9 @@ impl Log {
 
     pub async fn init(&mut self) -> Result<(), AsyncTaskError> {
         // Create the log directory path, it may already exist.
-        fs::create_dir_all(self.dir.clone());
-        self.initialize_leader_epoch_cache()?;
+        fs::create_dir_all(self.dir.clone())?;
+        self.initialize_leader_epoch_cache().await?;
+        let next_offset = self.load_segments().await?;
         Ok(())
     }
 
@@ -166,46 +205,28 @@ impl Log {
         self.config.message_format_version.record_version()
     }
 
-    fn new_leader_epoch_file_cache(
+    async fn new_leader_epoch_file_cache(
         &self,
         leader_epoch_file: PathBuf,
     ) -> Result<LeaderEpochFileCache, AsyncTaskError> {
         let checkpoint_file =
             LeaderEpochCheckpointFile::new(leader_epoch_file, self.majordomo_tx.clone())?;
-        Ok(LeaderEpochFileCache::new(
-            self.topic_partition,
+        LeaderEpochFileCache::new(
+            self.topic_partition.clone(),
             self.log_end_offset(), /* RAFKA TODO: somehow make the FileCache use the value of
                                     * log_end_offset */
             checkpoint_file,
-        ))
+        )
+        .await
     }
 
-    /// Removes a file unless it exists.
-    // RAFKA TODO: Move to a utils module
-    pub fn delete_file_if_exists(file: &Path) -> Result<(), AsyncTaskError> {
-        match std::fs::remove_file(file) {
-            Ok(()) => {
-                tracing::debug!("Successfully deleted leader_epoch_file: {}", file.display());
-            },
-            Err(err) => match err.kind() {
-                ErrorKind::NotFound => {
-                    tracing::debug!("No need to delete {} as it doesn't exist", file.display())
-                },
-                errkind @ _ => {
-                    tracing::error!("Unable to delete {}: {:?}", file.display(), errkind);
-                    return Err(err.into());
-                },
-            },
-        };
-        Ok(())
-    }
-
-    pub fn initialize_leader_epoch_cache(&mut self) -> Result<(), AsyncTaskError> {
-        let leader_epoch_file = LeaderEpochCheckpointFile::new_file(self.dir);
+    pub async fn initialize_leader_epoch_cache(&mut self) -> Result<(), AsyncTaskError> {
+        let leader_epoch_file = LeaderEpochCheckpointFile::new_file(self.dir.clone());
+        let leader_epoch_file_path = leader_epoch_file.as_path();
         let record_version = self.record_version();
         if record_version.precedes(RecordVersion::V2) {
             let current_cache = if leader_epoch_file.exists() {
-                Some(self.new_leader_epoch_file_cache(leader_epoch_file)?)
+                Some(self.new_leader_epoch_file_cache(leader_epoch_file.clone()).await?)
             } else {
                 None
             };
@@ -250,4 +271,14 @@ impl Log {
     pub fn dir(&self) -> &PathBuf {
         &self.dir
     }
+
+   fn is_index_file(file: &PathBuf) -> bool {
+    let filename = file.file_name().unwrap().to_str();
+    filename.ends_with(INDEX_FILE_SUFFIX) || filename.ends_with(TIME_INDEX_FILE_SUFFIX) || filename.ends_with(TXN_INDEX_FILE_SUFFIX)
+   }
+
+   fn is_log_file(file: &PathBuf) -> bool {
+    let filename = file.file_name().unwrap().to_str();
+    filename.ends_with(LOG_FILE_SUFFIX)
+   }
 }

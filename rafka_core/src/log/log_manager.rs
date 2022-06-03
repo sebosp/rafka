@@ -56,8 +56,6 @@ pub enum LogManagerError {
     CheckpointFile(#[from] CheckpointFileError),
     #[error("Log Segment Offset Overflow")]
     LogSegmentOffsetOverflow,
-    #[error("Expected string to end with '{}' but string is '{}'")]
-    UnexpectedSuffix(String, String),
 }
 
 #[derive(Debug)]
