@@ -14,14 +14,15 @@ use crate::utils::delete_file_if_exists;
 use crate::KafkaException;
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::num;
+use std::collections::HashMap;
+use std::fs::{self, DirEntry};
 use std::hash::{Hash, Hasher};
+use std::io;
+use std::num;
+use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use std::io;
-use std::fs::{self, DirEntry};
-use std::path::Path;
 
 /// Log file
 pub const LOG_FILE_SUFFIX: &str = ".log";
@@ -48,7 +49,6 @@ pub const CLEANED_FILE_SUFFIX: &str = ".cleaned";
 
 /// Temporary file used for swapping files into a log
 pub const SWAP_FILE_SUFFIX: &str = ".swap";
-
 
 // A directory that is used for future partition, for example for a partition being sent to/from
 // another broker/log-dir
@@ -82,9 +82,9 @@ pub fn future_dir_pattern(input: &str) -> Option<(&str, &str, &str)> {
     ))
 }
 
-/// A series of errors when handling log files, their `.swap`, `.clean`, etc. 
+/// A series of errors when handling log files, their `.swap`, `.clean`, etc.
 #[derive(thiserror::Error, Debug)]
-pub enum LogError{
+pub enum LogError {
     #[error("Parse error: {0}")]
     ParseInt(#[from] num::ParseIntError),
     #[error("dot separator not found on filename: {0}")]
@@ -128,6 +128,7 @@ pub struct Log {
     topic_partition: TopicPartition,
     producer_state_manager: ProducerStateManager,
     next_offset_metadata: LogOffsetMetadata,
+    segments: HashMap<i64, LogSegment>,
     leader_epoch_cache: Option<LeaderEpochFileCache>,
     // The identifier of a Log
     log_ident: String,
@@ -184,6 +185,7 @@ impl Log {
             next_offset_metadata: LogOffsetMetadata::default(),
             leader_epoch_cache: None,
             log_ident,
+            segments: HashMap::new(),
             majordomo_tx,
         })
     }
@@ -238,12 +240,153 @@ impl Log {
                     )
                 }
             }
-            Self::delete_file_if_exists(leader_epoch_file.as_path())?;
+            delete_file_if_exists(leader_epoch_file_path)?;
             self.leader_epoch_cache = None;
         } else {
-            self.leader_epoch_cache = Some(self.new_leader_epoch_file_cache(leader_epoch_file)?);
+            self.leader_epoch_cache =
+                Some(self.new_leader_epoch_file_cache(leader_epoch_file).await?);
         }
         Ok(())
+    }
+
+    fn delete_indices_if_exist(&self, base_file: PathBuf, suffix: &str) -> Result<(), LogError> {
+        tracing::info!("Deleting index files with suffix {suffix:?} for base_file {base_file:?}");
+        let offset = Self::offset_from_file(&base_file)?;
+        delete_file_if_exists(&Self::offset_index_file(self.dir.clone(), offset, suffix))?;
+        delete_file_if_exists(&Self::time_index_file(self.dir.clone(), offset, suffix))?;
+        delete_file_if_exists(&Self::transaction_index_file(self.dir.clone(), offset, suffix))?;
+        Ok(())
+    }
+
+    /// Deletes all the temp files found in the directory. Returns a list of the `.swap` files that
+    /// need to be swapped in place for existing segments. Additionally, incomplete log splitting
+    /// is identified by looking into the `.swap` file base offset, if it is higher than the
+    /// smallest offset `.clean`. These `.swap` files are also deleted by this method.
+    async fn remove_temp_files_and_collect_swap_files(&self) -> Result<Vec<PathBuf>, LogError> {
+        let mut swap_files = vec![];
+        let mut clean_files = vec![];
+        let mut min_cleaned_file_offset = i64::MAX;
+
+        for entry in fs::read_dir(self.dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {}
+            let filename: String = format!("{}", path.file_name().unwrap().to_string_lossy());
+            if filename.ends_with(DELETED_FILE_SUFFIX) {
+                tracing::debug!("Deleting stray temporary file {:?}", path.canonicalize());
+                delete_file_if_exists(&path);
+            } else if filename.ends_with(CLEANED_FILE_SUFFIX) {
+                let min_cleaned_file_offset =
+                    std::cmp::min(Self::offset_from_file_name(filename)?, min_cleaned_file_offset);
+                clean_files.push(path);
+            } else if filename.ends_with(SWAP_FILE_SUFFIX) {
+                // There was a crash in the middle of a swap operation.
+                // Steps to recover:
+                // - If this is a log file, first delete the index files, then complete the swap
+                // operation later.
+                // - If this is an index file, just delete the index file as it will be rebuilt.
+                let base_file = PathBuf::from(replace_suffix(&filename, SWAP_FILE_SUFFIX, "")?);
+                tracing::info!(
+                    "Found file {:?} from interrupted swap operation.",
+                    path.canonicalize()
+                );
+                if Self::is_index_file(&base_file) {
+                    self.delete_indices_if_exist(base_file, "")?;
+                } else if Self::is_log_file(&base_file) {
+                    self.delete_indices_if_exist(base_file, "")?;
+                    swap_files.push(path)
+                }
+            }
+        }
+
+        // KAFKA-6264: Delete all .swap files whose base offset is greater than the minimum .cleaned
+        // segment offset. Such .swap files could be part of an incomplete split operation
+        // that could not complete. See Log#splitOverflowedSegment for more details about
+        // the split operation.
+        let (invalid_swap_files, valid_swap_files) = swap_files
+            .into_iter()
+            .partition(|file| Self::offset_from_file(&file)? >= min_cleaned_file_offset)
+            .collect();
+        for invalid_swap_file in invalid_swap_files {
+            tracing::debug!(
+                "Deleting invalid swap file {} minCleanedFileOffset: {min_cleaned_file_offset}",
+                invalid_swap_file.canonicalize().unwrap().display()
+            );
+            let base_file =
+                PathBuf::from(replace_suffix(&invalid_swap_file, SWAP_FILE_SUFFIX, "")?);
+            self.delete_indices_if_exist(base_file, SWAP_FILE_SUFFIX)?;
+            delete_file_if_exists(&invalid_swap_file)?;
+        }
+
+        // after the .swap files from incomplete split operations have been deleted, we can clean up
+        // the .clear files.
+        for clean_file in clean_files {
+            tracing::debug!(
+                "Deleting stray .clean file {}",
+                clean_file.canonicalize().unwrap().display()
+            );
+            delete_file_if_exists(&clean_file);
+        }
+
+        Ok(valid_swap_files)
+    }
+
+    /// All the log segments in this log ordered from oldest to newest
+    fn log_segments(&self) -> Vec<LogSegment> {
+        self.segments.values
+    }
+
+    fn offset_from_file_name(filename: String) -> Result<i64, LogError> {
+        match filename.find('.') {
+            Some(idx) => {
+                let (offset, _) = filename.split_at(idx);
+                Ok(offset.parse::<i64>()?)
+            },
+            None => Err(LogError::MissingDotSeparator(filename)),
+        }
+    }
+
+    /// Creates filenames using padding so that `ls` sorts files numerically.
+    fn filename_prefix_from_offset(offset: i64) -> String {
+        format!("{:020}", offset)
+    }
+
+    /// Creates a file name in the provided dir using the base offset and the suffix
+    fn offset_index_file(dir: PathBuf, offset: i64, suffix: &str) -> PathBuf {
+        dir.set_file_name(format!(
+            "{}{}{}",
+            Self::filename_prefix_from_offset(offset),
+            INDEX_FILE_SUFFIX,
+            suffix
+        ));
+        dir
+    }
+
+    /// Creates a time index file name in the provided dir using the base offset and the suffix
+    fn time_index_file(dir: PathBuf, offset: i64, suffix: &str) -> PathBuf {
+        dir.set_file_name(format!(
+            "{}{}{}",
+            Self::filename_prefix_from_offset(offset),
+            TIME_INDEX_FILE_SUFFIX,
+            suffix
+        ));
+        dir
+    }
+
+    /// Construct a transaction index file name in the given dir using the given base offset and the
+    /// given suffix
+    fn transaction_index_file(dir: PathBuf, offset: i64, suffix: &str) -> PathBuf {
+        dir.set_file_name(format!(
+            "{}{}{}",
+            Self::filename_prefix_from_offset(offset),
+            TXN_INDEX_FILE_SUFFIX,
+            suffix
+        ));
+        dir
+    }
+
+    fn offset_from_file(file: &PathBuf) -> Result<i64, LogError> {
+        Self::offset_from_file_name(format!("{}", file.file_name().unwrap().to_str().unwrap()))
     }
 
     /// Gets the topic, partition from a directory of a log
@@ -272,13 +415,15 @@ impl Log {
         &self.dir
     }
 
-   fn is_index_file(file: &PathBuf) -> bool {
-    let filename = file.file_name().unwrap().to_str();
-    filename.ends_with(INDEX_FILE_SUFFIX) || filename.ends_with(TIME_INDEX_FILE_SUFFIX) || filename.ends_with(TXN_INDEX_FILE_SUFFIX)
-   }
+    fn is_index_file(file: &PathBuf) -> bool {
+        let filename = file.file_name().unwrap().to_str();
+        filename.ends_with(INDEX_FILE_SUFFIX)
+            || filename.ends_with(TIME_INDEX_FILE_SUFFIX)
+            || filename.ends_with(TXN_INDEX_FILE_SUFFIX)
+    }
 
-   fn is_log_file(file: &PathBuf) -> bool {
-    let filename = file.file_name().unwrap().to_str();
-    filename.ends_with(LOG_FILE_SUFFIX)
-   }
+    fn is_log_file(file: &PathBuf) -> bool {
+        let filename = file.file_name().unwrap().to_str();
+        filename.ends_with(LOG_FILE_SUFFIX)
+    }
 }
