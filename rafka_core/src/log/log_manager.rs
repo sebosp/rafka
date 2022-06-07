@@ -25,6 +25,9 @@ use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 
 use super::log_cleaner::LogCleaner;
+use super::log_segment::{
+    LogSegment, LogSegmentAsyncTask, LogSegmentAsyncTask, LogSegmentCoordinator,
+};
 
 pub const RECOVERY_POINT_CHECKPOINT_FILE: &str = "recovery-point-offset-checkpoint";
 pub const LOG_START_OFFSET_CHECKPOINT_FILE: &str = "log-start-offset-checkpoint";
@@ -54,8 +57,8 @@ pub enum LogManagerError {
     AcquireLock(String),
     #[error("Topic Partition Checkpoint File: {0}")]
     CheckpointFile(#[from] CheckpointFileError),
-    #[error("Log Segment Offset Overflow")]
-    LogSegmentOffsetOverflow,
+    #[error("Detected offset overflow at offset {} in segment {:?}")]
+    LogSegmentOffsetOverflow(i64, LogSegment),
 }
 
 #[derive(Debug)]
@@ -473,6 +476,7 @@ pub struct LogManagerCoordinator {
     current_logs: HashMap<TopicPartition, Log>,
     logs_to_be_deleted: HashMap<Log, Instant>,
     state: LogManagerState,
+    log_segment_coordinator_tx: mpsc::Sender<LogSegmentAsyncTask>,
 }
 impl LogManagerCoordinator {
     /// Creates a new instance of the LogManagerCoordinator
@@ -501,6 +505,19 @@ impl LogManagerCoordinator {
         // res.log_manager.init().await?;
         // The LogManagerCoordinator cannot yet initialize, it must first wait for the
         // LoadInitialOfflineDirs from the KafkaServer
+        let (log_segment_rx, log_segment_coordinator_tx) = oneshot::channel();
+        tokio::spawn(async move {
+            let mut log_segment_coordinator = LogSegmentCoordinator::new();
+            log_segment_coordinator
+                .send_tx_to_caller(log_segment_coordinator_tx)
+                .await
+                .expect("Unable to send send_tx_to_caller");
+            log_segment_coordinator
+                .process_message_queue()
+                .await
+                .expect("Error process_message_queue on LogSegmentCoordinator");
+        });
+        let log_segment_coordinator_tx = log_segment_rx.await?;
 
         Ok(Self {
             tx,
@@ -512,6 +529,7 @@ impl LogManagerCoordinator {
             log_manager: LogManager::new(config, KafkaScheduler::default(), time, majordomo_tx)?,
             logs_to_be_deleted: HashMap::new(),
             state: LogManagerState::PreInit,
+            log_segment_coordinator_tx,
         })
     }
 
