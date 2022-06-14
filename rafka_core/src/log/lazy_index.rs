@@ -33,6 +33,17 @@ impl LazyIndex {
             TimeIndex::new(file, base_offset, max_index_size, writable),
         ))
     }
+
+    pub fn close(&self) {
+        match self {
+            Self::Offset(index_file, _offset_index) => {
+                index_file.close();
+            },
+            Self::TimeIndex(index_file, _time_index) => {
+                index_file.close();
+            },
+        }
+    }
 }
 
 trait IndexWrapper {
@@ -77,19 +88,9 @@ impl IndexWrapper for IndexFile {
         delete_file_if_exists(&self.file)
     }
 
-    fn close(&self)
-    where
-        Self: AbstractIndex,
-    {
-        AbstractIndex::close(&self);
-    }
+    fn close(&self) {}
 
-    fn close_handler(&self)
-    where
-        Self: AbstractIndex,
-    {
-        AbstractIndex::close_handler(&self);
-    }
+    fn close_handler(&self) {}
 }
 
 impl AbstractIndex for IndexFile {}
