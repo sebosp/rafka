@@ -9,7 +9,11 @@
 //! initial rust version, the value has been moved to a LogSegmentCoordinator which keeps it
 //! losely synchronized through mpsc calls.
 
+use super::lazy_index::LazyIndex;
 use super::log_manager::LogManagerError;
+use super::offset_index::OffsetIndex;
+use super::time_index::TimeIndex;
+use crate::common::record::file_records::FileRecords;
 use crate::majordomo::AsyncTaskError;
 use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
@@ -19,9 +23,9 @@ pub struct LogSegment {
     /// The file records containing log entries
     log: FileRecords,
     /// The offset index
-    lazy_offset_index: LazyIndex<OffsetIndex>,
+    lazy_offset_index: LazyIndex,
     /// Timestamp index
-    lazy_time_index: LazyIndex<TimeIndex>,
+    lazy_time_index: LazyIndex,
     /// Transaction index
     txn_index: TransactionIndex,
     /// Lower bound of offsets in the segment
@@ -36,8 +40,8 @@ pub struct LogSegment {
 impl LogSegment {
     pub fn new(
         log: FileRecords,
-        lazy_offset_index: LazyIndex<OffsetIndex>,
-        lazy_time_index: LazyIndex<TimeIndex>,
+        lazy_offset_index: LazyIndex,
+        lazy_time_index: LazyIndex,
         txn_index: TransactionIndex,
         base_offset: i64,
         index_interval_bytes: i32,
