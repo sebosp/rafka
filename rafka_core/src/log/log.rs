@@ -2,6 +2,7 @@
 
 use super::log_config::LogConfig;
 use super::log_manager::LogManagerError;
+use super::log_segment::LogSegment;
 use crate::common::record::record_version::RecordVersion;
 use crate::common::topic_partition::TopicPartition;
 use crate::log::producer_state_manager::ProducerStateManager;
@@ -91,8 +92,12 @@ pub enum LogError {
     MissingDotSeparator(String),
     #[error("Io {0:?}")]
     Io(#[from] std::io::Error),
-    #[error("Expected string to end with '{}' but string is '{}'")]
+    #[error("Expected string to end with '{0}' but string is '{1}'")]
     UnexpectedSuffix(String, String),
+    #[error(
+        "The size of segment {0} ({1}) is larger than the maximum allowed segment size of {2}"
+    )]
+    SegmentSizeAboveMax(String, u64, i32),
 }
 
 /// Append-only log for storing messages, it is a sequence of segments.
@@ -329,6 +334,54 @@ impl Log {
         }
 
         Ok(valid_swap_files)
+    }
+
+    /// Clears the current segments and attempts to load them.
+    /// This function is called multiple times from [`load_segments`] and is retried on
+    /// LogManagerError::LogSegmentOffsetOverflow
+    fn clear_and_load_segments(&mut self) -> Result<(), LogManagerError> {
+        for (_key, segment) in self.segments.iter_mut() {
+            *segment.close()?;
+        }
+        self.segments.clear();
+        self.load_segment_files()?;
+        Ok(())
+    }
+
+    /// Loads the segments from the files on disk to return the next offset.
+    /// This method is called on [`Self::init`] and may return an
+    /// [`LogManagerError::LogSegmentOffsetOverflow error when:
+    /// - A `.swap` file is encountered with messages that overflow the index offset.
+    /// - An unexpected number of .log files are found "with overflow"
+    async fn load_segments(&mut self) -> Result<i64, LogError> {
+        // Go through the files in the log directory, temp files need to be removed and interrupted
+        // swap operations need to be completed.
+        let swap_files = self.remove_temp_files_and_collect_swap_files().await?;
+
+        // Load all the log and segment files
+        // KAFKA-6264 there may be legacy log segements that generate LogSegmentOffsetOverflow,
+        // these are split when encountered, once split all the logs are loaded again from
+        // clean state.
+        loop {
+            // retry_on_offset_overflow
+            match self.clear_and_load_segments() {
+                Ok(()) => break,
+                Err(LogManagerError::LogSegmentOffsetOverflow(offset, segment)) => {
+                    // In case we encounter a segment with offset overflow, the retry logic will
+                    // split it after which we need to retry loading of
+                    // segments. In that case, we also need to close all segments that could have
+                    // been left open in previous call to loadSegmentFiles().
+                    tracing::info!(
+                        "Caught segment overflow error: {:?}. Splittting segment and retrying.",
+                        LogManagerError::LogSegmentOffsetOverflow(offset, segment)
+                    );
+                    self.split_overflowed_segment(segment);
+                },
+                Err(err) => {
+                    return Err(err.into());
+                },
+            }
+        }
     }
 
     /// All the log segments in this log ordered from oldest to newest
