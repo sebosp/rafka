@@ -9,3 +9,4 @@ pub mod log_segment;
 pub mod offset_index;
 pub mod producer_state_manager;
 pub mod time_index;
+pub mod transaction_index;
