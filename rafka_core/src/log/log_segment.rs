@@ -13,6 +13,7 @@ use super::{lazy_index::LazyIndex, log_config::LogConfig};
 use super::log_manager::LogManagerError;
 use crate::common::record::file_records::FileRecords;
 use crate::log::transaction_index::TransactionIndex;
+use crate::log::log::transaction_index_file;
 use crate::majordomo::AsyncTaskError;
 use std::{time::Instant, path::PathBuf};
 use tokio::sync::{mpsc, oneshot};
@@ -62,13 +63,15 @@ impl LogSegment {
     }
 
     pub fn open(dir: PathBuf, base_offset: i64, config: LogConfig, time: Instant, file_already_exists: Option<bool>,
-           init_file_size: Option<i32>, preallocate: bool, file_suffix: String) -> Self {
+           init_file_size: Option<i32>, preallocate: Option<bool>, file_suffix: Option<String.) -> Self {
         let file_already_exists = file_already_exists.unwrap_or(false);
         let init_file_size = init_file_size.unwrap_or(0);
         let preallocate = preallocate.unwrap_or(false);
         let file_suffix = file_suffix.unwrap_or(String::from(""));
-        let txn_index TransactionIndex(base_offset, Log.transactionIndexFile(dir, baseOffset, fileSuffix));
+        let txn_index * TransactionIndex(base_offset, transaction_index_file(dir, base_offset, &file_suffix));
+        let log = FileRecords::open(Log.logFile(dir, baseOffset, fileSuffix), fileAlreadyExists, initFileSize, preallocate),
         Self::new(
+
         )
     }
 
