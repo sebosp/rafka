@@ -16,8 +16,8 @@ use std::path::PathBuf;
 pub struct FileRecords {
     file: PathBuf,
     channel: FileChannel,
-    start: i32,
-    end: i32,
+    start: u64,
+    end: u64,
     is_slice: bool,
     size: u64, // RAFKA TODO: Used to be AtomicInteger, figure out why.
     batches: Vec<FileChannelRecordBatch>,
@@ -56,11 +56,33 @@ impl FileRecords {
             channel.position(limit);
         }
 
-        let batches = Self::batches_from(start);
+        let batches = vec![]; // TODO: Self::batches_from(start);
         Ok(Self { file, channel, start, end, is_slice, size, batches })
     }
 
-    pub fn batches_from(start: u64) -> Iterator<FileChannelRecordBatch> {
+    // pub fn batches_from(start: u64) -> impl IntoIterator<Item = FileChannelRecordBatch> {
+    // unimplemented!()
+    // }
+
+    /// Close the record set
+    pub fn close(&self) -> Result<(), LogError> {
+        self.flush()?;
+        self.trim();
+        self.channel.close();
+        Ok(())
+    }
+
+    /// Commits all writes to disk: TODO:
+    pub fn flush(&self) -> Result<(), LogError> {
+        Ok(())
+    }
+
+    pub fn trim(&self) -> Result<(), LogError> {
+        self.truncate_to(self.size)?;
+        Ok(())
+    }
+
+    pub fn truncate_to(&self, size: u64) -> Result<u64, LogError> {
         unimplemented!()
     }
 }
@@ -78,5 +100,9 @@ impl FileChannel {
 
     pub fn position(&mut self, position: u64) {
         self.position = position;
+    }
+
+    pub fn close(&self) -> Result<(), LogError> {
+        Ok(())
     }
 }
