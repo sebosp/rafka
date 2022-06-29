@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+#[derive(Debug)]
 pub struct TimeIndex {
     file: PathBuf,
     base_offset: i64,
@@ -15,7 +16,14 @@ pub struct TimeIndex {
 }
 
 impl TimeIndex {
-    fn new(file: PathBuf, base_offset: i64) -> Self {
-        Self { file, base_offset, max_index_size: -1, writable: true, entry_size: 12 }
+    pub fn new(
+        file: PathBuf,
+        base_offset: i64,
+        max_index_size: Option<i32>,
+        writable: Option<bool>,
+    ) -> Self {
+        let max_index_size = max_index_size.unwrap_or(-1);
+        let writeble = writable.unwrap_or(true);
+        Self { file, base_offset, max_index_size, writable, entry_size: 12 }
     }
 }
