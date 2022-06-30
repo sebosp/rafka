@@ -7,6 +7,7 @@ use std::io;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
+#[derive(Debug)]
 pub enum LazyIndex {
     Offset((IndexFile, OffsetIndex)),
     Time((IndexFile, TimeIndex)),
@@ -22,7 +23,7 @@ impl LazyIndex {
     ) -> Self {
         Self::Offset((
             IndexFile::new(file.clone()),
-            OffsetIndex::new(file, base_offset, max_index_size, writable),
+            OffsetIndex::new(file, base_offset, Some(max_index_size), Some(writable)),
         ))
     }
 
@@ -30,16 +31,16 @@ impl LazyIndex {
     pub fn for_time(file: PathBuf, base_offset: i64, max_index_size: i32, writable: bool) -> Self {
         Self::Time((
             IndexFile::new(file.clone()),
-            TimeIndex::new(file, base_offset, max_index_size, writable),
+            TimeIndex::new(file, base_offset, Some(max_index_size), Some(writable)),
         ))
     }
 
     pub fn close(&self) {
         match self {
-            Self::Offset(index_file, _offset_index) => {
+            Self::Offset((index_file, _offset_index)) => {
                 index_file.close();
             },
-            Self::TimeIndex(index_file, _time_index) => {
+            Self::Time((index_file, _time_index)) => {
                 index_file.close();
             },
         }
@@ -48,7 +49,7 @@ impl LazyIndex {
 
 trait IndexWrapper {
     fn file(&self) -> PathBuf;
-    fn update_parent_dir(&self, f: PathBuf);
+    fn update_parent_dir(&mut self, f: PathBuf);
     fn rename_to(&mut self, dest: PathBuf) -> Result<(), io::Error>;
     fn delete_if_exists(&self) -> bool;
     fn close(&self);
@@ -70,8 +71,9 @@ impl IndexWrapper for IndexFile {
         self.file.clone()
     }
 
-    fn update_parent_dir(&self, parent_dir: PathBuf) {
-        self.file = parent_dir.push(self.file.file_name().unwrap());
+    fn update_parent_dir(&mut self, parent_dir: PathBuf) {
+        parent_dir.push(self.file.file_name().unwrap());
+        self.file = parent_dir;
     }
 
     fn rename_to(&mut self, dest: PathBuf) -> Result<(), io::Error> {
