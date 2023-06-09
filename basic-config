@@ -1,3 +1,3 @@
 zookeeper.connect = 127.0.0.1:2181/seb-chroot
 zookeeper.connection.timeout.ms = 1000
-log.dirs = bad-broker-metadata, non-existent-dir
+log.dirs = bad-broker-metadata, non-existent-dir, /home/seb/git/rafka/tests/compat/2_2_1_logs/kafka/data/
