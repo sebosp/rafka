@@ -194,65 +194,65 @@ fn attr_parser(field_ref: &syn::Field, name: &proc_macro2::Ident) -> ConfigDefFi
     }
     let mut is_assign_operation = false;
     for attr in &field_ref.attrs {
-        for segment in attr.path.segments.clone() {
-            if segment.ident.to_string() == "config_def" {
+        for segment in attr.path().segments.clone() {
+            if segment.ident == "config_def" {
                 is_config_def_segment = true;
             }
         }
-        if is_config_def_segment {
-            for token in attr.tokens.clone() {
-                if let proc_macro2::TokenTree::Group(group) = token {
-                    let mut current_attr = String::from("");
-                    // The value may be a negative number
-                    let mut has_dash = false;
-                    for section in group.stream() {
-                        match section {
-                            proc_macro2::TokenTree::Ident(id) => {
-                                if is_assign_operation {
-                                    res.set(&field_ref_name, current_attr.as_ref(), id.to_string());
-                                    has_dash = false;
-                                } else {
-                                    // But if there was no assignment, the ident is a new attribute
-                                    // key
-                                    current_attr = id.to_string();
-                                    match current_attr.as_ref() {
-                                        "key" | "default" | "default_fn" | "importance" | "doc" => {
-                                        },
-                                        "with_validator_fn" => res.with_validator_fn = true,
-                                        "with_default_fn" => res.with_default_fn = true,
-                                        "no_default_resolver" => res.with_default_resolver = false,
-                                        "no_default_builder" => res.with_default_builder = false,
-                                        unknown_attr @ _ => {
-                                            panic!("section Unknown attr: {}", unknown_attr);
-                                        },
-                                    };
-                                }
-                            },
-                            proc_macro2::TokenTree::Punct(punct) => {
-                                if punct.as_char() == '=' {
-                                    is_assign_operation = true;
-                                } else if punct.as_char() == ',' {
-                                    is_assign_operation = false;
-                                    has_dash = false;
-                                } else if punct.as_char() == '-' {
-                                    has_dash = true;
-                                } else {
-                                    panic!(
-                                        "Only supporting assignment as in: \"attr '=' value,\" \
-                                         but found punct: '{}'",
-                                        punct.as_char()
-                                    );
-                                }
-                            },
-                            proc_macro2::TokenTree::Literal(lit) => {
-                                let mut lit_value = lit.to_string();
-                                if has_dash {
-                                    lit_value = format!("-{}", lit_value);
-                                }
-                                res.set(&field_ref_name, current_attr.as_ref(), lit_value);
-                            },
-                            _ => {},
-                        }
+        if !is_config_def_segment {
+            break;
+        }
+        for token in attr.meta.require_list().unwrap().tokens.clone() {
+            if let proc_macro2::TokenTree::Group(group) = token {
+                let mut current_attr = String::from("");
+                // The value may be a negative number
+                let mut has_dash = false;
+                for section in group.stream() {
+                    match section {
+                        proc_macro2::TokenTree::Ident(id) => {
+                            if is_assign_operation {
+                                res.set(&field_ref_name, current_attr.as_ref(), id.to_string());
+                                has_dash = false;
+                            } else {
+                                // But if there was no assignment, the ident is a new attribute
+                                // key
+                                current_attr = id.to_string();
+                                match current_attr.as_ref() {
+                                    "key" | "default" | "default_fn" | "importance" | "doc" => {},
+                                    "with_validator_fn" => res.with_validator_fn = true,
+                                    "with_default_fn" => res.with_default_fn = true,
+                                    "no_default_resolver" => res.with_default_resolver = false,
+                                    "no_default_builder" => res.with_default_builder = false,
+                                    unknown_attr => {
+                                        panic!("section Unknown attr: {}", unknown_attr);
+                                    },
+                                };
+                            }
+                        },
+                        proc_macro2::TokenTree::Punct(punct) => {
+                            if punct.as_char() == '=' {
+                                is_assign_operation = true;
+                            } else if punct.as_char() == ',' {
+                                is_assign_operation = false;
+                                has_dash = false;
+                            } else if punct.as_char() == '-' {
+                                has_dash = true;
+                            } else {
+                                panic!(
+                                    "Only supporting assignment as in: \"attr '=' value,\" but \
+                                     found punct: '{}'",
+                                    punct.as_char()
+                                );
+                            }
+                        },
+                        proc_macro2::TokenTree::Literal(lit) => {
+                            let mut lit_value = lit.to_string();
+                            if has_dash {
+                                lit_value = format!("-{}", lit_value);
+                            }
+                            res.set(&field_ref_name, current_attr.as_ref(), lit_value);
+                        },
+                        _ => {},
                     }
                 }
             }
