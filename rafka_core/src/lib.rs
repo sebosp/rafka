@@ -1,8 +1,4 @@
 #![warn(rust_2018_idioms)]
-#[macro_use]
-extern crate slog_term;
-#[macro_use]
-extern crate serde_derive;
 use thiserror::Error;
 
 pub mod api;
