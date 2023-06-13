@@ -63,7 +63,7 @@ impl LogSegment {
     }
 
     pub fn open(dir: PathBuf, base_offset: i64, config: LogConfig, time: Instant, file_already_exists: Option<bool>,
-           init_file_size: Option<i32>, preallocate: Option<bool>, file_suffix: Option<String.) -> Self {
+           init_file_size: Option<i32>, preallocate: Option<bool>, file_suffix: Option<String>) -> Self {
         let file_already_exists = file_already_exists.unwrap_or(false);
         let init_file_size = init_file_size.unwrap_or(0);
         let preallocate = preallocate.unwrap_or(false);
